@@ -6,11 +6,24 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
-      - uses: actions/upload-artifact@v4
+      - name: Build
+        shell: bash
+        run: |
+          manifest=$(find . -name Cargo.toml -not -path '*/target/*' | head -1)
+          if [ -z "$manifest" ]; then
+            echo "ERROR: no Cargo.toml anywhere in the repo - the files didn't upload"
+            find . -maxdepth 3 -not -path './.git/*' | head -50
+            exit 1
+          fi
+          dir=$(dirname "$manifest")
+          echo "Building in $dir"
+          cd "$dir"
+          cargo build --release
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp target/release/tidalfast.exe "$GITHUB_WORKSPACE/out/tidalfast.exe"
+      - uses: actions/upload-artifact@v6
         with:
           name: tidalfast-windows
-          path: target/release/tidalfast.exe
+          path: out/tidalfast.exe

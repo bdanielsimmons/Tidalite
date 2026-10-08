@@ -46,3 +46,14 @@ Create `%APPDATA%\tidalfast\credentials.json`:
 - Hi-Res / DASH streams aren't supported yet (falls back to FLAC lossless, then 320k AAC).
 - No Tidal Connect, no media keys yet, no lyrics.
 - Home page layout comes from Tidal's undocumented page API; if it changes, the app falls back to your Library.
+
+## Skin / controls
+
+Classic-player look: LCD time, live spectrum analyzer, scrolling title, kbps/kHz readouts, volume + seek sliders,
+round transport buttons, shuffle/repeat, and a playlist window. Click the **HIFI/320K** box to switch between
+lossless and AAC. Space = play/pause. Right-click a track to queue it. Click the status line to dismiss a message.
+
+## If a track won't play
+
+The player's status line shows the reason (it scrolls). Everything is also logged to
+`%APPDATA%\tidalfast\log.txt`. If lossless can't be decoded it automatically retries as 320k AAC.

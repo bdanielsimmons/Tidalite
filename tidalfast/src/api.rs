@@ -35,6 +35,16 @@ fn config_dir() -> PathBuf {
         .join("tidalfast")
 }
 
+/// Append a line to %APPDATA%\tidalfast\log.txt (handy when something won't play).
+pub fn log(msg: &str) {
+    use std::io::Write;
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("log.txt")) {
+        let _ = writeln!(f, "[{}] {}", now(), msg);
+    }
+}
+
 // ---------------------------------------------------------------- data types
 
 #[derive(Clone, Default)]
@@ -154,6 +164,9 @@ fn unwrap(v: &Value) -> &Value {
 }
 
 fn parse_track(v: &Value) -> Option<Track> {
+    if v["type"].as_str() == Some("video") {
+        return None;
+    }
     let t = unwrap(v);
     let id = t["id"].as_i64()?;
     t.get("album")?;
@@ -257,6 +270,11 @@ impl Api {
             .build()
             .expect("http client");
 
+        if let Ok(m) = std::fs::metadata(config_dir().join("log.txt")) {
+            if m.len() > 200_000 {
+                let _ = std::fs::remove_file(config_dir().join("log.txt"));
+            }
+        }
         let mut s = Session {
             client_id: DEFAULT_CLIENT_ID.to_string(),
             client_secret: DEFAULT_CLIENT_SECRET.to_string(),
@@ -629,32 +647,59 @@ impl Api {
 
     // -------------------------------------------------------------- playback
 
-    /// Direct audio URL for a track. Tries lossless FLAC first, then 320k-ish AAC.
-    pub fn stream_url(&self, id: i64) -> Res<String> {
-        let mut last = "No playable stream".to_string();
-        for quality in ["LOSSLESS", "HIGH"] {
-            let v = match self.get(
+    /// Direct audio URL for a track. Lossless first (if allowed), then 320k AAC, then low.
+    /// Every failure reason is collected and logged so a "won't play" is diagnosable.
+    pub fn stream_url(&self, id: i64, lossless: bool) -> Res<String> {
+        let quals: &[&str] = if lossless { &["LOSSLESS", "HIGH", "LOW"] } else { &["HIGH", "LOW"] };
+        let mut errs: Vec<String> = Vec::new();
+
+        for q in quals {
+            let r = self.get(
                 &format!("/tracks/{}/playbackinfopostpaywall", id),
-                &[("audioquality", quality), ("playbackmode", "STREAM"), ("assetpresentation", "FULL")],
-            ) {
-                Ok(v) => v,
-                Err(e) => {
-                    last = e;
-                    continue;
+                &[("audioquality", *q), ("playbackmode", "STREAM"), ("assetpresentation", "FULL")],
+            );
+            match r {
+                Ok(v) => {
+                    let mime = v["manifestMimeType"].as_str().unwrap_or("").to_string();
+                    if mime.contains("bts") {
+                        let raw = v["manifest"].as_str().unwrap_or("");
+                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(raw) {
+                            if let Ok(m) = serde_json::from_slice::<Value>(&bytes) {
+                                if let Some(u) = m["urls"][0].as_str() {
+                                    log(&format!("track {} -> {} ({})", id, q, m["codecs"].as_str().unwrap_or("?")));
+                                    return Ok(u.to_string());
+                                }
+                            }
+                        }
+                        errs.push(format!("{}: manifest unreadable", q));
+                    } else {
+                        errs.push(format!("{}: unsupported stream type {}", q, mime));
+                    }
                 }
-            };
-            let mime = v["manifestMimeType"].as_str().unwrap_or("");
-            if !mime.contains("bts") {
-                last = format!("Unsupported stream type '{}' (DASH not implemented yet)", mime);
-                continue;
-            }
-            let raw = v["manifest"].as_str().unwrap_or("");
-            let bytes = base64::engine::general_purpose::STANDARD.decode(raw).map_err(e2s)?;
-            let m: Value = serde_json::from_slice(&bytes).map_err(e2s)?;
-            if let Some(u) = m["urls"][0].as_str() {
-                return Ok(u.to_string());
+                Err(e) => errs.push(format!("{}: {}", q, e)),
             }
         }
-        Err(last)
+
+        // Older endpoint that returns the URL directly.
+        for q in quals {
+            let r = self.get(
+                &format!("/tracks/{}/urlpostpaywall", id),
+                &[("urlusagemode", "STREAM"), ("audioquality", *q), ("assetpresentation", "FULL")],
+            );
+            match r {
+                Ok(v) => {
+                    if let Some(u) = v["urls"][0].as_str() {
+                        log(&format!("track {} -> {} via urlpostpaywall", id, q));
+                        return Ok(u.to_string());
+                    }
+                    errs.push(format!("{}: no url in reply", q));
+                }
+                Err(e) => errs.push(format!("url {}: {}", q, e)),
+            }
+        }
+
+        let msg = errs.join(" | ");
+        log(&format!("track {} FAILED: {}", id, msg));
+        Err(msg)
     }
 }
