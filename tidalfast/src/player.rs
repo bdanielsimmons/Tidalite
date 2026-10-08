@@ -159,10 +159,27 @@ impl Player {
             loop {
                 match rx.recv_timeout(Duration::from_millis(50)) {
                     Ok(Cmd::Play(bytes)) => {
+                        log(&format!("player: received {} bytes", bytes.len()));
                         if let Some(s) = sink.take() {
                             s.stop();
                         }
-                        match (Sink::try_new(&handle), Decoder::new(Cursor::new(bytes))) {
+                        let sink_res = Sink::try_new(&handle);
+                        let (dtx, drx) =
+                            channel::<Result<Decoder<Cursor<Vec<u8>>>, String>>();
+                        std::thread::spawn(move || {
+                            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                Decoder::new(Cursor::new(bytes)).map_err(|e| format!("{}", e))
+                            }));
+                            let _ = dtx.send(match r {
+                                Ok(x) => x,
+                                Err(_) => Err("decoder panicked".to_string()),
+                            });
+                        });
+                        let dec_res = match drx.recv_timeout(Duration::from_secs(15)) {
+                            Ok(r) => r,
+                            Err(_) => Err("decoder timed out".to_string()),
+                        };
+                        match (sink_res, dec_res) {
                             (Ok(s), Ok(dec)) => {
                                 let rate = dec.sample_rate();
                                 log(&format!("decoder ok: {} Hz, {} ch", rate, dec.channels()));

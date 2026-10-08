@@ -509,6 +509,7 @@ impl Api {
             }
             if !st.is_success() {
                 let t = r.text().unwrap_or_default();
+                log(&format!("  error body: {}", t.chars().take(300).collect::<String>()));
                 return Err(format!("{} {}: {}", st.as_u16(), path, t.chars().take(160).collect::<String>()));
             }
             return r.json::<Value>().map_err(e2s);
@@ -574,11 +575,27 @@ impl Api {
 
     pub fn my_playlists(&self) -> Res<Vec<Card>> {
         let uid = self.uid();
-        let v = self.get(
+        if let Ok(v) = self.get(
             &format!("/users/{}/playlistsAndFavoritePlaylists", uid),
-            &[("limit", "100"), ("order", "DATE"), ("orderDirection", "DESC")],
-        )?;
-        Ok(cards_from(arr(&v["items"])))
+            &[("limit", "100")],
+        ) {
+            let c = cards_from(arr(&v["items"]));
+            if !c.is_empty() {
+                return Ok(c);
+            }
+        }
+        let mut out: Vec<Card> = Vec::new();
+        let mut last_err = String::new();
+        for p in ["playlists", "favorites/playlists"] {
+            match self.get(&format!("/users/{}/{}", uid, p), &[("limit", "100")]) {
+                Ok(v) => out.extend(cards_from(arr(&v["items"]))),
+                Err(e) => last_err = e,
+            }
+        }
+        if out.is_empty() && !last_err.is_empty() {
+            return Err(last_err);
+        }
+        Ok(out)
     }
 
     pub fn library(&self) -> Res<Page> {
