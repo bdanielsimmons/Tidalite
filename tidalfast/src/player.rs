@@ -4,8 +4,8 @@
 use crate::api::log;
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::source::SeekError;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use std::io::Cursor;
+use crate::decode::SymSource;
+use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -165,10 +165,10 @@ impl Player {
                         }
                         let sink_res = Sink::try_new(&handle);
                         let (dtx, drx) =
-                            channel::<Result<Decoder<Cursor<Vec<u8>>>, String>>();
+                            channel::<Result<SymSource, String>>();
                         std::thread::spawn(move || {
                             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                Decoder::new(Cursor::new(bytes)).map_err(|e| format!("{}", e))
+                                SymSource::new(bytes)
                             }));
                             let _ = dtx.send(match r {
                                 Ok(x) => x,

@@ -1,6 +1,7 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod api;
+mod decode;
 mod player;
 
 use api::{cover_url, Api, Card, Kind, Page, Track};
