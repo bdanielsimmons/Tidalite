@@ -36,13 +36,29 @@ fn config_dir() -> PathBuf {
 }
 
 /// Append a line to %APPDATA%\tidalfast\log.txt (handy when something won't play).
+static LOG_RING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 pub fn log(msg: &str) {
     use std::io::Write;
+    let t = now() % 86400; // UTC time of day
+    let line = format!("[{:02}:{:02}:{:02}] {}", t / 3600, (t / 60) % 60, t % 60, msg);
+    if let Ok(mut r) = LOG_RING.lock() {
+        r.push(line.clone());
+        let n = r.len();
+        if n > 400 {
+            r.drain(0..n - 400);
+        }
+    }
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("log.txt")) {
-        let _ = writeln!(f, "[{}] {}", now(), msg);
+        let _ = writeln!(f, "{}", line);
     }
+}
+
+/// Everything logged this run (shown by the LOG button).
+pub fn log_text() -> String {
+    LOG_RING.lock().map(|r| r.join("\n")).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- data types
@@ -477,14 +493,16 @@ impl Api {
             if !country.is_empty() {
                 q.push(("countryCode", country.as_str()));
             }
-            let r = self
-                .http
-                .get(format!("{}{}", API, path))
-                .bearer_auth(&tok)
-                .query(&q)
-                .send()
-                .map_err(e2s)?;
+            let t0 = std::time::Instant::now();
+            let r = match self.http.get(format!("{}{}", API, path)).bearer_auth(&tok).query(&q).send() {
+                Ok(r) => r,
+                Err(e) => {
+                    log(&format!("GET {} failed to send: {}", path, e));
+                    return Err(e.to_string());
+                }
+            };
             let st = r.status();
+            log(&format!("GET {} -> {} ({} ms)", path, st.as_u16(), t0.elapsed().as_millis()));
             if st.as_u16() == 401 && attempt == 0 {
                 self.refresh()?;
                 continue;

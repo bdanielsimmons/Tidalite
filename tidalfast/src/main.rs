@@ -618,6 +618,8 @@ struct App {
     seek_drag: Option<f32>,
     bands: [f32; NB],
     peaks: [f32; NB],
+    show_log: bool,
+    audio_err_shown: bool,
 }
 
 impl App {
@@ -660,7 +662,10 @@ impl App {
             seek_drag: None,
             bands: [0.0; NB],
             peaks: [0.0; NB],
+            show_log: false,
+            audio_err_shown: false,
         };
+        crate::api::log(&format!("tidalfast started (token saved: {})", app.api.has_token()));
         if app.api.has_token() {
             app.auth = Auth::Checking;
             let (api, tx, ctx) = (app.api.clone(), app.tx.clone(), app.ctx.clone());
@@ -707,7 +712,8 @@ impl App {
         self.auth = Auth::In;
         self.login_code = None;
         self.back.clear();
-        self.load(false, |a| a.home());
+        crate::api::log("logged in; loading library");
+        self.load(false, |a| a.library());
     }
 
     fn start_login(&mut self) {
@@ -748,6 +754,7 @@ impl App {
                     self.login_err = e;
                 }
                 Msg::Page(p, push) => {
+                    crate::api::log(&format!("page '{}': {} rows, {} tracks", p.title, p.rows.len(), p.tracks.len()));
                     if push {
                         if let Some(old) = self.page.take() {
                             self.back.push(old);
@@ -764,6 +771,7 @@ impl App {
                 Msg::Audio(g, id, bytes) => {
                     if g == self.play_gen {
                         let n = bytes.len();
+                        crate::api::log(&format!("downloaded {} bytes for track {}", n, id));
                         self.player.send(Cmd::Play(bytes));
                         self.set_kbps(n);
                         self.buffering = false;
@@ -803,6 +811,8 @@ impl App {
         self.status.clear();
         self.stopped = false;
         self.paused = false;
+        self.audio_err_shown = false;
+        crate::api::log(&format!("play: '{}' - '{}' (lossless: {})", t.artist, t.title, self.prefer_lossless));
 
         if let Some((id, bytes)) = self.prefetched.take() {
             if id == t.id {
@@ -1124,8 +1134,25 @@ impl App {
                 if retro_btn(ui, "LOG OUT", 84.0, false).clicked() {
                     acts.push(Action::Logout);
                 }
+                if retro_btn(ui, "LOG", 52.0, self.show_log).clicked() {
+                    self.show_log = !self.show_log;
+                }
             });
         });
+        if self.status_err && !self.status.is_empty() {
+            ui.add(egui::Label::new(RichText::new(self.status.clone()).size(13.0).color(RED)));
+        }
+        if self.show_log {
+            let mut text = crate::api::log_text();
+            egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .font(FontId::monospace(12.0))
+                        .desired_width(f32::INFINITY),
+                );
+            });
+            return;
+        }
         ui.add_space(4.0);
         let page = self.page.clone();
         let serial = self.serial;
@@ -1430,6 +1457,15 @@ impl eframe::App for App {
                 } else {
                     self.stopped = true;
                 }
+            }
+        }
+        let dead = self.player.shared.lock().unwrap().dead.clone();
+        if let Some(d) = dead {
+            if !self.audio_err_shown && self.cur.is_some() && !self.stopped {
+                self.audio_err_shown = true;
+                self.stopped = true;
+                self.buffering = false;
+                self.set_err(d);
             }
         }
         self.update_bands();

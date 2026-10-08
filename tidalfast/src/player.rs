@@ -1,8 +1,10 @@
 //! Audio engine on its own thread (rodio + symphonia: FLAC / AAC / MP3 decode in pure Rust).
 //! Also taps the decoded samples so the UI can draw a real spectrum analyzer.
 
+use crate::api::log;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::source::SeekError;
-use rodio::{Decoder, OutputStream, Sink, Source};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::io::Cursor;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -23,6 +25,8 @@ pub struct Shared {
     pub ended: bool,
     pub rate: u32,
     pub error: Option<String>,
+    /// Set if the audio device could not be opened at all (playback is impossible).
+    pub dead: Option<String>,
 }
 
 /// Most recent mono samples (-1..1), newest last. Read by the UI for the spectrum.
@@ -101,6 +105,32 @@ impl<S: Source<Item = i16>> Source for Tap<S> {
     }
 }
 
+/// Open the default output device; if that fails, try every device the system lists.
+fn open_output() -> Result<(OutputStream, OutputStreamHandle), String> {
+    let why = match OutputStream::try_default() {
+        Ok(x) => {
+            log("audio: default output device opened");
+            return Ok(x);
+        }
+        Err(e) => format!("default device failed: {}", e),
+    };
+    log(&format!("audio: {}", why));
+    let host = rodio::cpal::default_host();
+    if let Ok(devs) = host.output_devices() {
+        for d in devs {
+            let name = d.name().unwrap_or_else(|_| "?".to_string());
+            match OutputStream::try_from_device(&d) {
+                Ok(x) => {
+                    log(&format!("audio: opened device '{}'", name));
+                    return Ok(x);
+                }
+                Err(e) => log(&format!("audio: device '{}' failed: {}", name, e)),
+            }
+        }
+    }
+    Err(why)
+}
+
 impl Player {
     pub fn new() -> Player {
         let (tx, rx) = channel::<Cmd>();
@@ -110,10 +140,14 @@ impl Player {
         let vz = viz.clone();
 
         std::thread::spawn(move || {
-            let (_stream, handle) = match OutputStream::try_default() {
+            let (_stream, handle) = match open_output() {
                 Ok(x) => x,
                 Err(e) => {
-                    sh.lock().unwrap().error = Some(format!("No audio output device: {}", e));
+                    let msg = format!("NO AUDIO OUTPUT: {}", e);
+                    log(&msg);
+                    let mut g = sh.lock().unwrap();
+                    g.error = Some(msg.clone());
+                    g.dead = Some(msg);
                     return;
                 }
             };
@@ -131,6 +165,7 @@ impl Player {
                         match (Sink::try_new(&handle), Decoder::new(Cursor::new(bytes))) {
                             (Ok(s), Ok(dec)) => {
                                 let rate = dec.sample_rate();
+                                log(&format!("decoder ok: {} Hz, {} ch", rate, dec.channels()));
                                 s.set_volume(vol);
                                 {
                                     let mut v = vz.lock().unwrap();
@@ -148,10 +183,14 @@ impl Player {
                                 g.rate = rate;
                             }
                             (_, Err(e)) => {
-                                sh.lock().unwrap().error = Some(format!("DECODE: can't decode audio ({})", e));
+                                let m = format!("DECODE: can't decode audio ({})", e);
+                                log(&m);
+                                sh.lock().unwrap().error = Some(m);
                             }
                             (Err(e), _) => {
-                                sh.lock().unwrap().error = Some(format!("Audio device error: {}", e));
+                                let m = format!("Audio device error: {}", e);
+                                log(&m);
+                                sh.lock().unwrap().error = Some(m);
                             }
                         }
                     }
@@ -214,6 +253,7 @@ impl Player {
                     if pos < 1.0 {
                         // The decoder gave us (almost) nothing: don't treat that as "track finished",
                         // or the whole queue would race by in silence.
+                        log("decoder produced no audio");
                         g.error = Some("DECODE: decoder produced no audio".to_string());
                     } else {
                         g.ended = true;

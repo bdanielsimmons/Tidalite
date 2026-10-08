@@ -57,3 +57,8 @@ lossless and AAC. Space = play/pause. Right-click a track to queue it. Click the
 
 The player's status line shows the reason (it scrolls). Everything is also logged to
 `%APPDATA%\tidalfast\log.txt`. If lossless can't be decoded it automatically retries as 320k AAC.
+
+## Diagnostics
+
+Click **LOG** in the Library window to see what the app is doing (requests, audio device, decoder, downloads).
+Click in the box, Ctrl+A, Ctrl+C to copy it. The same text is saved in `%APPDATA%\tidalfast\log.txt`.
