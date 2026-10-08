@@ -1,74 +1,59 @@
-# Tidalite
+# tidalfast
 
-A retro, Winamp-flavoured desktop player for Tidal. Native Rust (egui), no browser engine, no API keys:
-you log in with the normal "approve in your browser" flow. Needs an active Tidal subscription.
-Unofficial: it talks to the same endpoints the Tidal apps and the open-source `tidalapi` library use.
+Tidal, native and fast. A small Rust desktop app (egui, no browser engine) in the spirit of Spotifast:
+dark UI, album art everywhere, Home/Library/Search, playlist sidebar, queue panel, shuffle/repeat,
+seek + volume, lossless FLAC playback, and gapless-ish next-track prefetching.
+
+Needs an active Tidal subscription. Unofficial: it uses the same endpoints the Tidal apps and the
+open-source `tidalapi` library use. No API keys to obtain. Login is the normal "approve in your browser" flow.
 
 ## Get the .exe (no Rust needed on your machine)
 
-1. Upload everything in this folder to your GitHub repo (keep `.github/workflows/build.yml`;
-   if hidden folders get dropped, create that file in the GitHub web UI and paste in `build.yml.copy`).
-2. Actions tab -> the `build` run -> wait ~5-10 min.
-3. Download the `tidalite-windows` artifact (a zip containing `tidalite.exe`) and run it.
+1. Create a new private repo on GitHub and upload everything in this folder
+   (keep the `.github/workflows/build.yml` path exactly; if your upload drops hidden folders, create that file in the GitHub web UI and paste in `build.yml.copy`).
+2. Open the repo's **Actions** tab -> the `build` run -> wait ~5-10 min.
+3. Download the `tidalfast-windows` artifact (a zip containing `tidalfast.exe`). Run it.
 
-## Controls
+This sidesteps the pip/crates SSL problems you get on a locked-down work machine, because GitHub does the
+download and compile, not your PC.
 
-| | |
-|---|---|
-| Space | play / pause |
-| Left / Right | seek -5s / +5s |
-| Z X C V B | previous, play, pause, stop, next (the classic Winamp keys) |
-| A | open / close the cover viewer |
-| G | colour <-> black & white cover |
-| L | lyrics on / off (in the cover viewer) |
-| F or F11 | fullscreen (Esc leaves it) |
-
-Right-click a song: play next / add to queue. Right-click a row in the queue: play now / remove.
-Click the little cover in the player (or the ART button) to open the cover viewer.
-
-## Library
-
-The LIBRARY window has tabs: MY TRACKS (your liked songs, loaded in the background, with PLAY and SHUFFLE),
-LISTS, ALBUMS, ARTISTS. HOME shows Tidal's home feed.
-
-## Shuffle and the queue
-
-SHUFFLE (in the player, or on any album / playlist / MY TRACKS) really reorders the queue: the song playing
-stays on top and everything after it is shuffled, so the QUEUE window always shows what plays next.
-Turning shuffle off restores the original order. The queue is split into PLAYED / NOW PLAYING / UP NEXT, and the
-status line of the player shows the next song.
-
-## Cover viewer
-
-The cover tilts toward your mouse (and sways gently when the mouse is elsewhere). COLOR / B&W switches the
-filter (it also applies to the small cover). LYRICS shows time-synced lyrics from Tidal when available.
-FULLSCREEN fills the screen.
-
-## Diagnostics
-
-LOG in the library window shows what the app is doing; COPY LOG puts it on the clipboard.
-Everything is also saved in `%APPDATA%\tidalite\log.txt`. Your login lives in `%APPDATA%\tidalite\session.json`
-(migrated automatically from the old `tidalfast` folder).
-
-## Build it yourself
+## Build it yourself instead
 
 ```
 winget install Rustlang.Rustup
 cargo build --release
-target\release\tidalite.exe
+target\release\tidalfast.exe
 ```
-If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_CHECK_REVOKE=false`.
+
+If cargo hits the same SSL/revocation error as pip did (corporate TLS inspection), try:
+`set CARGO_HTTP_CHECK_REVOKE=false` and re-run, or ask IT for the proxy CA and set `CARGO_HTTP_CAINFO`.
+The app itself uses Windows' own certificate store (schannel), so it trusts your corporate root cert.
 
 ## Files
 
-- `src/api.rs`: Tidal login, token refresh, library, search, lyrics, stream URLs
-- `src/player.rs`: audio thread (rodio) with the spectrum tap
-- `src/decode.rs`: symphonia decoder (AAC/MP4, FLAC, MP3)
-- `src/font.rs`: the pixel font engine (hand-made 5x7 font, upper + lower case)
+- `src/api.rs`: Tidal login (device code), token refresh, pages, search, stream URLs
+- `src/player.rs`: audio thread (rodio + symphonia: FLAC/AAC decode)
 - `src/main.rs`: the UI
+- Session is stored in `%APPDATA%\tidalfast\session.json`
+
+## If Tidal rotates its public client id
+
+Create `%APPDATA%\tidalfast\credentials.json`:
+`{"client_id":"...","client_secret":"..."}` (current values live in the `tidalapi` repo's `session.py`).
 
 ## Known limits
 
-- Hi-Res / DASH streams aren't supported (lossless requests may come back as 320k AAC for this login).
-- Only Latin text can be shown in the pixel font; other scripts appear as "?".
-- No Tidal Connect, no media-key integration yet.
+- Hi-Res / DASH streams aren't supported yet (falls back to FLAC lossless, then 320k AAC).
+- No Tidal Connect, no media keys yet, no lyrics.
+- Home page layout comes from Tidal's undocumented page API; if it changes, the app falls back to your Library.
+
+## Skin / controls
+
+Classic-player look: LCD time, live spectrum analyzer, scrolling title, kbps/kHz readouts, volume + seek sliders,
+round transport buttons, shuffle/repeat, and a playlist window. Click the **HIFI/320K** box to switch between
+lossless and AAC. Space = play/pause. Right-click a track to queue it. Click the status line to dismiss a message.
+
+## If a track won't play
+
+The player's status line shows the reason (it scrolls). Everything is also logged to
+`%APPDATA%\tidalfast\log.txt`. If lossless can't be decoded it automatically retries as 320k AAC.

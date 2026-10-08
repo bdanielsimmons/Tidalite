@@ -22,8 +22,8 @@ jobs:
           cd "$dir"
           cargo build --release
           mkdir -p "$GITHUB_WORKSPACE/out"
-          cp target/release/*.exe "$GITHUB_WORKSPACE/out/tidalite.exe"
+          cp target/release/tidalfast.exe "$GITHUB_WORKSPACE/out/tidalfast.exe"
       - uses: actions/upload-artifact@v6
         with:
-          name: tidalite-windows
-          path: out/tidalite.exe
+          name: tidalfast-windows
+          path: out/tidalfast.exe
