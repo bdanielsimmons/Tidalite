@@ -1,8 +1,8 @@
 [package]
-name = "tidalfast"
+name = "tidalite"
 version = "0.1.0"
 edition = "2021"
-description = "Tidal, native and fast."
+description = "Tidalite - a retro desktop player for Tidal."
 
 [dependencies]
 eframe = "0.29"
