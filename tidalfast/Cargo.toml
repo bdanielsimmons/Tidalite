@@ -1,0 +1,22 @@
+[package]
+name = "tidalfast"
+version = "0.1.0"
+edition = "2021"
+description = "Tidal, native and fast."
+
+[dependencies]
+eframe = "0.29"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# native-tls = Windows' own certificate store, so corporate/IT proxy certs are trusted
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde_json = "1"
+rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
+webbrowser = "1"
+dirs = "5"
+base64 = "0.22"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
