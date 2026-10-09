@@ -9,6 +9,7 @@
 use crate::decode::SymSource;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
+use rodio::Source;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
