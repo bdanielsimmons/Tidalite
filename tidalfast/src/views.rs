@@ -531,7 +531,9 @@ impl App {
         }
         section_header(ui, "MY PLAYLISTS (CLICK TO OPEN, RIGHT-CLICK TO REMOVE)");
         for (k, (i, l)) in mine.iter().enumerate() {
-            if let Some(r) = list_row(ui, k, Some(k + 1), || l.name.clone(), || "OPEN".to_string(), RowState::Normal, false, false) {
+            if let Some(r) =
+                list_row(ui, k, Some(k + 1), || l.name.clone(), || "OPEN".to_string(), RowState::Normal, false, false)
+            {
                 if r.clicked() {
                     if kind == "sc" {
                         acts.push(Action::ScOpenSet(l.url.clone()));
@@ -657,7 +659,9 @@ impl App {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 let saved = self.yt_cur.as_ref().map_or(true, |u| self.store.lists.iter().any(|l| &l.url == u));
-                if !saved && retro_btn(ui, "SAVE THIS PLAYLIST", false).tip("Keep the link so you can open it again later").clicked() {
+                if !saved
+                    && retro_btn(ui, "SAVE THIS PLAYLIST", false).tip("Keep the link so you can open it again later").clicked()
+                {
                     if let Some(u) = self.yt_cur.clone() {
                         acts.push(Action::SaveList(1, u));
                     }
@@ -794,16 +798,9 @@ impl App {
             ui.add_space(4.0);
             for (i, pl) in self.store.playlists.iter().enumerate() {
                 let n = pl.items.len();
-                if let Some(r) = list_row(
-                    ui,
-                    i,
-                    Some(i + 1),
-                    || pl.name.clone(),
-                    || format!("{} tracks", n),
-                    RowState::Normal,
-                    false,
-                    false,
-                ) {
+                if let Some(r) =
+                    list_row(ui, i, Some(i + 1), || pl.name.clone(), || format!("{} tracks", n), RowState::Normal, false, false)
+                {
                     if r.clicked() {
                         acts.push(Action::PlaylistAdd(i, t.clone()));
                     }
@@ -838,16 +835,9 @@ impl App {
             ui.add_space(4.0);
             for (i, pl) in self.store.playlists.iter().enumerate() {
                 let n = pl.items.len();
-                if let Some(r) = list_row(
-                    ui,
-                    i,
-                    Some(i + 1),
-                    || pl.name.clone(),
-                    || format!("{} tracks", n),
-                    RowState::Normal,
-                    false,
-                    false,
-                ) {
+                if let Some(r) =
+                    list_row(ui, i, Some(i + 1), || pl.name.clone(), || format!("{} tracks", n), RowState::Normal, false, false)
+                {
                     if r.clicked() {
                         acts.push(Action::PlaylistOpen(Some(i)));
                     }

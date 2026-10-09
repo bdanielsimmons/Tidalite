@@ -246,3 +246,4 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - Album-art view: skin picker button, spectrum WIDTH setting, filled waveform, skin-coloured bars.
 - Saved playlists for SoundCloud and YouTube (links kept in library.json); YouTube playlist links list their videos; right-click a song for Copy link.
 - LISTS tab: your own playlists mixing any source; right-click a song > Add to a playlist; SAVE QUEUE AS PLAYLIST.
+- v9.29: main.rs split: skin.rs (palettes, colour helpers), viz.rs (visualizer), icons.rs (pixel icons); one shared skin menu. Behaviour unchanged.

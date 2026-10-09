@@ -7,19 +7,24 @@ mod chart;
 mod decode;
 mod extras;
 mod font;
+mod icons;
 mod media;
 mod player;
+mod skin;
 mod sources;
 mod stems;
 mod store;
 mod tools;
 mod vicon;
 mod views;
+mod viz;
 
 use api::{cover_url, Api, Card, Kind, Page, Track};
 use eframe::egui::{self, Align, Color32, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
 use font::{fit, ptext, ptext_fit, snap, spx, text_w, thick, wrap};
+use icons::*;
 use player::{Cmd, Player};
+use skin::*;
 use sources::Src;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -27,522 +32,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-// ------------------------------------------------------------------- skins
-#[derive(Clone, Copy)]
-struct Pal {
-    app_bg: Color32,
-    trim: Color32,
-    beige: Color32,
-    beige_lt: Color32,
-    beige_dk: Color32,
-    beige_h: Color32,
-    lcd: Color32,
-    lcd_ghost: Color32,
-    groove: Color32,
-    sel: Color32,
-    ink: Color32,
-    ink2: Color32,
-    dim: Color32,
-    red: Color32,
-    btn_face: Color32,
-    btn_hi: Color32,
-    row_alt: Color32,
-    row_sel: Color32,
-    bar_txt: Color32,
-    edge: Color32,
-}
-
-const fn c(r: u8, g: u8, b: u8) -> Color32 {
-    Color32::from_rgb(r, g, b)
-}
-
-const SKIN_NAMES: [&str; 11] =
-    ["OLIVE", "AQUA", "DARK", "AMBER", "PAPER", "PLUM", "SLATE", "CLAY", "AERO GLASS", "SLEEK DARK", "SLEEK LIGHT"];
-
-static PALS: [Pal; 11] = [
-    // OLIVE: the classic beige/olive player
-    Pal {
-        app_bg: c(8, 8, 10),
-        trim: c(186, 184, 136),
-        beige: c(201, 199, 160),
-        beige_lt: c(226, 224, 188),
-        beige_dk: c(160, 157, 118),
-        beige_h: c(213, 211, 174),
-        lcd: c(212, 210, 172),
-        lcd_ghost: c(190, 188, 150),
-        groove: c(120, 118, 84),
-        sel: c(184, 181, 142),
-        ink: c(12, 12, 8),
-        ink2: c(55, 55, 38),
-        dim: c(80, 78, 58),
-        red: c(150, 30, 20),
-        btn_face: c(150, 146, 92),
-        btn_hi: c(190, 186, 128),
-        row_alt: c(203, 201, 163),
-        row_sel: c(70, 70, 50),
-        bar_txt: c(226, 224, 188),
-        edge: c(12, 12, 8),
-    },
-    // AQUA: glassy sky blue
-    Pal {
-        app_bg: c(4, 16, 28),
-        trim: c(150, 215, 235),
-        beige: c(170, 210, 228),
-        beige_lt: c(226, 246, 253),
-        beige_dk: c(110, 160, 186),
-        beige_h: c(190, 226, 240),
-        lcd: c(200, 236, 238),
-        lcd_ghost: c(176, 214, 218),
-        groove: c(92, 138, 162),
-        sel: c(150, 200, 222),
-        ink: c(6, 24, 34),
-        ink2: c(24, 62, 81),
-        dim: c(55, 87, 101),
-        red: c(153, 34, 34),
-        btn_face: c(70, 150, 190),
-        btn_hi: c(110, 190, 225),
-        row_alt: c(188, 224, 230),
-        row_sel: c(22, 70, 100),
-        bar_txt: c(226, 246, 252),
-        edge: c(2, 12, 20),
-    },
-    // DARK: graphite with green phosphor
-    Pal {
-        app_bg: c(6, 7, 8),
-        trim: c(122, 127, 133),
-        beige: c(62, 65, 70),
-        beige_lt: c(96, 100, 106),
-        beige_dk: c(38, 40, 44),
-        beige_h: c(76, 80, 86),
-        lcd: c(16, 24, 18),
-        lcd_ghost: c(24, 36, 27),
-        groove: c(30, 32, 35),
-        sel: c(50, 66, 54),
-        ink: c(126, 255, 150),
-        ink2: c(136, 235, 156),
-        dim: c(136, 191, 148),
-        red: c(255, 152, 141),
-        btn_face: c(88, 92, 98),
-        btn_hi: c(118, 122, 130),
-        row_alt: c(20, 30, 22),
-        row_sel: c(36, 100, 56),
-        bar_txt: c(252, 254, 252),
-        edge: c(0, 0, 0),
-    },
-    // AMBER: bronze with amber phosphor
-    Pal {
-        app_bg: c(8, 6, 4),
-        trim: c(154, 118, 68),
-        beige: c(74, 62, 46),
-        beige_lt: c(112, 94, 68),
-        beige_dk: c(44, 36, 26),
-        beige_h: c(88, 74, 54),
-        lcd: c(24, 16, 6),
-        lcd_ghost: c(38, 26, 10),
-        groove: c(36, 28, 18),
-        sel: c(70, 52, 28),
-        ink: c(255, 184, 64),
-        ink2: c(246, 177, 74),
-        dim: c(215, 169, 96),
-        red: c(255, 149, 132),
-        btn_face: c(110, 92, 60),
-        btn_hi: c(140, 118, 80),
-        row_alt: c(32, 22, 10),
-        row_sel: c(120, 76, 16),
-        bar_txt: c(255, 249, 236),
-        edge: c(0, 0, 0),
-    },
-    // PAPER: warm white with ink-blue type
-    Pal {
-        app_bg: c(40, 38, 34),
-        trim: c(142, 135, 123),
-        beige: c(236, 230, 214),
-        beige_lt: c(252, 249, 240),
-        beige_dk: c(196, 188, 168),
-        beige_h: c(244, 239, 226),
-        lcd: c(250, 247, 238),
-        lcd_ghost: c(234, 229, 214),
-        groove: c(150, 142, 124),
-        sel: c(214, 206, 186),
-        ink: c(24, 34, 72),
-        ink2: c(60, 73, 114),
-        dim: c(96, 97, 112),
-        red: c(176, 36, 36),
-        btn_face: c(120, 134, 176),
-        btn_hi: c(150, 164, 204),
-        row_alt: c(240, 235, 221),
-        row_sel: c(40, 56, 110),
-        bar_txt: c(246, 244, 236),
-        edge: c(24, 22, 20),
-    },
-    // PLUM: dusky purple with pink phosphor
-    Pal {
-        app_bg: c(10, 6, 14),
-        trim: c(150, 110, 170),
-        beige: c(82, 62, 96),
-        beige_lt: c(124, 98, 140),
-        beige_dk: c(50, 36, 62),
-        beige_h: c(98, 76, 114),
-        lcd: c(28, 16, 34),
-        lcd_ghost: c(40, 26, 48),
-        groove: c(44, 30, 54),
-        sel: c(84, 54, 100),
-        ink: c(255, 221, 242),
-        ink2: c(246, 212, 232),
-        dim: c(203, 178, 194),
-        red: c(255, 161, 154),
-        btn_face: c(132, 96, 150),
-        btn_hi: c(160, 124, 180),
-        row_alt: c(36, 22, 44),
-        row_sel: c(130, 50, 100),
-        bar_txt: c(255, 233, 245),
-        edge: c(2, 0, 4),
-    },
-    // SLATE: cool grey-blue steel
-    Pal {
-        app_bg: c(8, 10, 14),
-        trim: c(140, 156, 176),
-        beige: c(168, 182, 200),
-        beige_lt: c(196, 208, 222),
-        beige_dk: c(120, 134, 154),
-        beige_h: c(182, 196, 212),
-        lcd: c(204, 214, 225),
-        lcd_ghost: c(168, 182, 196),
-        groove: c(86, 100, 120),
-        sel: c(146, 162, 184),
-        ink: c(10, 18, 30),
-        ink2: c(29, 41, 61),
-        dim: c(54, 66, 86),
-        red: c(131, 24, 24),
-        btn_face: c(96, 112, 136),
-        btn_hi: c(130, 148, 172),
-        row_alt: c(178, 190, 206),
-        row_sel: c(30, 52, 88),
-        bar_txt: c(230, 238, 246),
-        edge: c(4, 8, 14),
-    },
-    // CLAY: terracotta and sand
-    Pal {
-        app_bg: c(12, 7, 5),
-        trim: c(196, 130, 92),
-        beige: c(222, 178, 140),
-        beige_lt: c(244, 214, 182),
-        beige_dk: c(176, 128, 96),
-        beige_h: c(232, 192, 156),
-        lcd: c(240, 212, 180),
-        lcd_ghost: c(224, 192, 158),
-        groove: c(142, 98, 70),
-        sel: c(204, 152, 116),
-        ink: c(13, 4, 2),
-        ink2: c(77, 32, 21),
-        dim: c(93, 64, 48),
-        red: c(139, 20, 13),
-        btn_face: c(186, 98, 62),
-        btn_hi: c(214, 128, 88),
-        row_alt: c(228, 188, 152),
-        row_sel: c(120, 44, 24),
-        bar_txt: c(250, 228, 204),
-        edge: c(20, 8, 4),
-    },
-    // AERO GLASS: sky blue, glossy glass and grass green (Windows XP / Vista era)
-    Pal {
-        app_bg: c(18, 60, 110),
-        trim: c(185, 224, 245),
-        beige: c(226, 240, 252),
-        beige_lt: c(252, 254, 255),
-        beige_dk: c(150, 186, 218),
-        beige_h: c(240, 248, 255),
-        lcd: c(238, 250, 255),
-        lcd_ghost: c(214, 236, 248),
-        groove: c(150, 184, 212),
-        sel: c(188, 222, 246),
-        ink: c(14, 40, 72),
-        ink2: c(38, 81, 119),
-        dim: c(77, 106, 133),
-        red: c(189, 52, 43),
-        btn_face: c(46, 150, 210),
-        btn_hi: c(96, 206, 120),
-        row_alt: c(232, 244, 254),
-        row_sel: c(34, 124, 196),
-        bar_txt: c(255, 255, 255),
-        edge: c(36, 92, 142),
-    },
-    // SLEEK DARK: charcoal with one blue accent
-    Pal {
-        app_bg: c(12, 13, 17),
-        trim: c(140, 148, 168),
-        beige: c(28, 30, 37),
-        beige_lt: c(52, 56, 68),
-        beige_dk: c(20, 21, 27),
-        beige_h: c(42, 45, 55),
-        lcd: c(18, 19, 25),
-        lcd_ghost: c(26, 28, 36),
-        groove: c(44, 47, 58),
-        sel: c(40, 52, 84),
-        ink: c(236, 238, 245),
-        ink2: c(168, 173, 187),
-        dim: c(142, 146, 158),
-        red: c(255, 92, 102),
-        btn_face: c(70, 122, 255),
-        btn_hi: c(120, 160, 255),
-        row_alt: c(32, 34, 42),
-        row_sel: c(50, 94, 220),
-        bar_txt: c(255, 255, 255),
-        edge: c(10, 10, 14),
-    },
-    // SLEEK LIGHT: soft white with the same blue accent
-    Pal {
-        app_bg: c(226, 229, 237),
-        trim: c(206, 212, 228),
-        beige: c(248, 249, 252),
-        beige_lt: c(255, 255, 255),
-        beige_dk: c(212, 216, 228),
-        beige_h: c(238, 241, 249),
-        lcd: c(238, 241, 247),
-        lcd_ghost: c(226, 230, 240),
-        groove: c(206, 211, 224),
-        sel: c(216, 227, 252),
-        ink: c(22, 25, 34),
-        ink2: c(74, 81, 96),
-        dim: c(97, 102, 113),
-        red: c(194, 50, 61),
-        btn_face: c(48, 100, 240),
-        btn_hi: c(92, 142, 255),
-        row_alt: c(242, 244, 250),
-        row_sel: c(48, 100, 240),
-        bar_txt: c(255, 255, 255),
-        edge: c(44, 50, 70),
-    },
-];
-
-static SKIN: AtomicUsize = AtomicUsize::new(0);
-
-/// Look of the skin: 0 retro pixel, 1 aero glass, 2 sleek.
-fn style() -> u8 {
-    match SKIN.load(Ordering::Relaxed) % PALS.len() {
-        8 => 1,
-        9 | 10 => 2,
-        _ => 0,
-    }
-}
-
-/// Rounded fill (modern skins).
-fn rfill(p: &egui::Painter, r: Rect, rad: f32, c: Color32) {
-    p.rect_filled(r, Rounding::same(rad), c);
-}
-
-fn rline(p: &egui::Painter, r: Rect, rad: f32, w: f32, c: Color32) {
-    p.rect_stroke(r, Rounding::same(rad), Stroke::new(w, c));
-}
-
-/// Vertical gradient inside a rounded rectangle, drawn as thin horizontal slices clipped by the corner radius.
-fn rgrad(p: &egui::Painter, r: Rect, rad: f32, top: Color32, bot: Color32) {
-    let n = (r.height() / 2.0).ceil().max(1.0) as usize;
-    let lerp = |a: u8, b: u8, t: f32| (a as f32 + (b as f32 - a as f32) * t) as u8;
-    for i in 0..n {
-        let t = i as f32 / (n.max(2) - 1) as f32;
-        let y0 = r.min.y + r.height() * i as f32 / n as f32;
-        let y1 = r.min.y + r.height() * (i + 1) as f32 / n as f32;
-        let col = Color32::from_rgb(lerp(top.r(), bot.r(), t), lerp(top.g(), bot.g(), t), lerp(top.b(), bot.b(), t));
-        // inset each slice near the corners so the gradient keeps the rounded outline
-        let dy = (y0 + y1) * 0.5 - r.min.y;
-        let from_edge = dy.min(r.height() - dy);
-        let k = if from_edge < rad { rad - (rad * rad - (rad - from_edge) * (rad - from_edge)).max(0.0).sqrt() } else { 0.0 };
-        p.rect_filled(Rect::from_min_max(Pos2::new(r.min.x + k, y0), Pos2::new(r.max.x - k, y1 + 0.5)), Rounding::ZERO, col);
-    }
-}
-
-fn rgb_to_hsv(c: Color32) -> (f32, f32, f32) {
-    let (r, g, b) = (c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0);
-    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
-    let d = mx - mn;
-    let h = if d == 0.0 {
-        0.0
-    } else if mx == r {
-        ((g - b) / d).rem_euclid(6.0) / 6.0
-    } else if mx == g {
-        ((b - r) / d + 2.0) / 6.0
-    } else {
-        ((r - g) / d + 4.0) / 6.0
-    };
-    (h, if mx == 0.0 { 0.0 } else { d / mx }, mx)
-}
-
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
-    let i = (h * 6.0).floor();
-    let f = h * 6.0 - i;
-    let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
-    let (r, g, b) = match (i as i32).rem_euclid(6) {
-        0 => (v, t, p),
-        1 => (q, v, p),
-        2 => (p, v, t),
-        3 => (p, q, v),
-        4 => (t, p, v),
-        _ => (v, p, q),
-    };
-    Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
-}
-
-/// Bars and/or waveform inside `r`. `art` = soft white overlay (album view); otherwise the skin's own colours.
-fn viz_draw(
-    p: &egui::Painter,
-    r: Rect,
-    bands: &[f32],
-    peaks: &[f32],
-    wave: &[f32],
-    mode: u8,
-    wfrac: f32,
-    art: bool,
-    alpha: f32,
-    tint: Option<(Color32, Color32)>,
-) {
-    let nb = bands.len().max(1);
-    let modern = style() != 0;
-    let a1 = (alpha * 255.0) as u8;
-    let a2 = ((alpha * 2.0).min(0.9) * 255.0) as u8;
-    let (body, cap, line) = if let Some((pri, sec)) = tint {
-        if art {
-            let f = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
-            (f(pri, a1), f(sec, a2), f(pri, a2.max(130)))
-        } else {
-            (pri, sec, pri)
-        }
-    } else if art {
-        // the skin's own colours, picked to stand out against the dark cover backdrop
-        let pl = pal();
-        let score = |c: &Color32| {
-            let (_, sat, v) = rgb_to_hsv(*c);
-            sat * 0.6 + v
-        };
-        let lum = |c: &Color32| rgb_to_hsv(*c).2;
-        let body_c = [pl.ink, pl.ink2, pl.trim, pl.btn_hi, pl.btn_face, pl.red, pl.lcd]
-            .into_iter()
-            .max_by(|x, y| score(x).total_cmp(&score(y)))
-            .unwrap_or(pl.ink);
-        let cap_c = [pl.beige_lt, pl.beige_h, pl.trim, pl.ink2, pl.btn_hi]
-            .into_iter()
-            .max_by(|x, y| lum(x).total_cmp(&lum(y)))
-            .unwrap_or(pl.beige_lt);
-        let f = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
-        (f(body_c, a1), f(cap_c, a2), f(body_c, a2.max(130)))
-    } else if modern {
-        (pal().btn_hi, pal().ink2, pal().btn_face)
-    } else {
-        (pal().ink, pal().ink2, pal().ink)
-    };
-    if mode == 0 || mode == 2 {
-        let slot = r.width() / nb as f32;
-        let bw = (slot * wfrac).max(1.5);
-        let q = if modern {
-            0.0
-        } else if art {
-            6.0
-        } else {
-            2.0
-        };
-        for i in 0..nb.min(peaks.len()) {
-            let x = r.min.x + i as f32 * slot + (slot - bw) / 2.0;
-            let mut h = bands[i] * r.height();
-            let mut ph = peaks[i] * r.height();
-            if q > 0.0 {
-                h = (h / q).floor() * q;
-                ph = (ph / q).floor() * q;
-            }
-            let rad = if modern { (bw * 0.35).min(3.0) } else { 0.0 };
-            if h > 0.5 {
-                let br = Rect::from_min_size(Pos2::new(x, r.max.y - h), Vec2::new(bw, h));
-                if modern {
-                    rfill(p, br, rad, body);
-                } else {
-                    fill_rect(p, br, body);
-                }
-            }
-            if ph > 1.0 {
-                let pr = Rect::from_min_size(
-                    Pos2::new(x, r.max.y - ph - 2.0),
-                    Vec2::new(bw, if modern { 2.0 } else { 1.0_f32.max(q / 2.0) }),
-                );
-                if modern {
-                    rfill(p, pr, 1.0, cap);
-                } else {
-                    fill_rect(p, pr, cap);
-                }
-            }
-        }
-    }
-    if mode >= 1 && wave.len() > 1 {
-        let cy = r.center().y;
-        let amp = r.height() * if mode == 1 { 0.46 } else { 0.32 };
-        let n = wave.len();
-        if modern {
-            let pts: Vec<Pos2> =
-                (0..n).map(|k| Pos2::new(r.min.x + r.width() * k as f32 / (n - 1) as f32, cy - wave[k] * amp)).collect();
-            let w: f32 = if art { 3.0 } else { 1.5 };
-            // the area under the wave is lit too, fading toward the bottom like the bars do
-            let mut mesh = egui::Mesh::default();
-            let uv = egui::epaint::WHITE_UV;
-            let (ft, fb) = (body.linear_multiply(0.5), body.linear_multiply(0.08));
-            for pt in &pts {
-                mesh.vertices.push(egui::epaint::Vertex { pos: *pt, uv, color: ft });
-                mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(pt.x, r.max.y), uv, color: fb });
-            }
-            for k in 0..(pts.len() as u32 - 1) {
-                let b = k * 2;
-                mesh.indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
-            }
-            p.add(egui::Shape::mesh(mesh));
-            if style() == 1 || art {
-                // soft glow under the line
-                p.add(egui::Shape::line(
-                    pts.clone(),
-                    Stroke::new(w * 3.0, Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), 36)),
-                ));
-            }
-            p.add(egui::Shape::line(pts, Stroke::new(w, line)));
-        } else {
-            // pixel scope: 2-dot columns, joined vertically
-            let step = if art { 6.0 } else { 2.0 };
-            let cols = (r.width() / step).floor().max(2.0) as usize;
-            let mut prev: Option<f32> = None;
-            for c in 0..cols {
-                let f = c as f32 / (cols - 1) as f32 * (n - 1) as f32;
-                let (i0, fr) = (f.floor() as usize, f.fract());
-                let v = wave[i0] * (1.0 - fr) + wave[(i0 + 1).min(n - 1)] * fr;
-                let y = ((cy - v * amp) / 2.0).floor() * 2.0;
-                let (lo, hi) = match prev {
-                    Some(pv) => (pv.min(y), pv.max(y)),
-                    None => (y, y),
-                };
-                let col = Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), line.a());
-                let top = y + step.min(3.0);
-                if r.max.y > top {
-                    fill_rect(
-                        p,
-                        Rect::from_min_max(
-                            Pos2::new(r.min.x + c as f32 * step, top),
-                            Pos2::new(r.min.x + c as f32 * step + step.min(4.0), r.max.y),
-                        ),
-                        body.linear_multiply(0.4),
-                    );
-                }
-                fill_rect(
-                    p,
-                    Rect::from_min_size(
-                        Pos2::new(r.min.x + c as f32 * step, lo),
-                        Vec2::new(step.min(4.0), hi - lo + step.min(3.0)),
-                    ),
-                    col,
-                );
-                prev = Some(y);
-            }
-        }
-    }
-}
-
-fn pal() -> &'static Pal {
-    &PALS[SKIN.load(Ordering::Relaxed) % PALS.len()]
-}
+use viz::viz_draw;
 
 const EQ_PRESETS: [(&str, [f32; 10]); 4] = [
     ("FLAT", [0.0; 10]),
@@ -555,10 +45,6 @@ const EQ_PRESETS: [(&str, [f32; 10]); 4] = [
 const VERSION: &str = if PRACTICE { "v9 STUDIO" } else { "v9" };
 /// Built with `--no-default-features` the practice tools (files, tunes, diary, loops, timer) are left out.
 const PRACTICE: bool = cfg!(feature = "practice");
-
-const CHECK: [&str; 4] = ["....#", "...#.", "#.#..", ".#..."];
-
-const HEART: [&str; 6] = [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."];
 
 const LIB_W: f32 = 430.0;
 #[allow(dead_code)]
@@ -847,132 +333,6 @@ fn marquee(ui: &egui::Ui, rect: Rect, text: &str, px: f32, color: Color32) {
     }
 }
 
-// --------------------------------------------------------------- pixel icons
-const PREV: [&str; 7] = ["#.....#", "#....##", "#...###", "#..####", "#...###", "#....##", "#.....#"];
-const NEXT: [&str; 7] = ["#.....#", "##....#", "###...#", "####..#", "###...#", "##....#", "#.....#"];
-const PLAY: [&str; 7] = ["##.....", "####...", "######.", "#######", "######.", "####...", "##....."];
-const PAUSE: [&str; 7] = ["###.###", "###.###", "###.###", "###.###", "###.###", "###.###", "###.###"];
-const STOP: [&str; 7] = [".......", ".#####.", ".#####.", ".#####.", ".#####.", ".#####.", "......."];
-const PLAY_S: [&str; 5] = ["#....", "##...", "###..", "##...", "#...."];
-const PAUSE_S: [&str; 5] = ["##.##", "##.##", "##.##", "##.##", "##.##"];
-const STOP_S: [&str; 5] = ["#####", "#####", "#####", "#####", "#####"];
-
-fn pixmap(p: &egui::Painter, origin: Pos2, px: f32, rows: &[&str], color: Color32) {
-    if style() != 0 {
-        // modern skins: smooth vector icons; anything without one gets soft rounded dots instead of hard squares
-        let size = Vec2::new(rows.first().map_or(0, |r| r.len()) as f32 * px, rows.len() as f32 * px);
-        if vicon::draw(p, Rect::from_min_size(origin, size), rows, color) {
-            return;
-        }
-        for (y, row) in rows.iter().enumerate() {
-            for (x, ch) in row.chars().enumerate() {
-                if ch == '#' {
-                    let min = origin + Vec2::new(x as f32 * px, y as f32 * px);
-                    rfill(p, Rect::from_min_size(min, Vec2::splat(px)).shrink(px * 0.06), px * 0.4, color);
-                }
-            }
-        }
-        return;
-    }
-    for (y, row) in rows.iter().enumerate() {
-        for (x, ch) in row.chars().enumerate() {
-            if ch == '#' {
-                let min = origin + Vec2::new(x as f32 * px, y as f32 * px);
-                fill_rect(p, Rect::from_min_size(min, Vec2::splat(px)), color);
-            }
-        }
-    }
-}
-
-// ---- pixel icons (9 wide) for the album viewer
-const IC_PREV: [&str; 9] =
-    [".#.....#.", ".#....##.", ".#...###.", ".#..####.", ".#.#####.", ".#..####.", ".#...###.", ".#....##.", ".#.....#."];
-const IC_NEXT: [&str; 9] =
-    [".#.....#.", ".##....#.", ".###...#.", ".####..#.", ".#####.#.", ".####..#.", ".###...#.", ".##....#.", ".#.....#."];
-const IC_PLAY: [&str; 9] =
-    [".#.......", ".###.....", ".#####...", ".######..", ".########", ".######..", ".#####...", ".###.....", ".#......."];
-const IC_PAUSE: [&str; 9] =
-    [".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###."];
-const IC_HEART: [&str; 8] =
-    [".##...##.", "#########", "#########", "#########", ".#######.", "..#####..", "...###...", "....#...."];
-const IC_FULL: [&str; 9] =
-    ["###...###", "#.......#", "#.......#", ".........", ".........", ".........", "#.......#", "#.......#", "###...###"];
-const IC_WIN: [&str; 9] =
-    [".........", ".##...##.", ".#.....#.", ".........", ".........", ".........", ".#.....#.", ".##...##.", "........."];
-const IC_MIC: [&str; 9] =
-    ["...###...", "...###...", "...###...", "#..###..#", "#..###..#", ".#.###.#.", "..#####..", "....#....", "...###..."];
-const IC_BW: [&str; 9] =
-    ["...###...", ".###..##.", ".###...#.", "####....#", "####....#", "####....#", ".###...#.", ".###..##.", "...###..."];
-
-const IC_SPEC: [&str; 9] =
-    [".........", "......#..", "..#...#..", "..#.#.#..", "#.#.#.#.#", "#.#.#.#.#", "#.#.#.#.#", "#########", "........."];
-const IC_SHUF: [&str; 9] = [
-    "...........",
-    "........#..",
-    "####...####",
-    "....#.#.#..",
-    ".....#.....",
-    "....#.#.#..",
-    "####...####",
-    "........#..",
-    "...........",
-];
-const IC_REP: [&str; 9] = [
-    "...........",
-    ".......#...",
-    ".#########.",
-    ".#.....#.#.",
-    ".#.......#.",
-    ".#.#.....#.",
-    ".#########.",
-    "...#.......",
-    "...........",
-];
-const IC_REP1: [&str; 9] = [
-    "...........",
-    ".......#...",
-    ".#########.",
-    ".#..##.#.#.",
-    ".#...#...#.",
-    ".#.#.#...#.",
-    ".#########.",
-    "...#.......",
-    "...........",
-];
-
-const IC_MOON: [&str; 9] =
-    ["...###...", "..##...#.", ".###.....", "###......", "###......", "####.....", ".####....", "..#####..", "...###..."];
-const IC_TOMATO: [&str; 9] =
-    ["....#....", "..#.#.#..", "...###...", ".#######.", "#########", "#########", "#########", ".#######.", "..#####.."];
-const IC_DISK: [&str; 8] =
-    ["..#####..", ".#.....#.", ".#######.", ".#.....#.", ".#######.", ".#.....#.", ".#######.", "..#####.."];
-const IC_LOG: [&str; 9] =
-    ["######...", "#....##..", "#....#.#.", "#....####", "#.###...#", "#.......#", "#.###...#", "#.......#", "#########"];
-const IC_BOOK: [&str; 6] = [".#####.", ".#####.", ".#####.", ".#####.", ".##.##.", ".#...#."];
-const IC_SEARCH: [&str; 9] =
-    ["..###....", ".#...#...", "#.....#..", "#.....#..", "#.....#..", ".#...#...", "..###.#..", ".......#.", "........#"];
-const IC_HOME: [&str; 9] =
-    ["....#....", "...###...", "..#####..", ".#######.", "#########", ".#######.", ".##...##.", ".##...##.", ".##...##."];
-const IC_BACK: [&str; 9] =
-    [".........", "...#.....", "..##.....", ".#######.", "#########", ".#######.", "..##.....", "...#.....", "........."];
-const IC_SKIN: [&str; 7] = ["###.###", "###.###", "###.###", ".......", "###.###", "###.###", "###.###"];
-const IC_EQ: [&str; 9] =
-    [".#..#..#.", ".#..#..#.", "###.#..#.", ".#..#..#.", ".#..#.###", ".#.###.#.", ".#..#..#.", ".#..#..#.", ".#..#..#."];
-const IC_CLOCK: [&str; 9] =
-    ["...###...", ".##...##.", ".#..#..#.", "#...#...#", "#...###.#", "#.......#", ".#.....#.", ".##...##.", "...###..."];
-const IC_METRO: [&str; 8] =
-    ["...###...", "...#.#...", "..#.#.#..", "..#.#.#..", ".#..#..#.", ".#..#..#.", "#...#...#", "#########"];
-const IC_X: [&str; 9] =
-    ["#.......#", ".#.....#.", "..#...#..", "...#.#...", "....#....", "...#.#...", "..#...#..", ".#.....#.", "#.......#"];
-const IC_REW: [&str; 9] =
-    ["....#...#", "...##..##", "..###.###", ".########", "#########", ".########", "..###.###", "...##..##", "....#...#"];
-const IC_SPK0: [&str; 8] =
-    ["....#....", "...##....", "##.##.#.#", "##.##..#.", "##.##..#.", "##.##.#.#", "...##....", "....#...."];
-const IC_SPK1: [&str; 8] =
-    ["....#....", "...##....", "##.##....", "##.##.#..", "##.##.#..", "##.##....", "...##....", "....#...."];
-const IC_SPK2: [&str; 8] =
-    ["....#....", "...##...#", "##.##...#", "##.##.#.#", "##.##.#.#", "##.##...#", "...##...#", "....#...."];
-
 /// A button showing a pixel icon, `w` wide. `col` tints it; `on` draws it pressed.
 fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
@@ -984,6 +344,17 @@ fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) 
     let o = Pos2::new((rect.center().x - iw / 2.0).round(), (rect.center().y - ih / 2.0 + dy).round());
     pixmap(ui.painter(), o, px, icon, col);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Right-click list of every skin; the current one is marked.
+fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+    for (n, name) in SKIN_NAMES.iter().enumerate() {
+        let mark = if n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
+        if menu_item(ui, &format!("{}{}", mark, name)) {
+            acts.push(Action::SkinSet(n));
+            ui.close_menu();
+        }
+    }
 }
 
 fn icon_btn(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32) -> egui::Response {
@@ -1233,16 +604,6 @@ fn modern_deco(p: &egui::Painter, outer: Rect, inner: Rect, title: &str) {
     ptext(p, Pos2::new(x, cy), Align::Min, title, 2.0, txt_col);
 }
 
-// little 9x9 pictures for the window title tabs
-const WIN_LIBRARY: [&str; 9] =
-    ["..#......", "..#.###..", ".##.###.#", ".##.###.#", ".##.###.#", ".##.###.#", ".##.###.#", "#########", "........."];
-const WIN_QUEUE: [&str; 9] =
-    [".........", "##.######", "##.######", ".........", "##.######", "##.######", ".........", "##.######", "##.######"];
-const WIN_SHEET: [&str; 9] =
-    ["....####.", "....#..##", "....#....", "....#....", "....#....", ".##.#....", "####.....", "####.....", ".##......"];
-const WIN_PRACTICE: [&str; 9] =
-    [".........", "#.......#", "#...#...#", "#.#.#.#.#", "#.#####.#", "#.#####.#", "#.#.#.#.#", "#...#...#", "#.......#"];
-
 const SEGS: [(f32, f32, f32, f32); 7] = [
     (1.0, 0.0, 6.0, 2.0),  // a
     (6.0, 1.0, 2.0, 6.0),  // b
@@ -1324,9 +685,6 @@ fn round_btn(ui: &egui::Ui, center: Pos2, radius: f32, icon: &[&str], px: f32, i
     pixmap(p, o, px, icon, Color32::from_rgb(34, 32, 16));
     resp
 }
-
-const MARK: [&str; 9] =
-    ["....#....", "...###...", "..#####..", ".#o###o#.", "#o#o#o#o#", ".#o###o#.", "..#####..", "...###...", "....#...."];
 
 /// A little pixel gem with a tide line through it.
 fn logo_mark(p: &egui::Painter, origin: Pos2, px: f32) {
@@ -2044,7 +1402,8 @@ fn track_link(t: &Track, ext: Option<&store::Ext>) -> Option<String> {
 /// Menu entry that shows the link and copies it. Nothing is shown when there is no link (local files).
 fn link_item(ui: &mut egui::Ui, acts: &mut Vec<Action>, link: Option<String>) {
     if let Some(l) = link {
-        let short: String = if l.chars().count() > 46 { format!("{}...", l.chars().take(44).collect::<String>()) } else { l.clone() };
+        let short: String =
+            if l.chars().count() > 46 { format!("{}...", l.chars().take(44).collect::<String>()) } else { l.clone() };
         if menu_item(ui, &format!("Copy link   {}", short.trim_start_matches("https://"))) {
             acts.push(Action::CopyLink(l));
             ui.close_menu();
@@ -4230,15 +3589,7 @@ impl App {
             if skin_btn.clicked() {
                 acts.push(Action::Skin);
             }
-            skin_btn.context_menu(|ui| {
-                for (n, name) in SKIN_NAMES.iter().enumerate() {
-                    let mark = if n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
-                    if menu_item(ui, &format!("{}{}", mark, name)) {
-                        acts.push(Action::SkinSet(n));
-                        ui.close_menu();
-                    }
-                }
-            });
+            skin_btn.context_menu(|ui| skin_menu(ui, acts));
             if icon_btn_w(ui, &IC_EQ, self.show_eq, ink, 38.0).tip("Equalizer").clicked() {
                 acts.push(Action::ToggleEq);
             }
@@ -5002,7 +4353,11 @@ impl App {
             }
             let on = self.loop_on;
             let flag = |x: f32, lab: &str| {
-                fill_rect(&p, Rect::from_min_max(Pos2::new(x - 1.5, sb.min.y - 4.0), Pos2::new(x + 1.5, sb.max.y + 4.0)), pal().red);
+                fill_rect(
+                    &p,
+                    Rect::from_min_max(Pos2::new(x - 1.5, sb.min.y - 4.0), Pos2::new(x + 1.5, sb.max.y + 4.0)),
+                    pal().red,
+                );
                 if x - sb.min.x > 44.0 && sb.max.x - x > 44.0 {
                     ptext(&p, Pos2::new(x, sb.max.y + 14.0), Align::Center, lab, 2.0, pal().red);
                 }
@@ -5089,15 +4444,7 @@ impl App {
                 if skin_b.clicked() {
                     acts.push(Action::Skin);
                 }
-                skin_b.context_menu(|ui| {
-                    for (n, name) in SKIN_NAMES.iter().enumerate() {
-                        let mark = if n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
-                        if menu_item(ui, &format!("{}{}", mark, name)) {
-                            acts.push(Action::SkinSet(n));
-                            ui.close_menu();
-                        }
-                    }
-                });
+                skin_b.context_menu(|ui| skin_menu(ui, acts));
                 if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
                     acts.push(Action::ToggleLyrics);
                 }

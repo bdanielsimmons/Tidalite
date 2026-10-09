@@ -1038,7 +1038,11 @@ impl App {
                         .find(|(_, u)| *u == url)
                         .map(|(t, _)| t.clone())
                         .unwrap_or_else(|| sources::list_name(&url));
-                    self.store.lists.push(store::SavedList { kind: (if kind == 0 { "sc" } else { "yt" }).to_string(), name, url });
+                    self.store.lists.push(store::SavedList {
+                        kind: (if kind == 0 { "sc" } else { "yt" }).to_string(),
+                        name,
+                        url,
+                    });
                     self.store_dirty = true;
                 }
                 self.set_note("PLAYLIST SAVED");

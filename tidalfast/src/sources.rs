@@ -348,7 +348,11 @@ pub fn list_name(url: &str) -> String {
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
         })
         .collect();
-    if name.is_empty() { "Playlist".to_string() } else { name.join(" ") }
+    if name.is_empty() {
+        "Playlist".to_string()
+    } else {
+        name.join(" ")
+    }
 }
 
 /// A YouTube playlist: what is in it (first 200), quick listing without per-video requests.
