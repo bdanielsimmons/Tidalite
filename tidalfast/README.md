@@ -260,3 +260,6 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 ## Preferences (PREFS button)
 - **Updates:** a downloaded update shows a bar at the top ("UPDATE vN READY - CLICK TO RESTART"). Nothing restarts by itself unless you turn on *Restart by itself when I'm away* (off by default; waits for ~5 quiet minutes with nothing playing). Otherwise the update installs the next time you open the app. Checks happen at launch and every 6 hours using a conditional request (ETag), so an unchanged check is a tiny 304 that GitHub doesn't count against its rate limit.
 - **Keyboard shortcuts:** every key is rebindable (click a key, press the new one; ESC cancels; a key taken from another action unbinds that one). ESC, F1, F11, TAB and ENTER stay reserved. Reset-to-default button included. The Help KEYS tab reflects your bindings.
+
+## Build speed
+CI caches compiled dependencies (Swatinem/rust-cache), and the release profile uses thin LTO with 8 codegen units. The first build after this change is as slow as before (it fills the cache); later ones only recompile Tidalite itself.
