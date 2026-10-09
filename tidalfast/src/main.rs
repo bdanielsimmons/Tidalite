@@ -3692,9 +3692,6 @@ impl App {
             });
         }
 
-        // mode row: LIBRARY / PLAYER / ALBUM / MINI
-        self.mode_strip(ui, acts);
-
         // tools row
         ui.horizontal(|ui| {
             let ink = pal().ink;
@@ -4188,6 +4185,19 @@ impl App {
         icon_in(p, rp, rep_icon, if self.repeat != Repeat::Off { pal().red } else { pal().ink });
         if rpr.clicked() {
             acts.push(Action::Repeat);
+        }
+        if !self.mini {
+            let fb = rc(220.0, 102.0, 36.0, 16.0);
+            let fs = self.fullscreen;
+            let fbr = ui
+                .interact(fb, ui.id().with("full"), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .tip(format!("{}  ({} / F11)", if fs { "Leave fullscreen" } else { "Fullscreen" }, self.key_text(prefs::Cmd::Fullscreen)));
+            raised_h(p, fb, fs || fbr.is_pointer_button_down_on(), fbr.hovered() && !fs);
+            icon_in(p, fb, if fs { &IC_WIN } else { &IC_FULL }, pal().ink);
+            if fbr.clicked() {
+                acts.push(Action::ToggleFullscreen);
+            }
         }
 
         // ---- where is this track stored?

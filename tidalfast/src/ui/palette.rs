@@ -106,18 +106,10 @@ impl App {
                     acts.push(Action::SetMode(i as u8));
                 }
             }
-            let fs = self.fullscreen;
-            let tip = if fs { "Leave fullscreen" } else { "Fullscreen" };
-            if crate::icon_btn(ui, if fs { &crate::IC_WIN } else { &crate::IC_FULL }, false, pal().ink)
-                .tip(format!("{}  ({} / F11)", tip, self.key_text(Cmd::Fullscreen)))
-                .clicked()
-            {
-                acts.push(Action::ToggleFullscreen);
-            }
         });
     }
 
-    /// Mode buttons floating bottom-left in player mode, where the library's own row is not on screen.
+    /// Mode buttons floating bottom-left in player mode, the way back to the library with the mouse.
     /// The album view stays clean (keys 1-4 / Ctrl+K still switch).
     pub(crate) fn floating_modes(&mut self, ctx: &egui::Context, acts: &mut Vec<Action>) {
         if self.mode() != 1 {

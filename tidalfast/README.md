@@ -278,7 +278,7 @@ CI caches compiled dependencies (Swatinem/rust-cache), and the release profile u
 - Album view, modern skins: bars are a soft gradient and neighbours are blended; the waveform is smoothed. The right-click menu on the spectrum icon has a new COVER setting (cover opacity, 50-100%, default 90%) so the visualizer shows faintly through the cover.
 
 ## Modes, command palette, size, overflow fixes
-- **Modes:** LIBRARY / PLAYER / ALBUM / MINI as a button row (top of the library window, and floating in album and player modes). Keys 1-4 switch from anywhere and are rebindable.
+- **Modes:** LIBRARY / PLAYER / ALBUM / MINI. Keys 1-4 switch from anywhere and are rebindable; in player mode a button row floats bottom-left to get back.
 - **Command palette:** Ctrl+K (Cmd+K on a Mac). Type part of an action name, arrows + Enter. Same names are used by the Mac menu bar (`run_named` in `src/ui/palette.rs`).
 - **Size of everything:** Preferences -> 90% to 175% (also Ctrl +/-). Saved with the settings.
 - **Library tabs** now tighten their padding and shrink their text to stay inside the window; the **metronome** is wider/bigger, its rows wrap instead of spilling, and the pendulum and beat boxes are larger.
