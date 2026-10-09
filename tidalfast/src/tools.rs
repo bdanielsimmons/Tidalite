@@ -204,9 +204,31 @@ impl App {
             ui.horizontal(|ui| {
                 label(ui, "BEATS", 60.0);
                 let s = self.mt.beats.to_string();
-                self.num_step(ui, acts, F_BEATS, 36.0, Knob::Beats, s, "Beats per bar");
+                self.num_step(ui, acts, F_BEATS, 36.0, Knob::Beats, s, "Beats per bar (1 to 32)");
+                if retro_btn_w(ui, &format!("/ {}", self.mt.unit), 60.0, self.mt.unit != 4)
+                    .tip("What one beat is: quarter, eighth or sixteenth. 22 / 8 = twenty-two eighths. BPM stays in quarter notes.")
+                    .clicked()
+                {
+                    acts.push(Action::Opt(Opt::Unit));
+                }
+                let gs = band::groupings(self.mt.beats);
+                if gs.len() > 1 {
+                    let txt = match self.mt_group {
+                        0 => "GROUPS".to_string(),
+                        k => gs[k - 1].iter().map(|n| n.to_string()).collect::<Vec<_>>().join("+"),
+                    };
+                    if retro_btn_w(ui, &txt, 170.0, self.mt_group > 0)
+                        .tip("Accent a grouping for odd meters (7 = 2+2+3, 22 = 3+3+3+3+3+3+4 ...). Click to try the next one.")
+                        .clicked()
+                    {
+                        acts.push(Action::Opt(Opt::Group));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                label(ui, "SOUND", 60.0);
                 let sub = ["NO SUBDIV", "EIGHTHS", "TRIPLETS", "SIXTEENTHS"][(self.mt.sub as usize).min(3)];
-                if retro_btn_w(ui, sub, 120.0, self.mt.sub > 0).tip("Quiet ticks between the beats").clicked() {
+                if retro_btn_w(ui, sub, 130.0, self.mt.sub > 0).tip("Quiet ticks between the beats").clicked() {
                     acts.push(Action::Opt(Opt::Sub));
                 }
                 for (i, name) in ["ALL", "2 & 4", "1 ONLY"].iter().enumerate() {
@@ -277,7 +299,7 @@ impl App {
 
     /// Beat boxes (click one to change its volume) and a swinging pendulum.
     fn metro_vis(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        let beats = self.mt.beats.clamp(1, 12) as usize;
+        let beats = self.mt.beats.clamp(1, 32) as usize;
         // where are we in the bar?
         let (beat_no, frac, muted) = match (self.mt.on, self.mt_vis) {
             (true, Some((t0, spb, cycle))) => {
@@ -332,54 +354,72 @@ impl App {
             if muted { pal().red } else { pal().lcd },
         );
 
-        // beat boxes
+        // beat boxes: up to 16 to a row, two rows for the long odd meters
         ui.add_space(6.0);
-        let w = ((ui.available_width() - 6.0) / beats as f32 - 4.0).clamp(26.0, 56.0);
-        for b in 0..beats {
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 104.0), Sense::click());
-            let lvl = self.mt.levels[b].min(3) as usize;
-            let now_beat = beat_no == Some(b) && !muted;
-            inset(ui.painter(), r, if now_beat && lvl > 0 { pal().sel } else { pal().lcd });
-            let p = ui.painter();
-            // volume pips (bottom = 1)
-            for k in 0..3usize {
-                let pip = Rect::from_min_size(
-                    Pos2::new(r.min.x + 6.0, r.max.y - 26.0 - k as f32 * 22.0),
-                    Vec2::new(r.width() - 12.0, 16.0),
-                );
-                let lit = k < lvl;
-                fill_rect(
-                    p,
-                    pip,
-                    if lit {
-                        if now_beat {
-                            pal().red
-                        } else {
-                            pal().ink2
-                        }
-                    } else {
-                        pal().lcd_ghost
-                    },
-                );
+        let per = beats.min(16);
+        let rows = beats.div_ceil(per);
+        let bh = if rows > 1 { 49.0 } else { 104.0 };
+        let w = ((ui.available_width() - 6.0) / per as f32 - 4.0).clamp(12.0, 56.0);
+        ui.vertical(|ui| {
+            for row in 0..rows {
+                ui.horizontal(|ui| {
+                    for b in (row * per)..((row + 1) * per).min(beats) {
+                        self.beat_box(ui, acts, b, w, bh, beat_no == Some(b) && !muted);
+                    }
+                });
             }
-            ptext(
+        });
+    }
+
+    /// One clickable beat: its number and its volume pips.
+    fn beat_box(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, b: usize, w: f32, h: f32, now_beat: bool) {
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
+        let lvl = self.mt.levels[b].min(3) as usize;
+        inset(ui.painter(), r, if now_beat && lvl > 0 { pal().sel } else { pal().lcd });
+        let p = ui.painter();
+        let tall = h > 60.0;
+        // volume pips (bottom = 1)
+        for k in 0..3usize {
+            let pip = if tall {
+                Rect::from_min_size(Pos2::new(r.min.x + 6.0, r.max.y - 26.0 - k as f32 * 22.0), Vec2::new(r.width() - 12.0, 16.0))
+            } else {
+                Rect::from_min_size(
+                    Pos2::new(r.min.x + 4.0 + k as f32 * ((r.width() - 8.0) / 3.0), r.max.y - 11.0),
+                    Vec2::new((r.width() - 8.0) / 3.0 - 1.0, 6.0),
+                )
+            };
+            let lit = k < lvl;
+            fill_rect(
                 p,
-                Pos2::new(r.center().x, r.min.y + 9.0),
-                Align::Center,
-                &(b + 1).to_string(),
-                2.0,
-                if now_beat { pal().red } else { pal().ink },
+                pip,
+                if lit {
+                    if now_beat {
+                        pal().red
+                    } else {
+                        pal().ink2
+                    }
+                } else {
+                    pal().lcd_ghost
+                },
             );
-            if now_beat {
-                outline(p, r, 2.0, pal().red);
-            }
-            if resp
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .tip("Click to change this beat's volume (3 loud ... 0 silent)")
-                .clicked()
-            {
-                acts.push(Action::Opt(Opt::Level(b)));
-            }
+        }
+        ptext(
+            p,
+            Pos2::new(r.center().x, r.min.y + if tall { 9.0 } else { 8.0 }),
+            Align::Center,
+            &(b + 1).to_string(),
+            if w >= 24.0 { 2.0 } else { 1.0 },
+            if now_beat { pal().red } else { pal().ink },
+        );
+        if now_beat {
+            outline(p, r, 2.0, pal().red);
+        }
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip("Click to change this beat's volume (3 loud ... 0 silent)")
+            .clicked()
+        {
+            acts.push(Action::Opt(Opt::Level(b)));
         }
     }
 

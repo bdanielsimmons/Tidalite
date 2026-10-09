@@ -743,13 +743,38 @@ impl Api {
     }
 
     /// Recordings worth studying, best first: Tidal's 0-100 popularity, adjusted for practice. Karaoke, tribute and
-    /// compilation tracks sink; artists already in your tunes float up. One recording per artist.
-    pub fn popular(&self, name: &str, known: &[String]) -> Res<Vec<(Track, u32)>> {
-        let v = self.get("/search", &[("query", name), ("limit", "50"), ("types", "TRACKS")])?;
+    /// compilation tracks sink; artists already in your tunes float up. With a style (1 jazz, 2 gospel) the search is
+    /// widened and players of that world (and the composer's own recording) float above chart pop. One per artist.
+    pub fn popular(&self, name: &str, known: &[String], style: u8, composer: &str) -> Res<Vec<(Track, u32)>> {
+        let mut queries = vec![name.to_string()];
+        match style {
+            1 => {
+                queries.push(format!("{} jazz", name));
+                if !composer.trim().is_empty() {
+                    queries.push(format!("{} {}", name, composer.trim()));
+                }
+            }
+            2 => {
+                queries.push(format!("{} gospel", name));
+                queries.push(format!("{} choir", name));
+            }
+            _ => {}
+        }
         let mut all: Vec<(Track, u32)> = Vec::new();
-        for it in arr(&v["tracks"]["items"]) {
-            let pop = unwrap(it)["popularity"].as_u64().unwrap_or(0) as u32;
-            all.extend(parse_track(it).map(|t| (t, pop)));
+        for (qi, q) in queries.iter().enumerate() {
+            let v = match self.get("/search", &[("query", q.as_str()), ("limit", "50"), ("types", "TRACKS")]) {
+                Ok(v) => v,
+                Err(e) if qi == 0 => return Err(e),
+                Err(_) => continue,
+            };
+            for it in arr(&v["tracks"]["items"]) {
+                let pop = unwrap(it)["popularity"].as_u64().unwrap_or(0) as u32;
+                if let Some(t) = parse_track(it) {
+                    if !all.iter().any(|(x, _)| x.id == t.id) {
+                        all.push((t, pop));
+                    }
+                }
+            }
         }
         const JUNK: [&str; 14] = [
             "karaoke",
@@ -769,8 +794,110 @@ impl Api {
         ];
         const COMP: [&str; 9] =
             ["greatest hits", "best of", "essential", "collection", "anthology", "very best", "ultimate", "playlist", "hits"];
+        const JAZZ: [&str; 62] = [
+            "miles davis",
+            "coltrane",
+            "bill evans",
+            "thelonious monk",
+            "charlie parker",
+            "dizzy gillespie",
+            "duke ellington",
+            "count basie",
+            "louis armstrong",
+            "ella fitzgerald",
+            "sarah vaughan",
+            "billie holiday",
+            "art blakey",
+            "sonny rollins",
+            "cannonball adderley",
+            "wes montgomery",
+            "oscar peterson",
+            "dave brubeck",
+            "herbie hancock",
+            "wayne shorter",
+            "stan getz",
+            "chet baker",
+            "charles mingus",
+            "ahmad jamal",
+            "keith jarrett",
+            "pat metheny",
+            "joe pass",
+            "wynton kelly",
+            "hank mobley",
+            "lee morgan",
+            "freddie hubbard",
+            "horace silver",
+            "jimmy smith",
+            "kenny burrell",
+            "dexter gordon",
+            "lester young",
+            "coleman hawkins",
+            "ben webster",
+            "clifford brown",
+            "max roach",
+            "tommy flanagan",
+            "red garland",
+            "mccoy tyner",
+            "brad mehldau",
+            "kenny barron",
+            "chick corea",
+            "joe henderson",
+            "woody shaw",
+            "phil woods",
+            "paul chambers",
+            "ron carter",
+            "jim hall",
+            "bud powell",
+            "nat king cole",
+            "frank sinatra",
+            "tony bennett",
+            "joe williams",
+            "carmen mcrae",
+            "john scofield",
+            "michael brecker",
+            "gerry mulligan",
+            "jackie mclean",
+        ];
+        const JAZZ_WORDS: [&str; 8] = ["quartet", "quintet", "trio", "sextet", "orchestra", "big band", "jazz", "sessions"];
+        const GOSPEL: [&str; 34] = [
+            "mahalia jackson",
+            "kirk franklin",
+            "yolanda adams",
+            "winans",
+            "marvin sapp",
+            "tamela mann",
+            "mcclurkin",
+            "fred hammond",
+            "john p. kee",
+            "hezekiah walker",
+            "tye tribbett",
+            "israel houghton",
+            "james cleveland",
+            "andrae crouch",
+            "shirley caesar",
+            "clark sisters",
+            "richard smallwood",
+            "hawkins",
+            "commissioned",
+            "take 6",
+            "mary mary",
+            "smokie norful",
+            "earnest pugh",
+            "jonathan mcreynolds",
+            "travis greene",
+            "charles jenkins",
+            "anthony brown",
+            "kim burrell",
+            "karen clark",
+            "myron butler",
+            "gospel",
+            "choir",
+            "chorale",
+            "mass choir",
+        ];
+        let last_name = composer.split_whitespace().last().unwrap_or("").to_lowercase();
         let score = |t: &Track, pop: u32| -> i32 {
-            let (ti, al) = (t.title.to_lowercase(), t.album.to_lowercase());
+            let (ti, al, ar) = (t.title.to_lowercase(), t.album.to_lowercase(), t.artist.to_lowercase());
             let mut s = pop as i32;
             if JUNK.iter().any(|j| ti.contains(j) || al.contains(j)) {
                 s -= 60;
@@ -783,6 +910,33 @@ impl Api {
             }
             if known.iter().any(|k| k.eq_ignore_ascii_case(&t.artist)) {
                 s += 15;
+            }
+            match style {
+                1 => {
+                    let world = JAZZ.iter().any(|j| ar.contains(j));
+                    let words = JAZZ_WORDS.iter().any(|j| ar.contains(j) || al.contains(j));
+                    let own = last_name.len() > 3 && ar.contains(&last_name);
+                    if world {
+                        s += 35;
+                    }
+                    if words {
+                        s += 20;
+                    }
+                    if own {
+                        s += 25;
+                    }
+                    if !world && !words && !own {
+                        s -= 25;
+                    }
+                    if ti.contains("feat.") || ar.contains("feat.") || ar.contains(" & ") && !words && !world {
+                        s -= 10;
+                    }
+                }
+                2 => {
+                    let world = GOSPEL.iter().any(|g| ar.contains(g) || al.contains(g));
+                    s += if world { 35 } else { -20 };
+                }
+                _ => {}
             }
             s
         };

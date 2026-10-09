@@ -236,6 +236,29 @@ fn file_stem(src: &str) -> String {
     }
 }
 
+/// "soundcloud.com/some-artist/cool-track" -> ("Some Artist", "Cool Track"), when the link has that shape.
+fn slug_meta(url: &str) -> Option<(String, String)> {
+    let rest = url.split("://").nth(1)?;
+    let (host, path) = rest.split_once('/')?;
+    if !host.ends_with("soundcloud.com") || host.starts_with("api.") {
+        return None;
+    }
+    let segs: Vec<&str> = path.split(['/', '?']).filter(|s| !s.is_empty()).collect();
+    if segs.len() < 2 || ["sets", "likes", "reposts", "tracks", "albums", "popular-tracks"].contains(&segs[1]) {
+        return None;
+    }
+    let pretty = |s: &str| -> String {
+        s.split('-')
+            .map(|w| {
+                let mut c = w.chars();
+                c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    Some((pretty(segs[0]), pretty(segs[1])))
+}
+
 /// SoundCloud entries as yt-dlp lists them (one JSON object per line, "flat" = no per-track requests).
 fn parse_entries(bytes: &[u8]) -> Vec<Ext> {
     let mut out: Vec<Ext> = Vec::new();
@@ -254,8 +277,18 @@ fn parse_entries(bytes: &[u8]) -> Vec<Ext> {
             kind: "yt".to_string(),
             id: hash_id(&format!("yt:{}", url)),
             src: url.to_string(),
-            title: v["title"].as_str().unwrap_or("SoundCloud track").to_string(),
-            artist: v["uploader"].as_str().or_else(|| v["channel"].as_str()).unwrap_or("SoundCloud").to_string(),
+            // the quick listing has no titles: borrow them from the link until the real ones arrive
+            title: v["title"]
+                .as_str()
+                .map(|s| s.to_string())
+                .or_else(|| slug_meta(url).map(|m| m.1))
+                .unwrap_or_else(|| "SoundCloud track".to_string()),
+            artist: v["uploader"]
+                .as_str()
+                .or_else(|| v["channel"].as_str())
+                .map(|s| s.to_string())
+                .or_else(|| slug_meta(url).map(|m| m.0))
+                .unwrap_or_else(|| "SoundCloud".to_string()),
             dur: v["duration"].as_f64().unwrap_or(0.0) as f32,
             cover,
         });
@@ -305,6 +338,7 @@ pub fn yt_info(vid: &str) -> Result<Ext, String> {
     let url = media_url(vid);
     let out = command(&exe)
         .args(["--no-playlist", "--no-warnings", "--dump-single-json"])
+        .args(if url.contains("soundcloud.com") { cookie_args() } else { Vec::new() })
         .arg(&url)
         .output()
         .map_err(|e| format!("could not run yt-dlp: {}", e))?;
@@ -317,7 +351,7 @@ pub fn yt_info(vid: &str) -> Result<Ext, String> {
         .as_str()
         .or_else(|| v["uploader"].as_str())
         .or_else(|| v["channel"].as_str())
-        .unwrap_or("YouTube")
+        .unwrap_or(if vid.starts_with("http") { "SoundCloud" } else { "YouTube" })
         .replace(" - Topic", "");
     Ok(Ext {
         kind: "yt".to_string(),

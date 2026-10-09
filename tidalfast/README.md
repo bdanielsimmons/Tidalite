@@ -39,6 +39,14 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 - The album-art view background is now a soft gradient from the cover's average colour (no stretched picture).
 - Album viewer controls are pixel icons: previous / play-pause / next, B&W-color, lyrics (microphone), fullscreen, like (Tidal tracks only). Hover for names.
 - The album-art view shows your saved loops and the live A-B loop on its seek bar.
+- **Odd meters**: BEATS goes to 32 and `/ 4`, `/ 8`, `/ 16` sets what a beat is (22 / 8 = twenty-two eighths; BPM stays in quarter notes).
+  GROUPS accents 2s, 3s and 4s (7 = 2+2+3, 22 = 3+3+3+3+3+3+4 ...). Click any beat to set its own volume.
+- Fixed: STOP on the metronome now really stops it (the click loop used to keep playing).
+- **LOOK UP** has a style button next to it (AUTO / JAZZ / GOSPEL / ANY). AUTO treats a tune from the jazz standards list as jazz, searches wider
+  ("Countdown jazz", "Countdown Coltrane") and puts jazz players and the composer's own recording above chart pop.
+- Window title tabs have small pixel icons; the album viewer has shuffle and repeat icons.
+- Pixel icons on the library toolbar (hover for names), loop / clear / back / restart buttons, shuffle and repeat on the player, and a speaker icon for volume (click to mute).
+- SoundCloud results show names right away (taken from the link) and fill in the real titles, lengths and covers in the background.
 - Like button is hidden for files and YouTube clips.
 
 ## v9: the practice studio

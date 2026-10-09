@@ -295,6 +295,7 @@ enum Msg {
     YtAdded(Result<store::Ext, String>),
     YtTool(Result<PathBuf, String>),
     Sc(Result<Vec<store::Ext>, String>),
+    ScMeta(store::Ext),
     Wave(i64, Option<Vec<u8>>),
     Exported(Result<String, String>),
     /// LOOK UP result: tune name, who wrote it, other versions found on Tidal
@@ -395,6 +396,7 @@ enum Action {
     ForgetFolder(usize),
     AddYt,
     ScGo,
+    LookStyle,
     ScBrowser,
     ScKeep(i64),
     Offline(bool),
@@ -571,17 +573,88 @@ const IC_MIC: [&str; 9] =
 const IC_BW: [&str; 9] =
     ["...###...", ".###..##.", ".###...#.", "####....#", "####....#", "####....#", ".###...#.", ".###..##.", "...###..."];
 
-/// A button showing a pixel icon. `col` tints it; `on` draws it pressed.
-fn icon_btn(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(44.0, BTN_H), Sense::click());
+const IC_SHUF: [&str; 9] =
+    [".........", ".......#.", "###...###", "...#.#.#.", "....#....", "...#.#.#.", "###...###", ".......#.", "........."];
+const IC_REP: [&str; 9] =
+    [".........", "......#..", ".#######.", ".#....##.", ".#.....#.", ".##....#.", ".#######.", "..#......", "........."];
+const IC_REP1: [&str; 9] =
+    [".........", "......#..", ".#######.", ".#..#.##.", ".#.##..#.", ".##.#..#.", ".#######.", "..#......", "........."];
+
+const IC_MOON: [&str; 9] =
+    ["...###...", "..##...#.", ".###.....", "###......", "###......", "####.....", ".####....", "..#####..", "...###..."];
+const IC_TOMATO: [&str; 9] =
+    ["....#....", "..#.#.#..", "...###...", ".#######.", "#########", "#########", "#########", ".#######.", "..#####.."];
+const IC_DISK: [&str; 8] =
+    ["..#####..", ".#.....#.", ".#######.", ".#.....#.", ".#######.", ".#.....#.", ".#######.", "..#####.."];
+const IC_LOG: [&str; 9] =
+    ["######...", "#....##..", "#....#.#.", "#....####", "#.###...#", "#.......#", "#.###...#", "#.......#", "#########"];
+const IC_BOOK: [&str; 6] = [".#####.", ".#####.", ".#####.", ".#####.", ".##.##.", ".#...#."];
+const IC_SEARCH: [&str; 9] =
+    ["..###....", ".#...#...", "#.....#..", "#.....#..", "#.....#..", ".#...#...", "..###.#..", ".......#.", "........#"];
+const IC_HOME: [&str; 9] =
+    ["....#....", "...###...", "..#####..", ".#######.", "#########", ".#######.", ".##...##.", ".##...##.", ".##...##."];
+const IC_BACK: [&str; 9] =
+    [".........", "...#.....", "..##.....", ".#######.", "#########", ".#######.", "..##.....", "...#.....", "........."];
+const IC_SKIN: [&str; 7] = ["###.###", "###.###", "###.###", ".......", "###.###", "###.###", "###.###"];
+const IC_EQ: [&str; 9] =
+    [".#..#..#.", ".#..#..#.", "###.#..#.", ".#..#..#.", ".#..#.###", ".#.###.#.", ".#..#..#.", ".#..#..#.", ".#..#..#."];
+const IC_CLOCK: [&str; 9] =
+    ["...###...", ".##...##.", ".#..#..#.", "#...#...#", "#...###.#", "#.......#", ".#.....#.", ".##...##.", "...###..."];
+const IC_METRO: [&str; 8] =
+    ["...###...", "...#.#...", "..#.#.#..", "..#.#.#..", ".#..#..#.", ".#..#..#.", "#...#...#", "#########"];
+const IC_X: [&str; 9] =
+    ["#.......#", ".#.....#.", "..#...#..", "...#.#...", "....#....", "...#.#...", "..#...#..", ".#.....#.", "#.......#"];
+const IC_REW: [&str; 9] =
+    ["....#...#", "...##..##", "..###.###", ".########", "#########", ".########", "..###.###", "...##..##", "....#...#"];
+const IC_SPK0: [&str; 8] =
+    ["....#....", "...##....", "##.##.#.#", "##.##..#.", "##.##..#.", "##.##.#.#", "...##....", "....#...."];
+const IC_SPK1: [&str; 8] =
+    ["....#....", "...##....", "##.##....", "##.##.#..", "##.##.#..", "##.##....", "...##....", "....#...."];
+const IC_SPK2: [&str; 8] =
+    ["....#....", "...##...#", "##.##...#", "##.##.#.#", "##.##.#.#", "##.##...#", "...##...#", "....#...."];
+
+/// A button showing a pixel icon, `w` wide. `col` tints it; `on` draws it pressed.
+fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
     let down = resp.is_pointer_button_down_on() || on;
     raised_h(ui.painter(), rect, down, resp.hovered());
     let px = 2.0;
-    let (w, h) = (icon[0].len() as f32 * px, icon.len() as f32 * px);
+    let (iw, ih) = (icon[0].len() as f32 * px, icon.len() as f32 * px);
     let dy = if down { 1.0 } else { 0.0 };
-    let o = Pos2::new((rect.center().x - w / 2.0).round(), (rect.center().y - h / 2.0 + dy).round());
+    let o = Pos2::new((rect.center().x - iw / 2.0).round(), (rect.center().y - ih / 2.0 + dy).round());
     pixmap(ui.painter(), o, px, icon, col);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn icon_btn(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32) -> egui::Response {
+    icon_btn_w(ui, icon, on, col, 44.0)
+}
+
+/// Icon on the left, a short label on the right.
+fn ibtn(ui: &mut egui::Ui, icon: &[&str], text: &str, on: bool) -> egui::Response {
+    let w = 10.0 + icon[0].len() as f32 * 2.0 + 8.0 + text_w(text, 2.0) + 10.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let down = resp.is_pointer_button_down_on() || on;
+    raised_h(ui.painter(), rect, down, resp.hovered());
+    let dy = if down { 1.0 } else { 0.0 };
+    let o = Pos2::new((rect.min.x + 10.0).round(), (rect.center().y - icon.len() as f32 + dy).round());
+    pixmap(ui.painter(), o, 2.0, icon, pal().ink);
+    ptext(
+        ui.painter(),
+        Pos2::new(o.x + icon[0].len() as f32 * 2.0 + 8.0, rect.center().y + dy),
+        Align::Min,
+        text,
+        2.0,
+        pal().ink,
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Fit a pixel icon into `r` as large as whole dots allow.
+fn icon_in(p: &egui::Painter, r: Rect, icon: &[&str], col: Color32) {
+    let k = ((r.height() - 3.0) / icon.len() as f32).floor().max(1.0);
+    let (w, h) = (icon[0].len() as f32 * k, icon.len() as f32 * k);
+    pixmap(p, Pos2::new((r.center().x - w / 2.0).round(), (r.center().y - h / 2.0).round()), k, icon, col);
 }
 
 // ------------------------------------------------------------ skin drawing
@@ -661,19 +734,51 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     notch_fill(p, outer.shrink(u * 2.5), u * 2.0, Color32::BLACK);
     notch_fill(p, outer.shrink(u * 3.5), u, pal().groove);
     notch_fill(p, outer.shrink(u * 4.0), u, Color32::BLACK);
-    // title tab
+    // title tab (with a little pixel icon for the section)
     let label = format!("-[ {} ]-", title);
     let cy = outer.min.y + 12.0;
-    let tw = (text_w(&label, 2.0) + 30.0).min(outer.width() - 120.0).max(60.0);
+    let icon: Option<&[&str]> = match title.split(' ').next().unwrap_or("") {
+        "LIBRARY" => Some(&WIN_LIBRARY),
+        "QUEUE" => Some(&WIN_QUEUE),
+        "LEAD" => Some(&WIN_SHEET),
+        "PRACTICE" => Some(&WIN_PRACTICE),
+        "PLAYER" => Some(&MARK),
+        _ => None,
+    };
+    let iw = if icon.is_some() { 26.0 } else { 0.0 };
+    let tw = (text_w(&label, 2.0) + 30.0 + iw).min(outer.width() - 120.0).max(60.0);
     let tab = Rect::from_center_size(Pos2::new(outer.center().x, cy), Vec2::new(tw, 22.0));
     notch_fill(p, tab.expand(3.0), u, Color32::BLACK);
     fill_rect(p, Rect::from_min_max(Pos2::new(outer.min.x + 26.0, cy - 1.0), Pos2::new(tab.min.x - 6.0, cy + 1.0)), pal().trim);
     fill_rect(p, Rect::from_min_max(Pos2::new(tab.max.x + 6.0, cy - 1.0), Pos2::new(outer.max.x - 26.0, cy + 1.0)), pal().trim);
-    ptext_fit(p, tab.center(), Align::Center, &label, 2.0, tw - 12.0, pal().trim);
+    ptext_fit(p, tab.center() + Vec2::new(iw / 2.0, 0.0), Align::Center, &label, 2.0, tw - 12.0 - iw, pal().trim);
+    if let Some(rows) = icon {
+        let o = Pos2::new((tab.min.x + 9.0).round(), (cy - rows.len() as f32).round());
+        for (y, row) in rows.iter().enumerate() {
+            for (x, ch) in row.chars().enumerate() {
+                let col = match ch {
+                    '#' => pal().trim,
+                    'o' => pal().dim,
+                    _ => continue,
+                };
+                fill_rect(p, Rect::from_min_size(o + Vec2::new(x as f32 * 2.0, y as f32 * 2.0), Vec2::splat(2.0)), col);
+            }
+        }
+    }
     // body
     fill_rect(p, inner.expand(2.0), pal().edge);
     fill_rect(p, inner, pal().beige);
 }
+
+// little 9x9 pictures for the window title tabs
+const WIN_LIBRARY: [&str; 9] =
+    ["..#......", "..#.###..", ".##.###.#", ".##.###.#", ".##.###.#", ".##.###.#", ".##.###.#", "#########", "........."];
+const WIN_QUEUE: [&str; 9] =
+    [".........", "##.######", "##.######", ".........", "##.######", "##.######", ".........", "##.######", "##.######"];
+const WIN_SHEET: [&str; 9] =
+    ["....####.", "....#..##", "....#....", "....#....", "....#....", ".##.#....", "####.....", "####.....", ".##......"];
+const WIN_PRACTICE: [&str; 9] =
+    [".........", "#.......#", "#...#...#", "#.#.#.#.#", "#.#####.#", "#.#####.#", "#.#.#.#.#", "#...#...#", "#.......#"];
 
 const SEGS: [(f32, f32, f32, f32); 7] = [
     (1.0, 0.0, 6.0, 2.0),  // a
@@ -781,7 +886,9 @@ fn logo(ui: &mut egui::Ui) {
     inset(p, rect, pal().lcd);
     logo_mark(p, Pos2::new(rect.min.x + 12.0, rect.center().y - 13.5), 3.0);
     ptext(p, Pos2::new(rect.min.x + 50.0, rect.center().y - 6.0), Align::Min, "TIDALITE", 4.0, pal().ink);
-    ptext(p, Pos2::new(rect.min.x + 51.0, rect.center().y + 13.0), Align::Min, "A RETRO PLAYER FOR TIDAL", 1.0, pal().ink2);
+    let tag =
+        if PRACTICE { "A RETRO PLAYER FOR TIDAL AND MORE - MADE FOR PRACTICE" } else { "A RETRO PLAYER FOR TIDAL AND MORE" };
+    ptext_fit(p, Pos2::new(rect.min.x + 51.0, rect.center().y + 13.0), Align::Min, tag, 1.0, rect.width() - 110.0, pal().ink2);
     ptext(p, Pos2::new(rect.max.x - 10.0, rect.center().y + 13.0), Align::Max, VERSION, 1.0, pal().dim);
 }
 
@@ -800,7 +907,9 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
             Pos2::new(x, if on { row.min.y } else { row.min.y + 5.0 }),
             Pos2::new(x + w, base + if on { t } else { 0.0 }),
         );
-        let resp = ui.interact(r, ui.id().with(("tab", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = ui
+            .interact(r, ui.id().with(("tab", items.join("|"), i)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         let p = ui.painter();
         fill_rect(
             p,
@@ -1304,10 +1413,10 @@ fn cards_list(ui: &mut egui::Ui, cards: &[Card], tags: bool, acts: &mut Vec<Acti
 
 fn play_buttons(ui: &mut egui::Ui, tracks: &[Track], acts: &mut Vec<Action>) {
     ui.horizontal(|ui| {
-        if retro_btn(ui, "PLAY", false).clicked() {
+        if ibtn(ui, &IC_PLAY, "PLAY", false).clicked() {
             acts.push(Action::Play(tracks.to_vec(), 0));
         }
-        if retro_btn(ui, "SHUFFLE", false).clicked() {
+        if ibtn(ui, &IC_SHUF, "SHUFFLE", false).clicked() {
             acts.push(Action::PlayShuffled(tracks.to_vec()));
         }
     });
@@ -1591,6 +1700,12 @@ struct App {
     mt_add: f32,
     mt_step_at: Instant,
     mt_sig: u64,
+    mt_group: usize,
+    vol_before: f32,
+    look_style: u8,
+    last_ppp: f32,
+    last_size: Vec2,
+    frames: u32,
     mt_vis: Option<(Instant, f32, usize)>,
     mt_gen: u32,
     mt_pos: (f32, Instant),
@@ -1824,6 +1939,12 @@ impl App {
             mt_add: 0.0,
             mt_step_at: Instant::now(),
             mt_sig: 0,
+            mt_group: 0,
+            vol_before: 0.7,
+            look_style: 0,
+            last_ppp: 0.0,
+            last_size: Vec2::ZERO,
+            frames: 0,
             mt_vis: None,
             mt_gen: 0,
             mt_pos: (0.0, Instant::now()),
@@ -2887,7 +3008,12 @@ impl App {
         logo_mark(p, c + Vec2::new(-214.0, -102.0), 4.0);
         logo_mark(p, c + Vec2::new(178.0, -102.0), 4.0);
         ptext(p, c + Vec2::new(0.0, -84.0), Align::Center, "TIDALITE", 7.0, pal().ink);
-        ptext(p, c + Vec2::new(0.0, -40.0), Align::Center, "A retro player for Tidal", 2.0, pal().ink2);
+        if PRACTICE {
+            ptext(p, c + Vec2::new(0.0, -50.0), Align::Center, "A retro player for Tidal and more", 2.0, pal().ink2);
+            ptext(p, c + Vec2::new(0.0, -32.0), Align::Center, "PRACTICE EDITION: LOOP, SLOW DOWN, LEARN TUNES", 1.0, pal().dim);
+        } else {
+            ptext(p, c + Vec2::new(0.0, -40.0), Align::Center, "A retro player for Tidal and more", 2.0, pal().ink2);
+        }
         match self.auth {
             Auth::Checking => {
                 ptext(p, c + Vec2::new(0.0, 24.0), Align::Center, "Checking session...", 2.0, pal().ink);
@@ -3201,13 +3327,13 @@ impl App {
             });
         } else {
             ui.horizontal(|ui| {
-                if retro_btn(ui, "HOME", false).clicked() {
+                if ibtn(ui, &IC_HOME, "HOME", false).tip("Tidal home").clicked() {
                     acts.push(Action::Home);
                 }
-                if retro_btn(ui, "LIBRARY", false).clicked() {
+                if ibtn(ui, &WIN_LIBRARY, "LIBRARY", false).tip("Your tracks, lists, albums and artists").clicked() {
                     acts.push(Action::Library);
                 }
-                if !self.back.is_empty() && retro_btn(ui, "< BACK", false).clicked() {
+                if !self.back.is_empty() && icon_btn_w(ui, &IC_BACK, false, pal().ink, 38.0).tip("Back").clicked() {
                     acts.push(Action::Back);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3220,40 +3346,45 @@ impl App {
 
         // tools row
         ui.horizontal(|ui| {
-            if retro_btn(ui, "SKIN", false)
-                .tip(format!("Skin: {}", SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]))
+            let ink = pal().ink;
+            if icon_btn_w(ui, &IC_SKIN, false, ink, 38.0)
+                .tip(format!("Skin: {}  (click for the next)", SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]))
                 .clicked()
             {
                 acts.push(Action::Skin);
             }
-            if retro_btn(ui, "EQ", self.show_eq).clicked() {
+            if icon_btn_w(ui, &IC_EQ, self.show_eq, ink, 38.0).tip("Equalizer").clicked() {
                 acts.push(Action::ToggleEq);
             }
             ui.add_space(8.0);
-            let sl = match self.sleep_at {
-                Some(t) => format!("{} MIN", t.saturating_duration_since(Instant::now()).as_secs().div_ceil(60)),
-                None => "SLEEP".to_string(),
+            let sleeping = self.sleep_at.map(|t| t.saturating_duration_since(Instant::now()).as_secs().div_ceil(60));
+            let sl_tip = "Sleep timer: click to cycle 15 / 30 / 45 / 60 / 90 / off";
+            let sl_clicked = match sleeping {
+                Some(mins) => ibtn(ui, &IC_MOON, &format!("{} MIN", mins), true).tip(sl_tip).clicked(),
+                None => icon_btn_w(ui, &IC_MOON, false, ink, 38.0).tip(sl_tip).clicked(),
             };
-            if retro_btn(ui, &sl, self.sleep_mins > 0).tip("Sleep timer: click to cycle 15 / 30 / 45 / 60 / 90 / off").clicked() {
+            if sl_clicked {
                 acts.push(Action::Sleep);
             }
             if PRACTICE
-                && retro_btn(ui, "TIMER", self.pomo > 0 || self.timer_open)
+                && icon_btn_w(ui, &IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 38.0)
                     .tip("Focus timer: work in blocks with rests between")
                     .clicked()
             {
                 acts.push(Action::TimerPanel);
             }
             if PRACTICE
-                && retro_btn(ui, "METRONOME", self.metro_open).tip("Metronome with beats, subdivisions and a pendulum").clicked()
+                && icon_btn_w(ui, &IC_METRO, self.metro_open, ink, 38.0)
+                    .tip("Metronome with beats, subdivisions and a pendulum")
+                    .clicked()
             {
                 acts.push(Action::MetroPanel);
             }
             ui.add_space(8.0);
-            if retro_btn(ui, "DISK", self.show_cache).tip("Where tracks are stored on this computer").clicked() {
+            if icon_btn_w(ui, &IC_DISK, self.show_cache, ink, 38.0).tip("Where tracks are stored on this computer").clicked() {
                 acts.push(Action::ToggleCacheView);
             }
-            if retro_btn(ui, "LOG", self.show_log).clicked() {
+            if icon_btn_w(ui, &IC_LOG, self.show_log, ink, 38.0).tip("Log").clicked() {
                 self.show_log = !self.show_log;
                 if self.show_log {
                     self.show_eq = false;
@@ -3346,7 +3477,7 @@ impl App {
 
     fn player_window(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let inner = ui.max_rect();
-        window_deco(ui, inner, "TIDALITE");
+        window_deco(ui, inner, "PLAYER");
         let s = (inner.width() / 300.0).min(inner.height() / 138.0).max(0.5);
         let ox = inner.min.x + (inner.width() - 300.0 * s) / 2.0;
         let oy = inner.min.y + (inner.height() - 138.0 * s) / 2.0;
@@ -3555,7 +3686,29 @@ impl App {
                 acts.push(Action::Volume(v));
             }
         }
-        ptext(p, Pos2::new(ox + 112.0 * s, oy + 71.0 * s), Align::Min, "VOLUME", px_sm, pal().ink2);
+        // speaker icon (click to mute / unmute)
+        let spk_r = rc(112.0, 67.0, 16.0, 12.0);
+        let spk_icon: &[&str] = if self.volume <= 0.0 {
+            &IC_SPK0
+        } else if self.volume < 0.5 {
+            &IC_SPK1
+        } else {
+            &IC_SPK2
+        };
+        let k = (spk_r.height() / spk_icon.len() as f32).floor().max(1.0);
+        pixmap(p, spk_r.min, k, spk_icon, pal().ink2);
+        let spk_hit = ui
+            .interact(spk_r.expand(3.0), ui.id().with("mute"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip(if self.volume <= 0.0 { "Unmute" } else { "Mute" });
+        if spk_hit.clicked() {
+            if self.volume > 0.0 {
+                self.vol_before = self.volume;
+                acts.push(Action::Volume(0.0));
+            } else {
+                acts.push(Action::Volume(self.vol_before.max(0.3)));
+            }
+        }
         ptext(
             p,
             Pos2::new(ox + 250.0 * s, oy + 71.0 * s),
@@ -3635,34 +3788,33 @@ impl App {
             acts.push(Action::Next);
         }
 
-        // ---- shuffle / repeat (labels are fitted into their buttons)
-        let sh = rc(136.0, 102.0, 74.0, 16.0);
-        let shr = ui.interact(sh, ui.id().with("shuf"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        // ---- shuffle / repeat: icons, the names show on hover
+        let sh = rc(136.0, 102.0, 36.0, 16.0);
+        let shr = ui
+            .interact(sh, ui.id().with("shuf"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip(if self.shuffle { "Shuffle: on" } else { "Shuffle" });
         raised_h(p, sh, self.shuffle || shr.is_pointer_button_down_on(), shr.hovered() && !self.shuffle);
-        let led = Rect::from_center_size(Pos2::new(sh.min.x + 7.0 * s, sh.center().y), Vec2::splat(3.0 * s));
-        fill_rect(p, led, if self.shuffle { pal().red } else { pal().beige_dk });
-        let st = Rect::from_min_max(Pos2::new(sh.min.x + 12.0 * s, sh.min.y), sh.max);
-        ptext_fit(p, st.center(), Align::Center, "SHUFFLE", px_sm, st.width() - 6.0, pal().ink);
+        icon_in(p, sh, &IC_SHUF, if self.shuffle { pal().red } else { pal().ink });
         if shr.clicked() {
             acts.push(Action::Shuffle);
         }
-        let rp = rc(214.0, 102.0, 80.0, 16.0);
-        let rpr = ui.interact(rp, ui.id().with("rep"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let rp = rc(178.0, 102.0, 36.0, 16.0);
+        let rep_tip = match self.repeat {
+            Repeat::Off => "Repeat: off",
+            Repeat::All => "Repeat: all",
+            Repeat::One => "Repeat: this track",
+        };
+        let rpr =
+            ui.interact(rp, ui.id().with("rep"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).tip(rep_tip);
         raised_h(
             p,
             rp,
             self.repeat != Repeat::Off || rpr.is_pointer_button_down_on(),
             rpr.hovered() && self.repeat == Repeat::Off,
         );
-        let led = Rect::from_center_size(Pos2::new(rp.min.x + 7.0 * s, rp.center().y), Vec2::splat(3.0 * s));
-        fill_rect(p, led, if self.repeat != Repeat::Off { pal().red } else { pal().beige_dk });
-        let rp_txt = match self.repeat {
-            Repeat::Off => "REPEAT",
-            Repeat::All => "REPEAT ALL",
-            Repeat::One => "REPEAT 1",
-        };
-        let rt = Rect::from_min_max(Pos2::new(rp.min.x + 12.0 * s, rp.min.y), rp.max);
-        ptext_fit(p, rt.center(), Align::Center, rp_txt, px_sm, rt.width() - 6.0, pal().ink);
+        let rep_icon: &[&str] = if self.repeat == Repeat::One { &IC_REP1 } else { &IC_REP };
+        icon_in(p, rp, rep_icon, if self.repeat != Repeat::Off { pal().red } else { pal().ink });
         if rpr.clicked() {
             acts.push(Action::Repeat);
         }
@@ -3931,6 +4083,21 @@ impl App {
                     acts.push(Action::Next);
                 }
                 ui.add_space(14.0);
+                if icon_btn(ui, &IC_SHUF, self.shuffle, ink)
+                    .tip(if self.shuffle { "Shuffle is on - click to turn off" } else { "Shuffle the queue" })
+                    .clicked()
+                {
+                    acts.push(Action::Shuffle);
+                }
+                let (rep_icon, rep_tip) = match self.repeat {
+                    Repeat::Off => (&IC_REP, "Repeat: off  (click for all)"),
+                    Repeat::All => (&IC_REP, "Repeat all  (click for one track)"),
+                    Repeat::One => (&IC_REP1, "Repeat this track  (click to turn off)"),
+                };
+                if icon_btn(ui, rep_icon, self.repeat != Repeat::Off, ink).tip(rep_tip).clicked() {
+                    acts.push(Action::Repeat);
+                }
+                ui.add_space(14.0);
                 if icon_btn(ui, &IC_BW, gray, ink)
                     .tip(if gray { "Back to color art  (G)" } else { "Black and white art  (G)" })
                     .clicked()
@@ -3967,7 +4134,7 @@ impl App {
             &p,
             Pos2::new(full.max.x - 30.0, full.max.y - 14.0),
             Align::Max,
-            "Esc close    F fullscreen    G b&w    L lyrics    Space play/pause",
+            "Esc close    F fullscreen    G b&w    L lyrics    H like    Space play/pause",
             1.0,
             pal().dim,
         );
@@ -4186,6 +4353,16 @@ fn panel_frame() -> egui::Frame {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         font::set_ppp(ctx.pixels_per_point());
+        // the window's scale and size settle over the first frames: keep drawing until they do
+        {
+            let (ppp, sz) = (ctx.pixels_per_point(), ctx.screen_rect().size());
+            if (ppp - self.last_ppp).abs() > 0.001 || sz != self.last_size || self.frames < 10 {
+                self.last_ppp = ppp;
+                self.last_size = sz;
+                self.frames += 1;
+                ctx.request_repaint();
+            }
+        }
         self.drain(ctx);
         let mut acts: Vec<Action> = Vec::new();
 
@@ -4381,7 +4558,7 @@ impl eframe::App for App {
                 let lib_w = if self.focus_mode {
                     0.0
                 } else {
-                    (self.lib_frac * screen.width()).clamp(280.0, (screen.width() - 440.0).max(280.0))
+                    (self.lib_frac * screen.width()).clamp(280.0, (screen.width() - 560.0).max(280.0))
                 };
                 let right_w = screen.width() - lib_w;
                 let inner_w = right_w - 28.0;

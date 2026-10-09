@@ -138,7 +138,9 @@ pub struct Metro {
     /// beats per bar
     pub beats: u32,
     /// volume of each beat of the bar, 0 (silent) to 3 (loud); click a beat to step through them
-    pub levels: [u8; 12],
+    pub levels: [u8; 32],
+    /// the note value of one pulse: 4 (quarters), 8 (eighths) or 16. BPM is always counted in quarter notes, so 22/8 at 120 clicks 22 eighths at 240 a minute
+    pub unit: u8,
     /// ticks between the beats: 0 none, 1 eighths, 2 triplets, 3 sixteenths
     pub sub: u8,
     /// play this many bars, then be silent for `gap_mute` (0 = never silent)
@@ -161,7 +163,12 @@ impl Default for Metro {
         Metro {
             on: false,
             beats: 4,
-            levels: [3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+            levels: {
+                let mut l = [2u8; 32];
+                l[0] = 3;
+                l
+            },
+            unit: 4,
             sub: 0,
             gap_play: 0,
             gap_mute: 1,
@@ -187,9 +194,28 @@ fn click(buf: &mut [i16], start: usize, f: f32, vel: f32) {
 }
 
 impl Metro {
+    /// Clicks per real minute for a tempo given in quarter notes.
+    pub fn pulse(&self, bpm: f32) -> f32 {
+        bpm * self.unit as f32 / 4.0
+    }
+
+    /// Accent a grouping such as 3+3+3+4: loud on the bar's first beat, medium on each group start, soft in between.
+    pub fn apply_group(&mut self, g: &[u32]) {
+        for l in self.levels.iter_mut() {
+            *l = 1;
+        }
+        let mut at = 0usize;
+        for (i, size) in g.iter().enumerate() {
+            if at < 32 {
+                self.levels[at] = if i == 0 { 3 } else { 2 };
+            }
+            at += *size as usize;
+        }
+    }
+
     /// Preset volumes: every beat, only 2 and 4 (the jazz way), or only the first beat.
     pub fn preset(&mut self, which: u8) {
-        for b in 0..12 {
+        for b in 0..32 {
             self.levels[b] = match which {
                 0 => {
                     if b == 0 {
@@ -217,10 +243,35 @@ impl Metro {
     }
 }
 
+/// Ways to split `n` pulses into groups of 2, 3 and 4 (7 = 2+2+3, 22 = 3+3+3+3+3+3+4 ...).
+pub fn groupings(n: u32) -> Vec<Vec<u32>> {
+    let mut out: Vec<Vec<u32>> = Vec::new();
+    for size in [3u32, 2, 4] {
+        if n < size {
+            continue;
+        }
+        let (q, r) = (n / size, n % size);
+        let mut g = vec![size; q as usize];
+        match r {
+            0 => {}
+            1 => *g.last_mut().unwrap() += 1,
+            _ => g.push(r),
+        }
+        let mut alt = g.clone();
+        alt.rotate_right(1);
+        for cand in [g, alt] {
+            if cand.iter().sum::<u32>() == n && !out.contains(&cand) {
+                out.push(cand);
+            }
+        }
+    }
+    out
+}
+
 /// One cycle of the metronome (a bar, or the play + silent bars of a gap drill), to repeat forever.
 pub fn click_loop(m: &Metro, bpm: f32) -> Vec<i16> {
-    let beats = m.beats.clamp(1, 12) as usize;
-    let spb = 60.0 / bpm.clamp(20.0, 400.0) * RATE;
+    let beats = m.beats.clamp(1, 32) as usize;
+    let spb = 60.0 / m.pulse(bpm.clamp(20.0, 400.0)).clamp(20.0, 1000.0) * RATE;
     let bars = if m.gap_play > 0 { (m.gap_play + m.gap_mute.max(1)) as usize } else { 1 };
     let mut v = vec![0i16; ((bars * beats) as f32 * spb).round() as usize + 1];
     for bar in 0..bars {

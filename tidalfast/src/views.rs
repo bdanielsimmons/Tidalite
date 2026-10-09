@@ -763,11 +763,17 @@ impl App {
             if retro_btn(ui, "SHUFFLE", false).clicked() {
                 acts.push(Action::PlayTune(i, true));
             }
-            if retro_btn(ui, if self.look_busy { "LOOKING..." } else { "LOOK UP" }, self.look_busy)
+            if crate::ibtn(ui, &crate::IC_SEARCH, if self.look_busy { "LOOKING..." } else { "LOOK UP" }, self.look_busy)
                 .tip("Who wrote it, and the most popular recordings on Tidal. Only searches when you press this.")
                 .clicked()
             {
                 acts.push(Action::LookUp(i));
+            }
+            if retro_btn(ui, ["AUTO", "JAZZ", "GOSPEL", "ANY"][self.look_style as usize % 4], self.look_style > 0)
+                .tip("What kind of recordings LOOK UP favors. AUTO = jazz when the tune is a known standard.")
+                .clicked()
+            {
+                acts.push(Action::LookStyle);
             }
             if retro_btn(ui, "PLAY-ALONG", false)
                 .tip("Search YouTube for backing tracks of this tune (opens your browser)")
@@ -1246,17 +1252,21 @@ impl App {
             );
         });
         ui.horizontal(|ui| {
-            if retro_btn_w(ui, "LOOP", 70.0, self.loop_on && both).tip("Loop on / off  (\\ key)").clicked() {
+            let ink = pal().ink;
+            if crate::icon_btn_w(ui, &crate::IC_REP, self.loop_on && both, ink, 44.0).tip("Loop on / off  (\\ key)").clicked() {
                 acts.push(Action::LoopToggle);
             }
-            if retro_btn_w(ui, "CLEAR", 70.0, false).clicked() {
+            if crate::icon_btn_w(ui, &crate::IC_X, false, ink, 44.0).tip("Clear the A-B loop").clicked() {
                 acts.push(Action::LoopClear);
             }
             ui.add_space(8.0);
-            if retro_btn_w(ui, "BACK 2S", 86.0, false).tip("Jump back two seconds  (, key)").clicked() {
+            if crate::icon_btn_w(ui, &crate::IC_REW, false, ink, 44.0).tip("Back two seconds  (, key)").clicked() {
                 acts.push(Action::SeekRel(-2.0));
             }
-            if retro_btn_w(ui, "RESTART", 86.0, false).tip("Back to loop start (or track start)  (. key)").clicked() {
+            if crate::icon_btn_w(ui, &crate::IC_PREV, false, ink, 44.0)
+                .tip("Restart: back to the loop start (or the track start)  (. key)")
+                .clicked()
+            {
                 acts.push(Action::Seek(self.loop_a.unwrap_or(0.0)));
             }
             ui.add_space(8.0);
@@ -1291,7 +1301,7 @@ impl App {
             if o.enter {
                 acts.push(Action::SaveSection);
             }
-            if retro_btn_w(ui, "SAVE LOOP", 100.0, false).tip("Keep this A-B loop with the track").clicked() {
+            if crate::ibtn(ui, &crate::IC_BOOK, "SAVE LOOP", false).tip("Keep this A-B loop with the track").clicked() {
                 acts.push(Action::SaveSection);
             }
         });
@@ -1348,34 +1358,29 @@ impl App {
                         }
                     });
                     ui.horizontal(|ui| {
-                        label(ui, "PLAY", 56.0);
+                        label(ui, "EVERY", 60.0);
                         self.num_step(
                             ui,
                             acts,
                             F_TR_LOOPS,
-                            56.0,
+                            44.0,
                             Knob::Loops,
                             self.trainer_n.to_string(),
                             "Loops to play before each speed-up - or type it",
                         );
-                        label(ui, "LOOPS, THEN", 120.0);
+                        label(ui, "LOOPS", 56.0);
                         self.num_step(
                             ui,
                             acts,
                             F_TR_STEP,
-                            56.0,
+                            52.0,
                             Knob::Step,
                             format!("+{}%", self.trainer_step),
                             "How much faster each step - or type it",
                         );
-                        label(ui, "FASTER", 60.0);
                     });
+                    dim_line(ui, "STARTS AT THE SPEED SET ABOVE AND STOPS AT 100%", 1.0, pal().dim);
                     ui.horizontal(|ui| {
-                        label(ui, "START", 56.0);
-                        label(ui, "AT THE SPEED SET ABOVE. IT STOPS AT 100%.", 420.0);
-                    });
-                    ui.horizontal(|ui| {
-                        label(ui, "MORE", 56.0);
                         let ci = if self.count_in == 0 { "COUNT OFF".to_string() } else { format!("COUNT {}", self.count_in) };
                         if retro_btn_w(ui, &ci, 100.0, self.count_in > 0).tip("Clicks before every loop pass").clicked() {
                             acts.push(Action::CountIn);
@@ -1402,13 +1407,13 @@ impl App {
                             acts.push(Action::Transpose(1));
                         }
                         ui.add_space(8.0);
-                        if retro_btn_w(ui, CHAN_NAMES[self.chan as usize % 6], 112.0, self.chan != 0)
+                        if retro_btn_w(ui, CHAN_NAMES[self.chan as usize % 6], 100.0, self.chan != 0)
                             .tip("Ear mode: left / right only, mono, take out the middle, or just the bass")
                             .clicked()
                         {
                             acts.push(Action::Chan);
                         }
-                        if retro_btn_w(ui, if self.exporting { "SAVING..." } else { "EXPORT WAV" }, 112.0, false)
+                        if retro_btn_w(ui, if self.exporting { "SAVING..." } else { "EXPORT WAV" }, 100.0, false)
                             .tip("Save the A-B loop as a WAV file in Music/Tidalite loops")
                             .clicked()
                         {

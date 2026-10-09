@@ -52,6 +52,8 @@ pub enum Opt {
     BandStyle,
     Part(usize),
     PomoSound,
+    Unit,
+    Group,
 }
 
 /// "1:23.5", "83" -> seconds
@@ -315,7 +317,7 @@ impl App {
         let ratio = if self.practice && playing { self.speed as f32 / 100.0 } else { 1.0 };
         if !locked && self.mt.ramp_bars > 0 {
             let tempo = self.metro_tempo(playing);
-            let bar = self.mt.beats as f32 * 60.0 / tempo.max(20.0);
+            let bar = self.mt.beats as f32 * 60.0 / self.mt.pulse(tempo.max(20.0));
             if self.mt_step_at.elapsed().as_secs_f32() >= self.mt.ramp_bars as f32 * bar {
                 if tempo + self.mt.ramp_bpm as f32 <= self.mt.ramp_max as f32 {
                     self.mt_add += self.mt.ramp_bpm as f32;
@@ -336,8 +338,8 @@ impl App {
         let tempo = if locked { 60.0 * ratio / period } else { self.metro_tempo(playing) };
         let m = &self.mt;
         let mut sig = (tempo * 10.0) as u64 ^ ((m.beats as u64) << 20) ^ ((m.sub as u64) << 24) ^ ((m.gap_play as u64) << 28);
-        sig ^= (m.gap_mute as u64) << 34 ^ (locked as u64) << 40 ^ (self.mt_gen as u64) << 41;
-        for l in &m.levels[..m.beats.clamp(1, 12) as usize] {
+        sig ^= (m.gap_mute as u64) << 34 ^ (locked as u64) << 40 ^ (self.mt_gen as u64) << 41 ^ (m.unit as u64) << 52;
+        for l in &m.levels[..m.beats.clamp(1, 32) as usize] {
             sig = sig.wrapping_mul(31).wrapping_add(*l as u64 + 1);
         }
         sig |= 1 << 63;
@@ -350,7 +352,8 @@ impl App {
         let mut wait = 0.0f32;
         if locked {
             cfg.beats = 1;
-            cfg.levels = [2; 12];
+            cfg.levels = [2; 32];
+            cfg.unit = 4;
             cfg.gap_play = 0;
             if let Some((_, period, phase)) = self.beat {
                 let pos = self.pos();
@@ -362,8 +365,8 @@ impl App {
         }
         let body = band::click_loop(&cfg, tempo);
         let cycle =
-            cfg.beats.clamp(1, 12) as usize * if cfg.gap_play > 0 { (cfg.gap_play + cfg.gap_mute.max(1)) as usize } else { 1 };
-        self.mt_vis = Some((Instant::now() + Duration::from_secs_f32(wait), 60.0 / tempo, cycle));
+            cfg.beats.clamp(1, 32) as usize * if cfg.gap_play > 0 { (cfg.gap_play + cfg.gap_mute.max(1)) as usize } else { 1 };
+        self.mt_vis = Some((Instant::now() + Duration::from_secs_f32(wait), 60.0 / cfg.pulse(tempo), cycle));
         self.player.send(Cmd::Pcm(0, lead, body, 0.8));
     }
 
@@ -608,12 +611,39 @@ impl App {
                         for e in &list {
                             self.register(&e.to_version());
                         }
+                        // the real titles, covers and lengths: four at a time, shown as they arrive
+                        let srcs: Vec<String> = list.iter().take(40).map(|e| e.src.clone()).collect();
+                        for w in 0..4 {
+                            let mine: Vec<String> = srcs.iter().skip(w).step_by(4).cloned().collect();
+                            let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                            std::thread::spawn(move || {
+                                for s in mine {
+                                    if let Ok(e) = sources::yt_info(&s) {
+                                        let _ = tx.send(Msg::ScMeta(e));
+                                        ctx.request_repaint();
+                                    }
+                                }
+                            });
+                        }
                         self.sc_results = list;
                     }
                     Err(e) => {
                         api::log(&format!("soundcloud: {}", e));
                         self.sc_msg = format!("ERROR: {}", e);
                     }
+                }
+            }
+            Msg::ScMeta(e) => {
+                for slot in self.sc_results.iter_mut().chain(self.store.sc.iter_mut()) {
+                    if slot.id == e.id {
+                        slot.title = e.title.clone();
+                        slot.artist = e.artist.clone();
+                        slot.dur = e.dur;
+                        slot.cover = e.cover.clone();
+                    }
+                }
+                if self.store.sc.iter().any(|x| x.id == e.id) {
+                    self.store_dirty = true;
                 }
             }
             Msg::YtTool(r) => {
@@ -820,6 +850,7 @@ impl App {
                     format!("USING YOUR {} SIGN-IN. CLOSE THAT BROWSER IF IT FAILS.", sources::SC_BROWSERS[n as usize])
                 };
             }
+            Action::LookStyle => self.look_style = (self.look_style + 1) % 4,
             Action::ScKeep(id) => {
                 if let Some(e) = self.sc_results.iter().find(|e| e.id == id).cloned() {
                     if !self.store.sc.iter().any(|x| x.id == id) {
@@ -1043,9 +1074,20 @@ impl App {
                 self.look_for = name.clone();
                 self.look_tracks.clear();
                 let (api, tx, ctx) = (self.api.clone(), self.tx.clone(), self.ctx.clone());
+                let want_style = self.look_style;
                 std::thread::spawn(move || {
                     let info = sources::lookup_composer(&name);
-                    let tracks = api.popular(&name, &known).unwrap_or_default();
+                    // a tune in the jazz standards list is jazz (and that list knows who wrote it)
+                    let listed = sources::find_chart(&name).ok().map(|c| c.2);
+                    let style = match want_style {
+                        0 => u8::from(listed.is_some()),
+                        1 => 1,
+                        2 => 2,
+                        _ => 0,
+                    };
+                    let composer = listed.unwrap_or_else(|| info.as_ref().map(|s| s.to_string()).unwrap_or_default());
+                    let composer = composer.split(|c| c == ',' || c == '\n').next().unwrap_or("").replace("Written by", "");
+                    let tracks = api.popular(&name, &known, style, composer.trim()).unwrap_or_default();
                     let _ = tx.send(Msg::Lookup(name, info, tracks));
                     ctx.request_repaint();
                 });
@@ -1453,8 +1495,9 @@ impl App {
                 }
             }
             Knob::Beats => {
-                self.mt.beats = u(1.0, 12.0);
+                self.mt.beats = u(1.0, 32.0);
                 self.mt.preset(0);
+                self.mt_group = 0;
             }
             Knob::GapPlay => self.mt.gap_play = u(0.0, 32.0),
             Knob::GapMute => self.mt.gap_mute = u(1.0, 16.0),
@@ -1473,11 +1516,38 @@ impl App {
                 self.mt.on = !self.mt.on;
                 self.mt_add = 0.0;
                 self.mt_step_at = Instant::now();
+                if !self.mt.on {
+                    // silence it right now (the click loop plays forever until told to stop)
+                    self.player.send(Cmd::Pcm(0, Vec::new(), Vec::new(), 0.0));
+                    self.mt_vis = None;
+                }
                 self.mt_sig = 0;
             }
-            Opt::Preset(n) => self.mt.preset(n),
+            Opt::Preset(n) => {
+                self.mt.preset(n);
+                self.mt_group = 0;
+            }
+            Opt::Unit => {
+                self.mt.unit = match self.mt.unit {
+                    4 => 8,
+                    8 => 16,
+                    _ => 4,
+                };
+            }
+            Opt::Group => {
+                let gs = band::groupings(self.mt.beats);
+                if gs.is_empty() {
+                    return;
+                }
+                self.mt_group = (self.mt_group + 1) % (gs.len() + 1);
+                match self.mt_group {
+                    0 => self.mt.preset(0),
+                    k => self.mt.apply_group(&gs[k - 1]),
+                }
+            }
             Opt::Level(i) => {
-                let l = &mut self.mt.levels[i.min(11)];
+                self.mt_group = 0;
+                let l = &mut self.mt.levels[i.min(31)];
                 *l = if *l == 0 { 3 } else { *l - 1 };
             }
             Opt::Sub => self.mt.sub = (self.mt.sub + 1) % 4,
