@@ -125,7 +125,8 @@ pub fn open_folder() {
     }
     #[cfg(not(windows))]
     {
-        let _ = std::process::Command::new("xdg-open").arg(&d).spawn();
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let _ = std::process::Command::new(opener).arg(&d).spawn();
     }
 }
 

@@ -66,7 +66,6 @@ pub struct Day {
     pub date: String,
     pub secs: BTreeMap<String, u32>,
     pub loops: u32,
-    pub clean: u32,
     pub pomos: u32,
 }
 
@@ -139,7 +138,6 @@ pub struct Store {
     pub files: Vec<Ext>,
     pub yt: Vec<Ext>,
     pub bpm: HashMap<i64, u32>,
-    pub goal_min: u32,
     pub last: Option<Last>,
 }
 
@@ -149,11 +147,7 @@ fn path() -> PathBuf {
 
 impl Store {
     pub fn load() -> Store {
-        let mut s: Store = std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        if s.goal_min == 0 {
-            s.goal_min = 20;
-        }
-        s
+        std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
     }
 
     pub fn save(&self) {

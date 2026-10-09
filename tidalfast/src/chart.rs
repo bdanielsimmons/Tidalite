@@ -549,3 +549,85 @@ pub fn transpose(chord: &str, semis: i32) -> String {
     }
     out
 }
+
+// ------------------------------------------------------- jazz standards data
+/// One song of the open "Jazz Standards" JSON -> (chart text, key, composer).
+/// Alternate endings follow the main bars of their section.
+pub fn from_standard(song: &serde_json::Value) -> Option<(String, String, String)> {
+    let mut out = String::new();
+    let time: String = song["TimeSignature"].as_str().unwrap_or("4/4").chars().filter(|c| c.is_ascii_digit()).collect();
+    out.push_str(&format!("T{} ", if time.len() == 2 { time } else { "44".into() }));
+    let bars = |out: &mut String, chords: &str, label: &str| {
+        let mut label = label.to_string();
+        for bar in chords.split('|') {
+            let cs: Vec<&str> = bar.split(',').map(str::trim).filter(|c| !c.is_empty()).collect();
+            if cs.is_empty() {
+                continue;
+            }
+            if !label.is_empty() {
+                out.push_str(&format!("*{} ", std::mem::take(&mut label)));
+            }
+            out.push_str(&cs.join(" "));
+            out.push_str(" | ");
+        }
+    };
+    for sec in song["Sections"].as_array()? {
+        bars(&mut out, sec["MainSegment"]["Chords"].as_str().unwrap_or(""), sec["Label"].as_str().unwrap_or(""));
+        for (i, e) in sec["Endings"].as_array().into_iter().flatten().enumerate() {
+            bars(&mut out, e["Chords"].as_str().unwrap_or(""), &format!("{}.", i + 1));
+        }
+    }
+    let text = out.trim_end().to_string();
+    if parse_friendly(&text).bars.is_empty() {
+        return None;
+    }
+    Some((text, song["Key"].as_str().unwrap_or("").to_string(), song["Composer"].as_str().unwrap_or("").to_string()))
+}
+
+/// Title match that ignores case, punctuation and a leading "the" / "a".
+pub fn find_standard<'a>(list: &'a [serde_json::Value], name: &str) -> Option<&'a serde_json::Value> {
+    fn norm(s: &str) -> String {
+        let n: String = s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+        n.strip_prefix("the").or_else(|| n.strip_prefix('a')).map(str::to_string).filter(|r| r.len() > 3).unwrap_or(n)
+    }
+    let want = norm(name);
+    if want.is_empty() {
+        return None;
+    }
+    let title = |v: &serde_json::Value| norm(v["Title"].as_str().unwrap_or(""));
+    list.iter().find(|v| title(v) == want).or_else(|| list.iter().find(|v| want.len() >= 6 && title(v).starts_with(&want)))
+}
+
+// ------------------------------------------------------------ roman numerals
+/// Tonic (0-11) from the tune's key, else guessed from the last chord of the chart.
+pub fn tonic(key: &str, chart: &Chart) -> Option<i32> {
+    let k = key.trim();
+    let from_key = if k.is_empty() { None } else { note_index(split_root(k).0) };
+    from_key.or_else(|| {
+        let last = chart.bars.last()?.chords.last()?;
+        note_index(split_root(last).0)
+    })
+}
+
+/// "Dm7" in C -> "ii7", "G7" -> "V7", "Bbmaj7" -> "bVIImaj7".
+pub fn roman(chord: &str, tonic: i32) -> String {
+    let main = chord.split('/').next().unwrap_or("");
+    let (root, rest) = split_root(main);
+    let Some(ix) = note_index(root) else { return String::new() };
+    const DEG: [&str; 12] = ["I", "bII", "II", "bIII", "III", "IV", "bV", "V", "bVI", "VI", "bVII", "VII"];
+    let deg = DEG[(ix - tonic).rem_euclid(12) as usize];
+    let minor = (rest.starts_with('m') && !rest.starts_with("maj")) || rest.starts_with("dim");
+    let tail = if let Some(t) = rest.strip_prefix("dim") {
+        format!("o{}", t)
+    } else if minor {
+        rest[1..].to_string()
+    } else {
+        rest.to_string()
+    };
+    let tail = tail.strip_prefix("in").map(str::to_string).unwrap_or(tail);
+    if minor {
+        format!("{}{}", deg.to_lowercase(), tail)
+    } else {
+        format!("{}{}", deg, tail)
+    }
+}

@@ -22,8 +22,6 @@ pub enum Cmd {
     Volume(f32),
     /// Metronome click every n seconds (None = off).
     Metro(Option<f32>),
-    /// short three-note chime (focus timer)
-    Chime,
     Stop,
 }
 
@@ -924,20 +922,6 @@ impl<S: Source<Item = i16>> Source for Tap<S> {
     }
 }
 
-/// Three soft rising notes.
-fn chime_buf() -> Vec<i16> {
-    let mut v = Vec::new();
-    for (f, len) in [(659.3f32, 0.16f32), (784.0, 0.16), (1046.5, 0.5)] {
-        let n = (len * 44100.0) as usize;
-        for i in 0..n {
-            let t = i as f32 / 44100.0;
-            let env = (1.0 - i as f32 / n as f32).powi(2) * (i.min(200) as f32 / 200.0);
-            v.push(((t * f * std::f32::consts::TAU).sin() * env * 9000.0) as i16);
-        }
-    }
-    v
-}
-
 /// Play a count-in on its own sink and wait for it to finish.
 fn play_clicks(handle: &OutputStreamHandle, beats: u32, interval: f32, vol: f32) {
     if let Ok(c) = Sink::try_new(handle) {
@@ -1123,13 +1107,6 @@ impl Player {
                                 m.append(rodio::buffer::SamplesBuffer::new(1, 44100, v).repeat_infinite());
                                 metro = Some(m);
                             }
-                        }
-                    }
-                    Ok(Cmd::Chime) => {
-                        if let Ok(c) = Sink::try_new(&handle) {
-                            c.set_volume((vol * 1.5).clamp(0.3, 1.0));
-                            c.append(rodio::buffer::SamplesBuffer::new(1, 44100, chime_buf()));
-                            c.detach();
                         }
                     }
                     Ok(Cmd::Stop) => {

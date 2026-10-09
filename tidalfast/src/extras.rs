@@ -14,11 +14,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const CHAN_NAMES: [&str; 6] = ["STEREO", "LEFT ONLY", "RIGHT ONLY", "MONO", "NO CENTER", "BASS ONLY"];
-pub const TRAIN_STEPS: [u32; 3] = [5, 10, 15];
-pub const TRAIN_PASSES: [u32; 5] = [2, 3, 4, 6, 8];
-/// Action::Trainer arguments beyond the mode (0 off, 1 auto, 2 earned)
-pub const TRAIN_CYCLE_STEP: u8 = 10;
-pub const TRAIN_CYCLE_PASSES: u8 = 11;
+
+/// The little +/- numbers of the focus timer and the speed trainer.
+#[derive(Clone, Copy)]
+pub enum Knob {
+    Focus,
+    Rest,
+    Blocks,
+    Loops,
+    Step,
+}
 
 fn wave_path(id: i64) -> PathBuf {
     api::config_dir().join("waves").join(format!("{}.pk", id))
@@ -180,7 +185,7 @@ impl App {
         let date = store::today_str();
         self.store.day_mut(&date).loops += n;
         self.store_dirty = true;
-        if self.trainer == 1 {
+        if self.trainer {
             self.passes += n;
             self.check_trainer();
         }
@@ -461,6 +466,25 @@ impl App {
                 self.look_for = name;
                 self.look_tracks = tracks;
             }
+            Msg::Chart(name, r) => {
+                self.chart_busy = false;
+                let Some(i) = self.find_tune(&name) else { return };
+                match r {
+                    Ok((chart, key, composer)) => {
+                        let t = &mut self.store.tunes[i];
+                        t.chart = chart;
+                        if t.key.is_empty() {
+                            t.key = key;
+                        }
+                        if t.info.is_empty() && !composer.is_empty() {
+                            t.info = format!("{} - written by {}", name, composer);
+                        }
+                        self.store_dirty = true;
+                        self.set_note(&format!("FOUND THE CHANGES FOR {}", name.to_uppercase()));
+                    }
+                    Err(e) => self.set_note(&format!("NO CHART FOR {}: {}", name.to_uppercase(), e.to_uppercase())),
+                }
+            }
             _ => {}
         }
     }
@@ -654,6 +678,20 @@ impl App {
                 }
                 None => self.set_note("PLAY A RECORDING FIRST"),
             },
+            Action::FindChart(i) => {
+                let Some(t) = self.store.tunes.get(i) else { return };
+                let name = t.name.clone();
+                if self.chart_busy || !self.chart_tried.insert(name.clone()) {
+                    return;
+                }
+                self.chart_busy = true;
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Chart(name.clone(), sources::find_chart(&name)));
+                    ctx.request_repaint();
+                });
+            }
+            Action::ToggleNumerals => self.chart_rn = !self.chart_rn,
             Action::LookUp(i) => {
                 if self.look_busy {
                     return;
@@ -666,7 +704,7 @@ impl App {
                 let (api, tx, ctx) = (self.api.clone(), self.tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
                     let info = sources::lookup_composer(&name);
-                    let tracks = api.search(&name).map(|p| p.tracks).unwrap_or_default();
+                    let tracks = api.popular(&name).unwrap_or_default();
                     let _ = tx.send(Msg::Lookup(name, info, tracks));
                     ctx.request_repaint();
                 });
@@ -743,45 +781,27 @@ impl App {
                     }
                 }
             }
-            Action::Clean => {
-                let date = store::today_str();
-                let n = {
-                    let d = self.store.day_mut(&date);
-                    d.clean += 1;
-                    d.clean
-                };
-                self.store_dirty = true;
-                if self.trainer == 2 {
-                    self.passes += 1;
-                    self.check_trainer();
-                }
-                if self.trainer == 2 && self.passes > 0 {
-                    self.set_note(&format!("CLEAN! {} OF {} TO SPEED UP", self.passes, self.trainer_n));
+            Action::Trainer => {
+                self.trainer = !self.trainer;
+                self.passes = 0;
+                if self.trainer {
+                    self.practice = true;
+                    self.set_note(&format!("EVERY {} LOOPS THE SPEED GOES UP {}%", self.trainer_n, self.trainer_step));
                 } else {
-                    self.set_note(&format!("CLEAN PASSES TODAY: {}", n));
+                    self.set_note("SPEED TRAINER OFF");
+                }
+                self.sync_loop();
+            }
+            Action::Knob(k, d) => {
+                let adj = |v: u32, lo: u32, hi: u32, step: i32| (v as i32 + d * step).clamp(lo as i32, hi as i32) as u32;
+                match k {
+                    Knob::Focus => self.pomo_focus = adj(self.pomo_focus, 5, 90, 5),
+                    Knob::Rest => self.pomo_break = adj(self.pomo_break, 1, 30, 1),
+                    Knob::Blocks => self.pomo_cycles = adj(self.pomo_cycles, 1, 12, 1),
+                    Knob::Loops => self.trainer_n = adj(self.trainer_n, 1, 30, 1),
+                    Knob::Step => self.trainer_step = adj(self.trainer_step, 1, 25, 1),
                 }
             }
-            Action::Trainer(k) => match k {
-                TRAIN_CYCLE_STEP => {
-                    let i = TRAIN_STEPS.iter().position(|s| *s == self.trainer_step).unwrap_or(0);
-                    self.trainer_step = TRAIN_STEPS[(i + 1) % TRAIN_STEPS.len()];
-                }
-                TRAIN_CYCLE_PASSES => {
-                    let i = TRAIN_PASSES.iter().position(|s| *s == self.trainer_n).unwrap_or(0);
-                    self.trainer_n = TRAIN_PASSES[(i + 1) % TRAIN_PASSES.len()];
-                }
-                m => {
-                    self.trainer = m.min(2);
-                    self.passes = 0;
-                    self.practice = true;
-                    self.set_note(match self.trainer {
-                        0 => "TRAINER OFF",
-                        1 => "TRAINER: SPEEDS UP BY ITSELF EVERY FEW LOOPS",
-                        _ => "TRAINER: PRESS CLEAN (K) AFTER A GOOD PASS",
-                    });
-                    self.sync_loop();
-                }
-            },
             Action::TapTempo => {
                 let now = Instant::now();
                 if let Some(l) = self.taps.last() {
@@ -870,7 +890,7 @@ impl App {
                 });
             }
 
-            // ---- diary and goals
+            // ---- diary
             Action::SaveEntry => {
                 let today = store::today_str();
                 let default_mins = self.store.secs_on(&today) / 60;
@@ -886,10 +906,6 @@ impl App {
                 self.ed.id = 0;
                 self.store_dirty = true;
                 self.set_note("LOGGED IN THE DIARY");
-            }
-            Action::GoalAdj(d) => {
-                self.store.goal_min = (self.store.goal_min as i32 + d).clamp(5, 240) as u32;
-                self.store_dirty = true;
             }
             Action::RightTab(n) => self.rtab = n,
             Action::StemGet => {
@@ -951,30 +967,19 @@ impl App {
                 self.set_note("ALL STEMS DELETED");
             }
             Action::Pomo => {
-                if self.pomo > 0 {
+                if self.pomo == 1 || self.pomo == 2 {
                     self.pomo = 0;
                     self.pomo_end = None;
                     self.set_note("FOCUS TIMER STOPPED");
                 } else {
+                    self.pomo_n = if self.pomo == 3 { self.pomo_n + 1 } else { 1 };
                     self.pomo = 1;
                     self.pomo_end = Some(Instant::now() + Duration::from_secs(self.pomo_focus as u64 * 60));
-                    self.set_note(&format!("FOCUS FOR {} MIN - ONE THING AT A TIME", self.pomo_focus));
+                    self.set_note(&format!("FOCUS {} OF {} - ONE THING AT A TIME", self.pomo_n, self.pomo_cycles));
                 }
+                self.pomo_flash = None;
             }
-            Action::PomoLen => {
-                self.pomo_focus = match self.pomo_focus {
-                    15 => 25,
-                    25 => 45,
-                    _ => 15,
-                };
-            }
-            Action::PomoBreak => {
-                self.pomo_break = match self.pomo_break {
-                    5 => 10,
-                    10 => 15,
-                    _ => 5,
-                };
-            }
+            Action::TimerPanel => self.timer_open = !self.timer_open,
             Action::ImportIreal(target) => {
                 let text = self.ireal_in.trim().to_string();
                 match crate::chart::parse_ireal_url(&text) {
@@ -1018,28 +1023,34 @@ impl App {
         }
     }
 
-    /// Focus block -> break -> done, with a chime each time.
+    /// Focus -> rest -> wait for you. No sound: the window just flashes.
     fn pomo_tick(&mut self) {
         let Some(end) = self.pomo_end else { return };
         if Instant::now() < end {
             return;
         }
-        self.player.send(Cmd::Chime);
+        self.pomo_flash = Some(Instant::now());
         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         if self.pomo == 1 {
             let date = store::today_str();
             self.store.day_mut(&date).pomos += 1;
             self.store_dirty = true;
-            self.pomo = 2;
-            self.pomo_end = Some(Instant::now() + Duration::from_secs(self.pomo_break as u64 * 60));
             if self.cur.is_some() && !self.stopped && !self.paused {
                 self.apply(Action::PauseBtn);
             }
-            self.set_note(&format!("FOCUS BLOCK DONE - {} MIN BREAK. STRETCH, WATER.", self.pomo_break));
+            if self.pomo_n >= self.pomo_cycles {
+                self.pomo = 0;
+                self.pomo_end = None;
+                self.set_note(&format!("ALL {} FOCUS BLOCKS DONE - GOOD WORK", self.pomo_cycles));
+            } else {
+                self.pomo = 2;
+                self.pomo_end = Some(Instant::now() + Duration::from_secs(self.pomo_break as u64 * 60));
+                self.set_note(&format!("REST FOR {} MIN. STRETCH, WATER.", self.pomo_break));
+            }
         } else {
-            self.pomo = 0;
+            self.pomo = 3;
             self.pomo_end = None;
-            self.set_note("BREAK OVER - READY FOR ANOTHER BLOCK?");
+            self.set_note(&format!("REST OVER - START FOCUS {} OF {} WHEN READY", self.pomo_n + 1, self.pomo_cycles));
         }
     }
 

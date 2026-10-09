@@ -165,7 +165,9 @@ const EQ_PRESETS: [(&str, [f32; 10]); 4] = [
 ];
 
 /// Shown in the player and the log so you can tell which build you are running.
-const VERSION: &str = "v8 STUDIO";
+const VERSION: &str = if PRACTICE { "v9 STUDIO" } else { "v9" };
+/// Built with `--no-default-features` the practice tools (files, tunes, diary, loops, timer) are left out.
+const PRACTICE: bool = cfg!(feature = "practice");
 
 const CHECK: [&str; 4] = ["....#", "...#.", "#.#..", ".#..."];
 
@@ -201,7 +203,8 @@ enum Msg {
     Wave(i64, Option<Vec<u8>>),
     Exported(Result<String, String>),
     /// LOOK UP result: tune name, who wrote it, other versions found on Tidal
-    Lookup(String, Result<String, String>, Vec<Track>),
+    Lookup(String, Result<String, String>, Vec<(Track, u32)>),
+    Chart(String, Result<(String, String, String), String>),
     /// stem separation finished for this track id
     Stems(i64, Result<(), String>),
     /// the stem tool (runtime + model) finished downloading
@@ -314,8 +317,10 @@ enum Action {
     ToggleMore,
     RemoveVersion(usize, usize),
     Pomo,
-    PomoLen,
-    PomoBreak,
+    TimerPanel,
+    FindChart(usize),
+    ToggleNumerals,
+    Knob(extras::Knob, i32),
     StemGet,
     StemSplit,
     StemCancel,
@@ -324,8 +329,7 @@ enum Action {
     StemAll,
     StemClear,
     Continue,
-    Clean,
-    Trainer(u8),
+    Trainer,
     TapTempo,
     MetroToggle,
     BpmAdj(i32),
@@ -335,7 +339,6 @@ enum Action {
     Export,
     // ---- diary / chart
     SaveEntry,
-    GoalAdj(i32),
     RightTab(u8),
     ImportIreal(Option<usize>),
 }
@@ -688,6 +691,43 @@ fn menu_item(ui: &mut egui::Ui, text: &str) -> bool {
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
+/// Pixel-font hover hint (egui's own tooltip would use its default font).
+trait Tip {
+    fn tip(self, text: impl AsRef<str>) -> Self;
+}
+
+impl Tip for egui::Response {
+    fn tip(self, text: impl AsRef<str>) -> Self {
+        let on = self.hovered();
+        if self.ctx.animate_bool_with_time(self.id.with("tip"), on, 0.45) < 1.0 || !on {
+            return self;
+        }
+        let Some(m) = self.ctx.input(|i| i.pointer.hover_pos()) else { return self };
+        let px = spx(1.0);
+        let lines = wrap(text.as_ref(), px, 300.0);
+        let h = lines.len() as f32 * (px * 9.0 + 5.0) + 12.0;
+        let w = lines.iter().map(|l| text_w(l, px)).fold(0.0, f32::max) + 16.0;
+        let screen = self.ctx.screen_rect();
+        let x = (m.x + 12.0).min(screen.max.x - w - 4.0).max(4.0);
+        let y = if m.y + 24.0 + h > screen.max.y { m.y - h - 8.0 } else { m.y + 20.0 };
+        let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
+        let p = self.ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("tip")));
+        fill_rect(&p, r, pal().lcd);
+        outline(&p, r, 1.0, pal().ink);
+        for (i, l) in lines.iter().enumerate() {
+            ptext(
+                &p,
+                Pos2::new(r.min.x + 8.0, r.min.y + 6.0 + px * 4.5 + i as f32 * (px * 9.0 + 5.0)),
+                Align::Min,
+                l,
+                px,
+                pal().ink,
+            );
+        }
+        self
+    }
+}
+
 /// Small raised chip button (used on window title lines).
 fn chip(ui: &egui::Ui, rect: Rect, text: &str, active: bool, id: &str) -> egui::Response {
     let r = ui.interact(rect, ui.id().with(id), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -733,6 +773,9 @@ fn chunk(text: &str, px: f32, w: f32) -> Vec<String> {
 
 /// Right-click menu for loop points (shared by the seek bar and the practice timeline).
 fn loop_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, t: f32, both: bool, loop_on: bool, practice: bool) {
+    if !PRACTICE {
+        return;
+    }
     if menu_item(ui, &format!("Loop start (A) here  {}", fmt_t(t))) {
         acts.push(Action::SetAAt(t));
         ui.close_menu();
@@ -944,7 +987,7 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
                         ui.close_menu();
                     }
                 }
-                if menu_item(ui, "Add to a tune...") {
+                if PRACTICE && menu_item(ui, "Add to a tune...") {
                     acts.push(Action::PickTune(t.clone()));
                     ui.close_menu();
                 }
@@ -1206,7 +1249,7 @@ struct App {
     pick: Option<Track>,
     look_busy: bool,
     look_for: String,
-    look_tracks: Vec<Track>,
+    look_tracks: Vec<(Track, u32)>,
     f_tune: String,
     f_mins: String,
     f_bpm: String,
@@ -1228,10 +1271,14 @@ struct App {
     pomo_end: Option<Instant>,
     pomo_focus: u32,
     pomo_break: u32,
+    pomo_cycles: u32,
+    pomo_n: u32,
+    pomo_flash: Option<Instant>,
+    timer_open: bool,
     bpm: u32,
     count_in: u32,
     taps: Vec<Instant>,
-    trainer: u8,
+    trainer: bool,
     trainer_step: u32,
     trainer_n: u32,
     passes: u32,
@@ -1250,6 +1297,9 @@ struct App {
     rtab: u8,
     chart_tr: i32,
     chart_edit: bool,
+    chart_busy: bool,
+    chart_tried: std::collections::HashSet<String>,
+    chart_rn: bool,
     ireal_in: String,
     chart_cache: (String, chart::Chart),
 }
@@ -1417,10 +1467,14 @@ impl App {
             pomo_end: None,
             pomo_focus: 25,
             pomo_break: 5,
+            pomo_cycles: 4,
+            pomo_n: 1,
+            pomo_flash: None,
+            timer_open: false,
             bpm: 0,
             count_in: 0,
             taps: Vec::new(),
-            trainer: 0,
+            trainer: false,
             trainer_step: 5,
             trainer_n: 4,
             passes: 0,
@@ -1437,6 +1491,9 @@ impl App {
             rtab: 0,
             chart_tr: 0,
             chart_edit: false,
+            chart_busy: false,
+            chart_tried: Default::default(),
+            chart_rn: true,
             ireal_in: String::new(),
             chart_cache: (String::new(), chart::Chart::default()),
         };
@@ -2306,7 +2363,7 @@ impl App {
                 self.dirty = true;
                 self.set_note(if self.keep_cache { "SAVING TRACKS TO DISK" } else { "NOT SAVING NEW TRACKS" });
             }
-            Action::TogglePractice => {
+            Action::TogglePractice if PRACTICE => {
                 self.practice = !self.practice;
                 if self.practice {
                     self.loop_on = self.loop_a.is_some() && self.loop_b.is_some();
@@ -2692,7 +2749,7 @@ impl App {
             if retro_btn(ui, "CLEAR ALL", false).clicked() {
                 acts.push(Action::ClearCache);
             }
-            if retro_btn(ui, "CLEAR STEMS", false).on_hover_text("Delete all separated stems (frees disk space)").clicked() {
+            if retro_btn(ui, "CLEAR STEMS", false).tip("Delete all separated stems (frees disk space)").clicked() {
                 acts.push(Action::StemClear);
             }
             if retro_btn(ui, "CLOSE", false).clicked() {
@@ -2753,7 +2810,7 @@ impl App {
         // tools row
         ui.horizontal(|ui| {
             if retro_btn(ui, "SKIN", false)
-                .on_hover_text(format!("Skin: {}", SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]))
+                .tip(format!("Skin: {}", SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]))
                 .clicked()
             {
                 acts.push(Action::Skin);
@@ -2761,14 +2818,21 @@ impl App {
             if retro_btn(ui, "EQ", self.show_eq).clicked() {
                 acts.push(Action::ToggleEq);
             }
-            let sl = if self.sleep_mins > 0 { format!("{} MIN", self.sleep_mins) } else { "SLEEP".to_string() };
-            if retro_btn(ui, &sl, self.sleep_mins > 0)
-                .on_hover_text("Sleep timer: click to cycle 15 / 30 / 45 / 60 / 90 / off")
-                .clicked()
-            {
+            let sl = match self.sleep_at {
+                Some(t) => format!("{} MIN", t.saturating_duration_since(Instant::now()).as_secs().div_ceil(60)),
+                None => "SLEEP".to_string(),
+            };
+            if retro_btn(ui, &sl, self.sleep_mins > 0).tip("Sleep timer: click to cycle 15 / 30 / 45 / 60 / 90 / off").clicked() {
                 acts.push(Action::Sleep);
             }
-            if retro_btn(ui, "DISK", self.show_cache).on_hover_text("Where tracks are stored on this computer").clicked() {
+            if PRACTICE
+                && retro_btn(ui, "TIMER", self.pomo > 0 || self.timer_open)
+                    .tip("Focus timer: work in blocks with rests between")
+                    .clicked()
+            {
+                acts.push(Action::TimerPanel);
+            }
+            if retro_btn(ui, "DISK", self.show_cache).tip("Where tracks are stored on this computer").clicked() {
                 acts.push(Action::ToggleCacheView);
             }
             if retro_btn(ui, "LOG", self.show_log).clicked() {
@@ -2894,29 +2958,32 @@ impl App {
             };
             let r_pin = place(28.0);
             let r_mini = place(if self.mini { 36.0 } else { 36.0 });
-            let r_prac = place(56.0);
-            let r_lis = place(40.0);
-            let r_focus = place(48.0);
-            if chip(ui, r_focus, "FOCUS", self.focus_mode, "c_focus")
-                .on_hover_text("Hide the lists: just the player, your tools and the chart")
-                .clicked()
+            let r_prac = place(if PRACTICE { 56.0 } else { 0.0 });
+            let r_lis = place(if PRACTICE { 40.0 } else { 0.0 });
+            let r_focus = place(if PRACTICE { 48.0 } else { 0.0 });
+            if PRACTICE
+                && chip(ui, r_focus, "FOCUS", self.focus_mode, "c_focus")
+                    .tip("Hide the lists: just the player, your tools and the chart")
+                    .clicked()
             {
                 acts.push(Action::ToggleFocus);
             }
-            if chip(ui, r_pin, "PIN", self.pinned, "c_pin").on_hover_text("Keep this window on top").clicked() {
+            if chip(ui, r_pin, "PIN", self.pinned, "c_pin").tip("Keep this window on top").clicked() {
                 acts.push(Action::TogglePin);
             }
             if chip(ui, r_mini, if self.mini { "FULL" } else { "MINI" }, self.mini, "c_mini").clicked() {
                 acts.push(Action::ToggleMini);
             }
-            if chip(ui, r_prac, "PRACTICE", self.practice, "c_prac")
-                .on_hover_text("Transcribing: loop a section, slow it down")
-                .clicked()
+            if PRACTICE
+                && chip(ui, r_prac, "PRACTICE", self.practice, "c_prac")
+                    .tip("Transcribing: loop a section, slow it down")
+                    .clicked()
                 && !self.practice
             {
                 acts.push(Action::TogglePractice);
             }
-            if chip(ui, r_lis, "LISTEN", !self.practice, "c_lis").on_hover_text("Just listening: no loop, normal speed").clicked()
+            if PRACTICE
+                && chip(ui, r_lis, "LISTEN", !self.practice, "c_lis").tip("Just listening: no loop, normal speed").clicked()
                 && self.practice
             {
                 acts.push(Action::TogglePractice);
@@ -3188,7 +3255,7 @@ impl App {
         let strip_r = ui
             .interact(strip, ui.id().with("strip"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text("Click to open the folder where tracks are stored on this computer");
+            .tip("Click to open the folder where tracks are stored on this computer");
         inset(p, strip, pal().lcd);
         let (dtxt, dcol): (String, Color32) = match &track {
             None => (format!("TRACKS ARE SAVED TO: {}", cache::dir().display()), pal().ink2),
@@ -3564,7 +3631,7 @@ impl App {
                                         acts.push(Action::PlayIndex(i));
                                         ui.close_menu();
                                     }
-                                    if menu_item(ui, "Add to a tune...") {
+                                    if PRACTICE && menu_item(ui, "Add to a tune...") {
                                         acts.push(Action::PickTune(t.clone()));
                                         ui.close_menu();
                                     }
@@ -3650,7 +3717,7 @@ impl eframe::App for App {
 
         // files / folders dropped onto the window
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
-        if !dropped.is_empty() {
+        if PRACTICE && !dropped.is_empty() {
             self.handle_paths(dropped);
         }
         let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
@@ -3715,7 +3782,12 @@ impl eframe::App for App {
         };
         if let (true, Some(end)) = (self.pomo > 0, self.pomo_end) {
             let left = end.saturating_duration_since(Instant::now()).as_secs();
-            title = format!("{}:{:02} {}  |  {}", left / 60, left % 60, if self.pomo == 1 { "FOCUS" } else { "BREAK" }, title);
+            title = format!("{}:{:02} {}  |  {}", left / 60, left % 60, if self.pomo == 1 { "FOCUS" } else { "REST" }, title);
+        } else if self.pomo == 3 {
+            title = format!("REST OVER - NEXT FOCUS  |  {}", title);
+        }
+        if self.pomo_end.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(500));
         }
         if title != self.last_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -3771,9 +3843,6 @@ impl eframe::App for App {
                 }
                 if kp(egui::Key::P) {
                     acts.push(Action::TogglePractice);
-                }
-                if kp(egui::Key::K) {
-                    acts.push(Action::Clean);
                 }
                 if kp(egui::Key::OpenBracket) {
                     acts.push(Action::SetAAt(self.pos()));
@@ -3874,6 +3943,7 @@ impl eframe::App for App {
             p.rect_filled(r, Rounding::same(0.0), Color32::from_black_alpha(170));
             ptext(&p, r.center(), Align::Center, "DROP AUDIO FILES OR FOLDERS TO ADD THEM", 3.0, pal().bar_txt);
         }
+        self.timer_overlay(ctx, &mut acts);
         for a in acts {
             self.apply(a);
         }

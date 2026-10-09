@@ -9,9 +9,14 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 1. Upload everything in this folder to your GitHub repo (keep `.github/workflows/build.yml`;
    if hidden folders get dropped, create that file in the GitHub web UI and paste in `build.yml.copy`).
 2. Actions tab -> the `build` run -> wait ~5-10 min.
-3. Download the `tidalite-windows` artifact (a zip containing `tidalite.exe`) and run it.
+3. Each run makes four downloads (Artifacts, bottom of the run page):
+   - `tidalite-windows-practice` / `tidalite-mac-practice`: the full app with the practice studio
+   - `tidalite-windows-simple` / `tidalite-mac-simple`: just the Tidal player, none of the practice tools
+   Windows: unzip and run the `.exe`. Mac (Apple Silicon and Intel in one): unzip, then `tar -xzf` the archive, and the first
+   time right-click `tidalite` -> Open (or run `xattr -dr com.apple.quarantine tidalite`) because it is not signed.
+   Stem separation is Windows-only for now; everything else works on both.
 
-## v8 STUDIO: the practice studio
+## v9: the practice studio
 
 The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
 
@@ -23,26 +28,34 @@ The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
 - **TUNES**: your repertoire. Each tune has a status (LEARNING / WORKING / READY), key, tempo, notes and the
   *recordings worth studying* (Tidal, files or YouTube) with 1-5 stars and a note each.
   Right-click any song -> "Add to a tune...". LOOK UP (only when you press it) fetches the composer from
-  MusicBrainz and lists other recordings on Tidal; right-click one to add it.
-- **DIARY**: practice time is counted automatically while you are in PRACTICE mode. Daily goal bar,
-  week dots, a gentle streak (today not yet practiced never breaks it), per-tune time, and a journal (LOG PRACTICE).
+  MusicBrainz and lists the most popular recordings on Tidal (Tidal's own popularity score; hover for the album);
+  right-click one to add it.
+- **DIARY**: practice time is counted automatically while you are in PRACTICE mode. It shows where the time went
+  (per tune, today and the last 30 days), week dots, a gentle streak (today not yet practiced never breaks it), and a journal (LOG PRACTICE).
 - **CONTINUE** button at the top of the library resumes the last track, position and speed.
 
 ### Practice panel
 - Waveform timeline. Click to jump, **Shift + drag** to select a loop.
 - **SAVE LOOP** keeps named A-B loops per track (chips below; click to go, right-click to delete).
-- **MORE** opens: speed **TRAIN** (AUTO speeds up every N loops, EARNED speeds up after N clean passes you confirm with CLEAN / **K**),
+- **MORE** opens: speed **TRAIN** (set how many loops to play, and how many percent faster after them),
   **PITCH** transpose without changing speed, **EAR** modes (left, right, mono, no-center, bass only),
-  **EXPORT WAV** of the loop (Music/Tidalite loops), **METRO** + BPM + **TAP** tempo, **COUNT** in (2 or 4 clicks before each loop pass),
-  and a **TIMER** (focus block, then a break, with a chime; time shows in the window title).
+  **EXPORT WAV** of the loop (Music/Tidalite loops), **METRONOME** + BPM + **TAP** tempo, **COUNT** in (2 or 4 clicks before each loop pass),
+
 - **STEMS**: GET STEMS TOOL downloads (once, ~170 MB) the ONNX Runtime library and the HT-Demucs model from
   Hugging Face / GitHub. Then SPLIT THIS TRACK separates a stored track into drums, bass, other (guitar, keys, horns)
   and vocals; they are saved on disk (DISK view shows the size, CLEAR STEMS deletes them). Afterwards the pixel icons
   (drums, bass, other, vocals) switch each stem on or off; right-click an icon to hear only that one.
   Loops, slow-down, pitch and EQ all keep working on the mix.
+- **TIMER** (button in the tools row, works in every mode): set focus minutes, rest minutes and how many blocks, then START.
+  It floats bottom-right. No sound: when a block ends the window flashes and switches to REST; after the rest it waits
+  (flashing) until you press NEXT FOCUS. The time also shows in the window title.
 - **FOCUS** (chip on the player, or in MORE) hides the lists: just the player, your tools and the chart.
 
 ### Lead sheet
+The changes are found for you: open a tune's CHART tab and Tidalite fetches them from the free Jazz Standards chart list
+(about 1,300 tunes, downloaded once), plus key and composer. **I-IV-V** shows roman numerals under each chord. Tunes that aren't
+in the list (gospel, say) can still be typed in or imported from an iReal Pro link with EDIT.
+
 Right-bottom tab **CHART** (next to QUEUE): the chord changes of the open tune as a static grid, with
 CONCERT / Bb / Eb / F transposition. EDIT lets you type changes (`T44 *A | Dm7 G7 | Cmaj7 |`) or paste an
 iReal Pro `irealb://` link (fills changes, key, tempo, composer; playlist links import every song).
@@ -144,11 +157,11 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - `src/store.rs`: saved tunes, diary, sections (library.json)
 - `src/stems.rs`: stem separation (ONNX Runtime, loaded from a downloaded DLL)
 - `src/sources.rs`: files, yt-dlp, waveform, WAV export, composer lookup
-- `src/chart.rs`: chord-chart text format and iReal Pro link reader
+- `src/chart.rs`: chord-chart text format, iReal Pro link reader, Jazz Standards data, roman numerals
 
 ## Known limits
 
-- v8 has not been compiled by its author (no Rust toolchain access to crates in the sandbox). If the build fails, send the Actions error.
+- v9 has not been compiled by its author (no Rust toolchain access to crates in the sandbox). If the build fails, send the Actions error.
 - Stem separation is CPU-only: expect a few minutes per song and roughly 2-3 GB of free RAM while it runs. Windows only.
 - Hi-Res / DASH streams aren't supported (lossless requests may come back as 320k AAC for this login).
 - Only Latin text can be shown in the pixel font; other scripts appear as "?".

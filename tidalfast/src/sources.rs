@@ -147,6 +147,8 @@ pub fn ytdlp_path() -> Option<PathBuf> {
 pub fn ytdlp_download() -> Result<PathBuf, String> {
     let url = if cfg!(windows) {
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+    } else if cfg!(target_os = "macos") {
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
     } else {
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
     };
@@ -168,6 +170,11 @@ pub fn ytdlp_download() -> Result<PathBuf, String> {
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     let fin = dir.join(exe_name());
     std::fs::rename(&tmp, &fin).map_err(|e| format!("could not replace yt-dlp ({})", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&fin, std::fs::Permissions::from_mode(0o755));
+    }
     Ok(fin)
 }
 
@@ -394,4 +401,28 @@ pub fn lookup_composer(name: &str) -> Result<String, String> {
     } else {
         Ok(format!("{} - written by {}", title, writers.join(", ")))
     }
+}
+
+/// Chord changes for a tune from the open Jazz Standards data (about 1,300 songs).
+/// The file is downloaded once and kept next to the other app data.
+pub fn find_chart(name: &str) -> Result<(String, String, String), String> {
+    let path = crate::api::config_dir().join("charts.json");
+    if !path.exists() {
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(40)).build().map_err(|e| e.to_string())?;
+        let body = client
+            .get("https://raw.githubusercontent.com/mikeoliphant/JazzStandards/main/JazzStandards.json")
+            .send()
+            .and_then(|r| r.error_for_status())
+            .and_then(|r| r.text())
+            .map_err(|e| format!("couldn't reach the chart list ({})", e))?;
+        let _ = std::fs::create_dir_all(crate::api::config_dir());
+        std::fs::write(&path, body).map_err(|e| e.to_string())?;
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let list: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| {
+        let _ = std::fs::remove_file(&path);
+        e.to_string()
+    })?;
+    let song = crate::chart::find_standard(&list, name).ok_or("not in the free chart list (jazz standards only)")?;
+    crate::chart::from_standard(song).ok_or_else(|| "that chart has no chords".to_string())
 }

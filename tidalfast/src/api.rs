@@ -742,6 +742,29 @@ impl Api {
         Ok(p)
     }
 
+    /// Recordings of a tune, most popular first (Tidal's own 0-100 popularity score), one per artist.
+    pub fn popular(&self, name: &str) -> Res<Vec<(Track, u32)>> {
+        let v = self.get("/search", &[("query", name), ("limit", "50"), ("types", "TRACKS")])?;
+        let mut all: Vec<(Track, u32)> = Vec::new();
+        for it in arr(&v["tracks"]["items"]) {
+            let pop = unwrap(it)["popularity"].as_u64().unwrap_or(0) as u32;
+            all.extend(parse_track(it).map(|t| (t, pop)));
+        }
+        all.sort_by(|a, b| b.1.cmp(&a.1));
+        let want = name.to_lowercase();
+        let (named, rest): (Vec<_>, Vec<_>) = all.into_iter().partition(|(t, _)| t.title.to_lowercase().contains(&want));
+        let mut seen: Vec<String> = Vec::new();
+        let mut out = Vec::new();
+        for (t, p) in if named.len() >= 3 { named } else { named.into_iter().chain(rest).collect() } {
+            if !seen.contains(&t.artist) {
+                seen.push(t.artist.clone());
+                out.push((t, p));
+            }
+        }
+        out.truncate(12);
+        Ok(out)
+    }
+
     pub fn open(&self, c: &Card) -> Res<Page> {
         let mut p = Page { title: c.title.clone(), subtitle: c.subtitle.clone(), image: c.image.clone(), ..Default::default() };
         match c.kind {

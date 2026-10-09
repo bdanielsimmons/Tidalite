@@ -3,11 +3,22 @@ on:
   push:
   workflow_dispatch:
 jobs:
-  windows:
-    runs-on: windows-latest
+  build:
+    name: ${{ matrix.os_name }} ${{ matrix.flavor }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-latest, os_name: windows, flavor: practice, flags: "" }
+          - { runner: windows-latest, os_name: windows, flavor: simple, flags: "--no-default-features" }
+          - { runner: macos-latest, os_name: mac, flavor: practice, flags: "" }
+          - { runner: macos-latest, os_name: mac, flavor: simple, flags: "--no-default-features" }
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build
         shell: bash
         run: |
@@ -17,13 +28,21 @@ jobs:
             find . -maxdepth 3 -not -path './.git/*' | head -50
             exit 1
           fi
-          dir=$(dirname "$manifest")
-          echo "Building in $dir"
-          cd "$dir"
-          cargo build --release
-          mkdir -p "$GITHUB_WORKSPACE/out"
-          cp target/release/*.exe "$GITHUB_WORKSPACE/out/tidalite.exe"
+          cd "$(dirname "$manifest")"
+          out="$GITHUB_WORKSPACE/out"
+          mkdir -p "$out"
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            cargo build --release ${{ matrix.flags }}
+            cp target/release/tidalite.exe "$out/tidalite-${{ matrix.flavor }}.exe"
+          else
+            # one app that runs on both Apple Silicon and Intel Macs
+            cargo build --release ${{ matrix.flags }} --target aarch64-apple-darwin
+            cargo build --release ${{ matrix.flags }} --target x86_64-apple-darwin
+            lipo -create -output "$out/tidalite" target/aarch64-apple-darwin/release/tidalite target/x86_64-apple-darwin/release/tidalite
+            chmod +x "$out/tidalite"
+            (cd "$out" && tar -czf "tidalite-${{ matrix.flavor }}-mac.tar.gz" tidalite && rm tidalite)
+          fi
       - uses: actions/upload-artifact@v6
         with:
-          name: tidalite-windows
-          path: out/tidalite.exe
+          name: tidalite-${{ matrix.os_name }}-${{ matrix.flavor }}
+          path: out/*

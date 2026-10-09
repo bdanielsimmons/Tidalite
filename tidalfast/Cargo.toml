@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Tidalite - a retro desktop player for Tidal."
 
+[features]
+# `--no-default-features` builds the plain Tidal player without the practice tools
+default = ["practice"]
+practice = []
+
 [dependencies]
 eframe = "0.29"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
