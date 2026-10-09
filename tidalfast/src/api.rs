@@ -13,7 +13,7 @@ const API: &str = "https://api.tidal.com/v1";
 const AUTH: &str = "https://auth.tidal.com/v1/oauth2";
 // Public client credentials as published in the open-source `tidalapi` library.
 // Tidal rotates these occasionally. Override without recompiling by creating
-// <config dir>/tidalfast/credentials.json: {"client_id":"...","client_secret":"..."}
+// <config dir>/tidalite/credentials.json: {"client_id":"...","client_secret":"..."}
 const DEFAULT_CLIENT_ID: &str = "fX2JxdmntZWK0ixT";
 const DEFAULT_CLIENT_SECRET: &str = "1Nn9AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg=";
 const SCOPE: &str = "r_usr w_usr w_sub";
@@ -23,26 +23,49 @@ fn e2s<E: std::fmt::Display>(e: E) -> String {
 }
 
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("tidalfast")
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("tidalite")
 }
 
-/// Append a line to %APPDATA%\tidalfast\log.txt (handy when something won't play).
+/// Carry the saved login over from the old "tidalfast" folder (first run after the rename).
+fn migrate_config() {
+    let old = dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("tidalfast");
+    let new = config_dir();
+    if !new.join("session.json").exists() {
+        let _ = std::fs::create_dir_all(&new);
+        for f in ["session.json", "credentials.json"] {
+            let _ = std::fs::copy(old.join(f), new.join(f));
+        }
+    }
+}
+
+/// Append a line to %APPDATA%\tidalite\log.txt (handy when something won't play).
+static LOG_RING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 pub fn log(msg: &str) {
     use std::io::Write;
+    let t = now() % 86400; // UTC time of day
+    let line = format!("[{:02}:{:02}:{:02}] {}", t / 3600, (t / 60) % 60, t % 60, msg);
+    if let Ok(mut r) = LOG_RING.lock() {
+        r.push(line.clone());
+        let n = r.len();
+        if n > 400 {
+            r.drain(0..n - 400);
+        }
+    }
     let dir = config_dir();
     let _ = std::fs::create_dir_all(&dir);
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("log.txt")) {
-        let _ = writeln!(f, "[{}] {}", now(), msg);
+        let _ = writeln!(f, "{}", line);
     }
+}
+
+/// Everything logged this run (shown by the LOG button).
+pub fn log_text() -> String {
+    LOG_RING.lock().map(|r| r.join("\n")).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- data types
@@ -82,6 +105,10 @@ pub struct Page {
     pub tracks: Vec<Track>,
     pub rows: Vec<(String, Vec<Card>)>,
     pub rows_first: bool,
+    /// The "Your Library" page (shown with MY TRACKS / LISTS / ALBUMS / ARTISTS tabs).
+    pub library: bool,
+    /// Total number of liked songs on Tidal (only set on the library page).
+    pub total: usize,
 }
 
 pub struct DeviceCode {
@@ -139,12 +166,10 @@ fn image_url(uuid: &str, w: u32, h: u32) -> String {
     if uuid.is_empty() {
         return String::new();
     }
-    format!(
-        "https://resources.tidal.com/images/{}/{}x{}.jpg",
-        uuid.replace('-', "/"),
-        w,
-        h
-    )
+    if uuid.starts_with("http") {
+        return uuid.to_string(); // YouTube thumbnails are full URLs already
+    }
+    format!("https://resources.tidal.com/images/{}/{}x{}.jpg", uuid.replace('-', "/"), w, h)
 }
 
 fn arr(v: &Value) -> &[Value] {
@@ -176,11 +201,7 @@ fn parse_track(v: &Value) -> Option<Track> {
             title = format!("{} ({})", title, ver);
         }
     }
-    let artist = t["artist"]["name"]
-        .as_str()
-        .or_else(|| t["artists"][0]["name"].as_str())
-        .unwrap_or("")
-        .to_string();
+    let artist = t["artist"]["name"].as_str().or_else(|| t["artists"][0]["name"].as_str()).unwrap_or("").to_string();
     Some(Track {
         id,
         title,
@@ -189,6 +210,33 @@ fn parse_track(v: &Value) -> Option<Track> {
         cover: t["album"]["cover"].as_str().unwrap_or("").to_string(),
         duration: t["duration"].as_f64().unwrap_or(0.0) as f32,
     })
+}
+
+/// Parse "[mm:ss.xx] text" lines (LRC) into (seconds, text), sorted by time.
+fn parse_lrc(s: &str) -> Vec<(f32, String)> {
+    let mut out: Vec<(f32, String)> = Vec::new();
+    for line in s.lines() {
+        let mut rest = line.trim();
+        let mut times: Vec<f32> = Vec::new();
+        while rest.starts_with('[') {
+            match rest.find(']') {
+                Some(end) => {
+                    if let Some((m, sec)) = rest[1..end].split_once(':') {
+                        if let (Ok(m), Ok(sec)) = (m.trim().parse::<f32>(), sec.trim().parse::<f32>()) {
+                            times.push(m * 60.0 + sec);
+                        }
+                    }
+                    rest = rest[end + 1..].trim_start();
+                }
+                None => break,
+            }
+        }
+        for t in times {
+            out.push((t, rest.to_string()));
+        }
+    }
+    out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    out
 }
 
 fn tracks_from(items: &[Value]) -> Vec<Track> {
@@ -264,9 +312,10 @@ pub struct Api {
 
 impl Api {
     pub fn new() -> Api {
+        migrate_config();
         let http = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(30))
-            .user_agent("Mozilla/5.0 (tidalfast)")
+            .user_agent("Mozilla/5.0 (tidalite)")
             .build()
             .expect("http client");
 
@@ -477,20 +526,23 @@ impl Api {
             if !country.is_empty() {
                 q.push(("countryCode", country.as_str()));
             }
-            let r = self
-                .http
-                .get(format!("{}{}", API, path))
-                .bearer_auth(&tok)
-                .query(&q)
-                .send()
-                .map_err(e2s)?;
+            let t0 = std::time::Instant::now();
+            let r = match self.http.get(format!("{}{}", API, path)).bearer_auth(&tok).query(&q).send() {
+                Ok(r) => r,
+                Err(e) => {
+                    log(&format!("GET {} failed to send: {}", path, e));
+                    return Err(e.to_string());
+                }
+            };
             let st = r.status();
+            log(&format!("GET {} -> {} ({} ms)", path, st.as_u16(), t0.elapsed().as_millis()));
             if st.as_u16() == 401 && attempt == 0 {
                 self.refresh()?;
                 continue;
             }
             if !st.is_success() {
                 let t = r.text().unwrap_or_default();
+                log(&format!("  error body: {}", t.chars().take(300).collect::<String>()));
                 return Err(format!("{} {}: {}", st.as_u16(), path, t.chars().take(160).collect::<String>()));
             }
             return r.json::<Value>().map_err(e2s);
@@ -521,14 +573,7 @@ impl Api {
 
     /// Raw bytes of any URL (cover art, audio file).
     pub fn fetch(&self, url: &str) -> Res<Vec<u8>> {
-        let r = self
-            .http
-            .get(url)
-            .timeout(Duration::from_secs(600))
-            .send()
-            .map_err(e2s)?
-            .error_for_status()
-            .map_err(e2s)?;
+        let r = self.http.get(url).timeout(Duration::from_secs(600)).send().map_err(e2s)?.error_for_status().map_err(e2s)?;
         r.bytes().map(|b| b.to_vec()).map_err(e2s)
     }
 
@@ -556,46 +601,136 @@ impl Api {
 
     pub fn my_playlists(&self) -> Res<Vec<Card>> {
         let uid = self.uid();
+        if let Ok(v) = self.get(&format!("/users/{}/playlistsAndFavoritePlaylists", uid), &[("limit", "100")]) {
+            let c = cards_from(arr(&v["items"]));
+            if !c.is_empty() {
+                return Ok(c);
+            }
+        }
+        let mut out: Vec<Card> = Vec::new();
+        let mut last_err = String::new();
+        for p in ["playlists", "favorites/playlists"] {
+            match self.get(&format!("/users/{}/{}", uid, p), &[("limit", "100")]) {
+                Ok(v) => out.extend(cards_from(arr(&v["items"]))),
+                Err(e) => last_err = e,
+            }
+        }
+        if out.is_empty() && !last_err.is_empty() {
+            return Err(last_err);
+        }
+        Ok(out)
+    }
+
+    /// Like (true) or unlike (false) a track.
+    pub fn set_liked(&self, id: i64, like: bool) -> Res<()> {
+        let (exp, has_rt) = {
+            let s = self.session.lock().unwrap();
+            (s.expires_at, !s.refresh_token.is_empty())
+        };
+        if has_rt && exp > 0 && exp < now() + 60 {
+            let _ = self.refresh();
+        }
+        let (tok, country, uid) = {
+            let s = self.session.lock().unwrap();
+            (s.access_token.clone(), s.country.clone(), s.user_id)
+        };
+        let base = format!("{}/users/{}/favorites/tracks", API, uid);
+        let idstr = id.to_string();
+        let r = if like {
+            self.http
+                .post(&base)
+                .bearer_auth(&tok)
+                .query(&[("countryCode", country.as_str())])
+                .form(&[("trackIds", idstr.as_str()), ("onArtifactNotFound", "SKIP")])
+                .send()
+        } else {
+            self.http.delete(format!("{}/{}", base, idstr)).bearer_auth(&tok).query(&[("countryCode", country.as_str())]).send()
+        };
+        let r = r.map_err(e2s)?;
+        let st = r.status();
+        log(&format!("{} favorite {} -> {}", if like { "POST" } else { "DELETE" }, id, st.as_u16()));
+        if st.is_success() {
+            Ok(())
+        } else {
+            let t = r.text().unwrap_or_default();
+            log(&format!("  error body: {}", t.chars().take(300).collect::<String>()));
+            Err(format!("{}: {}", st.as_u16(), t.chars().take(120).collect::<String>()))
+        }
+    }
+
+    /// One page (100) of liked songs starting at `offset`.
+    /// Returns (tracks, total liked songs, raw item count in this page).
+    pub fn fav_tracks(&self, offset: usize) -> Res<(Vec<Track>, usize, usize)> {
+        let uid = self.uid();
+        let off = offset.to_string();
         let v = self.get(
-            &format!("/users/{}/playlistsAndFavoritePlaylists", uid),
-            &[("limit", "100"), ("order", "DATE"), ("orderDirection", "DESC")],
+            &format!("/users/{}/favorites/tracks", uid),
+            &[("limit", "100"), ("offset", off.as_str()), ("order", "DATE"), ("orderDirection", "DESC")],
         )?;
-        Ok(cards_from(arr(&v["items"])))
+        let total = v["totalNumberOfItems"].as_u64().unwrap_or(0) as usize;
+        let raw = arr(&v["items"]);
+        Ok((tracks_from(raw), total, raw.len()))
     }
 
     pub fn library(&self) -> Res<Page> {
         let uid = self.uid();
-        let mut p = Page { title: "Your Library".to_string(), rows_first: true, ..Default::default() };
-        if let Ok(pl) = self.my_playlists() {
-            if !pl.is_empty() {
-                p.rows.push(("Playlists".to_string(), pl));
+        let mut p = Page { title: "Your Library".to_string(), library: true, ..Default::default() };
+        let mut errs: Vec<String> = Vec::new();
+        match self.fav_tracks(0) {
+            Ok((t, total, _)) => {
+                p.total = total.max(t.len());
+                p.tracks = t;
             }
+            Err(e) => errs.push(e),
         }
-        if let Ok(v) = self.get(&format!("/users/{}/favorites/albums", uid), &[("limit", "50")]) {
-            let c = cards_from(arr(&v["items"]));
+        match self.my_playlists() {
+            Ok(pl) => {
+                if !pl.is_empty() {
+                    p.rows.push(("Playlists".to_string(), pl));
+                }
+            }
+            Err(e) => errs.push(e),
+        }
+        if let Ok(items) = self.paged(&format!("/users/{}/favorites/albums", uid), &[], 1000) {
+            let c = cards_from(&items);
             if !c.is_empty() {
                 p.rows.push(("Albums".to_string(), c));
             }
         }
-        if let Ok(v) = self.get(&format!("/users/{}/favorites/artists", uid), &[("limit", "50")]) {
-            let c = cards_from(arr(&v["items"]));
+        if let Ok(items) = self.paged(&format!("/users/{}/favorites/artists", uid), &[], 1000) {
+            let c = cards_from(&items);
             if !c.is_empty() {
                 p.rows.push(("Artists".to_string(), c));
             }
         }
-        let v = self.get(
-            &format!("/users/{}/favorites/tracks", uid),
-            &[("limit", "100"), ("order", "DATE"), ("orderDirection", "DESC")],
-        )?;
-        p.tracks = tracks_from(arr(&v["items"]));
+        if p.tracks.is_empty() && p.rows.is_empty() {
+            if let Some(e) = errs.into_iter().next() {
+                return Err(e);
+            }
+        }
         Ok(p)
     }
 
+    /// Lyrics for a track: (lines with start time in seconds, true if the timings are real).
+    pub fn lyrics(&self, id: i64) -> Res<(Vec<(f32, String)>, bool)> {
+        let v = self.get(&format!("/tracks/{}/lyrics", id), &[("deviceType", "PHONE"), ("locale", "en_US")])?;
+        if let Some(s) = v["subtitles"].as_str() {
+            let l = parse_lrc(s);
+            if !l.is_empty() {
+                return Ok((l, true));
+            }
+        }
+        if let Some(s) = v["lyrics"].as_str() {
+            let l: Vec<(f32, String)> = s.lines().map(|x| (-1.0, x.trim().to_string())).collect();
+            if l.iter().any(|(_, t)| !t.is_empty()) {
+                return Ok((l, false));
+            }
+        }
+        Err("no lyrics".to_string())
+    }
+
     pub fn search(&self, q: &str) -> Res<Page> {
-        let v = self.get(
-            "/search",
-            &[("query", q), ("limit", "30"), ("types", "TRACKS,ALBUMS,ARTISTS,PLAYLISTS")],
-        )?;
+        let v = self.get("/search", &[("query", q), ("limit", "30"), ("types", "TRACKS,ALBUMS,ARTISTS,PLAYLISTS")])?;
         let mut p = Page { title: format!("Results for \"{}\"", q), ..Default::default() };
         p.tracks = tracks_from(arr(&v["tracks"]["items"]));
         for (label, key) in [("Albums", "albums"), ("Artists", "artists"), ("Playlists", "playlists")] {
@@ -608,12 +743,7 @@ impl Api {
     }
 
     pub fn open(&self, c: &Card) -> Res<Page> {
-        let mut p = Page {
-            title: c.title.clone(),
-            subtitle: c.subtitle.clone(),
-            image: c.image.clone(),
-            ..Default::default()
-        };
+        let mut p = Page { title: c.title.clone(), subtitle: c.subtitle.clone(), image: c.image.clone(), ..Default::default() };
         match c.kind {
             Kind::Album => {
                 let items = self.paged(&format!("/albums/{}/items", c.id), &[], 500)?;

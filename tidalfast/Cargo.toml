@@ -1,8 +1,8 @@
 [package]
-name = "tidalfast"
+name = "tidalite"
 version = "0.1.0"
 edition = "2021"
-description = "Tidal, native and fast."
+description = "Tidalite - a retro desktop player for Tidal."
 
 [dependencies]
 eframe = "0.29"
@@ -10,10 +10,17 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # native-tls = Windows' own certificate store, so corporate/IT proxy certs are trusted
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+symphonia = { version = "0.5", default-features = false, features = ["aac", "isomp4", "flac", "mp3", "alac", "pcm", "wav", "ogg", "vorbis"] }
 rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
 webbrowser = "1"
+# native file dialogs (ADD FILES / ADD FOLDER)
+rfd = { version = "0.15", default-features = false }
 dirs = "5"
 base64 = "0.22"
+# stem separation: ONNX Runtime is loaded from a DLL that is downloaded on demand (nothing is linked in)
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 opt-level = 3

@@ -14,7 +14,7 @@ use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use symphonia::core::units::Time;
+use symphonia::core::units::{Time, TimeBase};
 
 struct MemSrc {
     cur: Cursor<Vec<u8>>,
@@ -51,6 +51,9 @@ pub struct SymSource {
     rate: u32,
     channels: u16,
     dur: Option<Duration>,
+    tb: Option<TimeBase>,
+    /// samples still to discard after a coarse seek, so seeks land on the exact frame
+    skip: usize,
 }
 
 impl SymSource {
@@ -101,7 +104,18 @@ impl SymSource {
                 Err(e) => return Err(format!("decode: {}", e)),
             }
         };
-        Ok(SymSource { format, decoder, track_id, buf: first, idx: 0, rate, channels: channels.max(1), dur })
+        Ok(SymSource {
+            format,
+            decoder,
+            track_id,
+            buf: first,
+            idx: 0,
+            rate,
+            channels: channels.max(1),
+            dur,
+            tb: params.time_base,
+            skip: 0,
+        })
     }
 }
 
@@ -122,17 +136,27 @@ impl Iterator for SymSource {
             if pkt.track_id() != self.track_id {
                 continue;
             }
-            match self.decoder.decode(&pkt) {
-                Ok(d) => {
+            // a panic inside the codec must not kill the audio thread silently
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.decoder.decode(&pkt).map(|d| {
                     let spec = *d.spec();
                     let mut sb = SampleBuffer::<i16>::new(d.capacity() as u64, spec);
                     sb.copy_interleaved_ref(d);
-                    self.buf.clear();
-                    self.buf.extend_from_slice(sb.samples());
+                    sb.samples().to_vec()
+                })
+            }));
+            match res {
+                Ok(Ok(samples)) => {
+                    self.buf = samples;
                     self.idx = 0;
+                    if self.skip > 0 {
+                        let n = self.skip.min(self.buf.len());
+                        self.idx = n;
+                        self.skip -= n;
+                    }
                 }
-                Err(SErr::DecodeError(_)) => continue,
-                Err(_) => return None,
+                Ok(Err(SErr::DecodeError(_))) => continue,
+                _ => return None,
             }
         }
     }
@@ -153,14 +177,18 @@ impl Source for SymSource {
     }
     fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
         let t = Time::new(pos.as_secs(), pos.subsec_nanos() as f64 / 1e9);
-        match self.format.seek(
-            SeekMode::Coarse,
-            SeekTo::Time { time: t, track_id: Some(self.track_id) },
-        ) {
-            Ok(_) => {
+        match self.format.seek(SeekMode::Coarse, SeekTo::Time { time: t, track_id: Some(self.track_id) }) {
+            Ok(to) => {
                 self.decoder.reset();
                 self.buf.clear();
                 self.idx = 0;
+                self.skip = 0;
+                if let Some(tb) = self.tb {
+                    let diff = to.required_ts.saturating_sub(to.actual_ts);
+                    let d = tb.calc_time(diff);
+                    let frames = (d.seconds as f64 + d.frac) * self.rate as f64;
+                    self.skip = frames.round() as usize * self.channels as usize;
+                }
                 Ok(())
             }
             Err(_) => Err(SeekError::NotSupported { underlying_source: "symphonia" }),
