@@ -204,10 +204,105 @@ fn last_line(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("unknown error").trim().to_string()
 }
 
+/// Which browser's SoundCloud sign-in yt-dlp borrows: 0 none, 1 firefox, 2 chrome, 3 edge.
+pub static SC_BROWSER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+pub const SC_BROWSERS: [&str; 4] = ["OFF", "FIREFOX", "CHROME", "EDGE"];
+
+/// `--cookies-from-browser <name>` for SoundCloud requests when switched on.
+fn cookie_args() -> Vec<String> {
+    match SC_BROWSER.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => vec!["--cookies-from-browser".into(), "firefox".into()],
+        2 => vec!["--cookies-from-browser".into(), "chrome".into()],
+        3 => vec!["--cookies-from-browser".into(), "edge".into()],
+        _ => Vec::new(),
+    }
+}
+
+/// A YouTube video id, or (SoundCloud and others) a full link.
+fn media_url(src: &str) -> String {
+    if src.starts_with("http") {
+        src.to_string()
+    } else {
+        format!("https://www.youtube.com/watch?v={}", src)
+    }
+}
+
+/// A file-name-safe stem for the temporary download of `src`.
+fn file_stem(src: &str) -> String {
+    if src.starts_with("http") {
+        format!("sc{}", hash_id(src).unsigned_abs())
+    } else {
+        src.to_string()
+    }
+}
+
+/// SoundCloud entries as yt-dlp lists them (one JSON object per line, "flat" = no per-track requests).
+fn parse_entries(bytes: &[u8]) -> Vec<Ext> {
+    let mut out: Vec<Ext> = Vec::new();
+    for line in String::from_utf8_lossy(bytes).lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let url = v["webpage_url"].as_str().or_else(|| v["url"].as_str()).unwrap_or("");
+        if !url.starts_with("http") || !url.contains("soundcloud.com") || out.iter().any(|e| e.src == url) {
+            continue;
+        }
+        let cover = v["thumbnail"]
+            .as_str()
+            .map(|s| s.to_string())
+            .or_else(|| v["thumbnails"].as_array().and_then(|a| a.last()).and_then(|t| t["url"].as_str()).map(|s| s.to_string()))
+            .unwrap_or_default();
+        out.push(Ext {
+            kind: "yt".to_string(),
+            id: hash_id(&format!("yt:{}", url)),
+            src: url.to_string(),
+            title: v["title"].as_str().unwrap_or("SoundCloud track").to_string(),
+            artist: v["uploader"].as_str().or_else(|| v["channel"].as_str()).unwrap_or("SoundCloud").to_string(),
+            dur: v["duration"].as_f64().unwrap_or(0.0) as f32,
+            cover,
+        });
+    }
+    out
+}
+
+/// Search SoundCloud (no account needed).
+pub fn sc_search(query: &str) -> Result<Vec<Ext>, String> {
+    let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
+    let out = command(&exe)
+        .args(["--no-warnings", "--flat-playlist", "--dump-json"])
+        .args(cookie_args())
+        .arg(format!("scsearch15:{}", query))
+        .output()
+        .map_err(|e| format!("could not run yt-dlp: {}", e))?;
+    let list = parse_entries(&out.stdout);
+    if list.is_empty() {
+        return Err(if out.status.success() { "nothing found".to_string() } else { last_line(&out.stderr) });
+    }
+    Ok(list)
+}
+
+/// A SoundCloud track, playlist, likes page or profile link: list what is in it (first 100).
+pub fn sc_list(url: &str) -> Result<Vec<Ext>, String> {
+    let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
+    let out = command(&exe)
+        .args(["--no-warnings", "--flat-playlist", "--dump-json", "--playlist-end", "100"])
+        .args(cookie_args())
+        .arg(url.trim())
+        .output()
+        .map_err(|e| format!("could not run yt-dlp: {}", e))?;
+    let mut list = parse_entries(&out.stdout);
+    if list.is_empty() && out.status.success() {
+        // a single track comes back as one full object
+        list = parse_entries(&out.stdout);
+    }
+    if list.is_empty() {
+        return Err(if out.status.success() { "nothing found at that link".to_string() } else { last_line(&out.stderr) });
+    }
+    Ok(list)
+}
+
 /// Title / uploader / length / thumbnail of a clip.
 pub fn yt_info(vid: &str) -> Result<Ext, String> {
     let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
-    let url = format!("https://www.youtube.com/watch?v={}", vid);
+    let url = media_url(vid);
     let out = command(&exe)
         .args(["--no-playlist", "--no-warnings", "--dump-single-json"])
         .arg(&url)
@@ -231,15 +326,21 @@ pub fn yt_info(vid: &str) -> Result<Ext, String> {
         title,
         artist,
         dur: v["duration"].as_f64().unwrap_or(0.0) as f32,
-        cover: format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", vid),
+        cover: if vid.starts_with("http") {
+            v["thumbnail"].as_str().unwrap_or("").to_string()
+        } else {
+            format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", vid)
+        },
     })
 }
 
 /// Download the audio of a clip (AAC in an m4a, which the player can decode) and return the bytes.
-pub fn yt_fetch(vid: &str) -> Result<Vec<u8>, String> {
+pub fn yt_fetch(src: &str) -> Result<Vec<u8>, String> {
     let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
     let tmp = crate::api::config_dir().join("tmp");
     let _ = std::fs::create_dir_all(&tmp);
+    let stem = file_stem(vid);
+    let vid = stem.as_str();
     if let Ok(rd) = std::fs::read_dir(&tmp) {
         for e in rd.flatten() {
             if e.file_name().to_string_lossy().starts_with(vid) {
@@ -247,9 +348,16 @@ pub fn yt_fetch(vid: &str) -> Result<Vec<u8>, String> {
             }
         }
     }
-    let url = format!("https://www.youtube.com/watch?v={}", vid);
+    let url = media_url(src);
     let out = command(&exe)
-        .args(["--no-playlist", "--no-warnings", "--no-progress", "-f", "140/bestaudio[ext=m4a]/bestaudio"])
+        .args([
+            "--no-playlist",
+            "--no-warnings",
+            "--no-progress",
+            "-f",
+            "140/http_mp3_1_0/http_mp3_0_0/bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio",
+        ])
+        .args(if url.contains("soundcloud.com") { cookie_args() } else { Vec::new() })
         .arg("-o")
         .arg(tmp.join(format!("{}.%(ext)s", vid)))
         .arg(&url)
@@ -270,8 +378,8 @@ pub fn yt_fetch(vid: &str) -> Result<Vec<u8>, String> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let bytes = std::fs::read(&path).map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&path);
-    if ext == "webm" || ext == "opus" {
-        return Err("YouTube only offered Opus audio - press UPDATE YT-DLP and try again".to_string());
+    if ext == "webm" || ext == "opus" || ext == "ogg" {
+        return Err("Only Opus audio was offered - press UPDATE YT-DLP and try again".to_string());
     }
     bytes
 }
@@ -404,25 +512,30 @@ pub fn lookup_composer(name: &str) -> Result<String, String> {
 }
 
 /// Chord changes for a tune from the open Jazz Standards data (about 1,300 songs).
-/// The file is downloaded once and kept next to the other app data.
-pub fn find_chart(name: &str) -> Result<(String, String, String), String> {
+/// The file is downloaded once and kept next to the other app data. On a miss the error
+/// carries the closest titles, for "did you mean" buttons.
+pub fn find_chart(name: &str) -> Result<(String, String, String), (String, Vec<String>)> {
+    let fail = |e: String| (e, Vec::new());
     let path = crate::api::config_dir().join("charts.json");
     if !path.exists() {
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(40)).build().map_err(|e| e.to_string())?;
+        let client =
+            reqwest::blocking::Client::builder().timeout(Duration::from_secs(40)).build().map_err(|e| fail(e.to_string()))?;
         let body = client
             .get("https://raw.githubusercontent.com/mikeoliphant/JazzStandards/main/JazzStandards.json")
             .send()
             .and_then(|r| r.error_for_status())
             .and_then(|r| r.text())
-            .map_err(|e| format!("couldn't reach the chart list ({})", e))?;
+            .map_err(|e| fail(format!("couldn't reach the chart list ({})", e)))?;
         let _ = std::fs::create_dir_all(crate::api::config_dir());
-        std::fs::write(&path, body).map_err(|e| e.to_string())?;
+        std::fs::write(&path, body).map_err(|e| fail(e.to_string()))?;
     }
-    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&path).map_err(|e| fail(e.to_string()))?;
     let list: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| {
         let _ = std::fs::remove_file(&path);
-        e.to_string()
+        fail(e.to_string())
     })?;
-    let song = crate::chart::find_standard(&list, name).ok_or("not in the free chart list (jazz standards only)")?;
-    crate::chart::from_standard(song).ok_or_else(|| "that chart has no chords".to_string())
+    match crate::chart::find_standard(&list, name) {
+        Some(song) => crate::chart::from_standard(song).ok_or_else(|| fail("that chart has no chords".to_string())),
+        None => Err(("not in the free chart list (jazz standards only)".to_string(), crate::chart::suggest(&list, name, 5))),
+    }
 }

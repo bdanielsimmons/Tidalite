@@ -2,6 +2,7 @@
 //! diary, saved sections, the speed trainer, metronome and the rest. (The drawing is in views.rs.)
 
 use crate::api::{self, Track};
+use crate::band;
 use crate::player::Cmd;
 use crate::sources::{self, Src};
 use crate::stems;
@@ -15,14 +16,60 @@ use std::time::{Duration, Instant};
 
 pub const CHAN_NAMES: [&str; 6] = ["STEREO", "LEFT ONLY", "RIGHT ONLY", "MONO", "NO CENTER", "BASS ONLY"];
 
-/// The little +/- numbers of the focus timer and the speed trainer.
-#[derive(Clone, Copy)]
+/// The settable numbers (the +/- buttons and the typed boxes next to them).
+#[derive(Clone, Copy, PartialEq)]
 pub enum Knob {
     Focus,
     Rest,
     Blocks,
     Loops,
     Step,
+    Speed,
+    LoopA,
+    LoopB,
+    Bpm,
+    Beats,
+    GapPlay,
+    GapMute,
+    RampBars,
+    RampBpm,
+    Shift,
+}
+
+/// Switches and small cycles (metronome, band, timer).
+#[derive(Clone, Copy)]
+pub enum Opt {
+    MetroOn,
+    Preset(u8),
+    Level(usize),
+    Sub,
+    Follow,
+    Sync,
+    Double,
+    Half,
+    FindBeats,
+    Band,
+    BandStyle,
+    Part(usize),
+    PomoSound,
+}
+
+/// "1:23.5", "83" -> seconds
+pub fn parse_time(t: &str) -> Option<f32> {
+    let t = t.trim();
+    match t.split_once(':') {
+        Some((m, s)) => Some(m.trim().parse::<f32>().ok()? * 60.0 + s.trim().parse::<f32>().ok()?),
+        None => t.parse::<f32>().ok(),
+    }
+    .filter(|v| *v >= 0.0)
+}
+
+fn knob_step(k: Knob) -> f32 {
+    match k {
+        Knob::Focus | Knob::Speed | Knob::Shift => 5.0,
+        Knob::LoopA | Knob::LoopB => 0.2,
+        _ => 1.0,
+    }
 }
 
 fn wave_path(id: i64) -> PathBuf {
@@ -72,6 +119,7 @@ impl App {
         let mut vs: Vec<Version> = Vec::new();
         vs.extend(self.store.files.iter().map(|e| e.to_version()));
         vs.extend(self.store.yt.iter().map(|e| e.to_version()));
+        vs.extend(self.store.sc.iter().map(|e| e.to_version()));
         for t in &self.store.tunes {
             vs.extend(t.versions.iter().cloned());
         }
@@ -127,9 +175,22 @@ impl App {
         self.store.tunes.iter().position(|t| t.name.trim().to_lowercase() == w)
     }
 
-    /// The tune the lead sheet should show: the one open in TUNES, else the playing track's tune.
+    /// The tune the lead sheet follows: the one you opened, or the playing track's tune. None = a
+    /// track that is in no tune (its chart is looked up on its own).
     pub(crate) fn chart_tune(&self) -> Option<usize> {
-        self.tune_open.filter(|i| *i < self.store.tunes.len()).or_else(|| self.cur_tune())
+        if self.chart_live {
+            return None;
+        }
+        self.chart_pick.filter(|i| *i < self.store.tunes.len()).or_else(|| self.cur_tune())
+    }
+
+    /// Chart text on show right now.
+    pub(crate) fn chart_text(&self) -> Option<String> {
+        match self.chart_tune() {
+            Some(i) => Some(self.store.tunes[i].chart.clone()),
+            None => self.live.as_ref().map(|l| l.0.clone()),
+        }
+        .filter(|t| !t.trim().is_empty())
     }
 
     pub(crate) fn practice_label(&self) -> String {
@@ -219,17 +280,134 @@ impl App {
         }
     }
 
-    /// Keep the metronome in step with tempo, speed and whether anything is playing.
-    fn update_metro(&mut self, playing: bool) {
-        let ms = if self.metro_on && self.bpm > 0 && self.practice && playing {
-            let iv = 60.0 / (self.bpm as f32 * self.speed as f32 / 100.0);
-            (iv * 1000.0) as u32
+    /// Tempo the metronome clicks at right now (beats per real minute).
+    fn metro_tempo(&self, playing: bool) -> f32 {
+        let base = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32 + self.mt_add;
+        if self.mt.follow && self.practice && playing {
+            base * self.speed as f32 / 100.0
         } else {
-            0
+            base
+        }
+    }
+
+    /// Keep the metronome and the band going: tempo changes, speed-up drill, locking to the track.
+    fn update_metro(&mut self, playing: bool) {
+        self.band_tick();
+        if !self.mt.on {
+            if self.mt_sig != 0 {
+                self.player.send(Cmd::Pcm(0, Vec::new(), Vec::new(), 0.0));
+                self.mt_sig = 0;
+                self.mt_vis = None;
+            }
+            return;
+        }
+        let tid = self.cur_track().map(|t| t.id);
+        let locked = self.mt.sync && playing && self.beat.map_or(false, |b| Some(b.0) == tid);
+        if self.mt.sync && !locked {
+            // locking was asked for but there is nothing to lock to yet
+            if self.mt_sig != 0 {
+                self.player.send(Cmd::Pcm(0, Vec::new(), Vec::new(), 0.0));
+                self.mt_sig = 0;
+                self.mt_vis = None;
+            }
+            return;
+        }
+        let ratio = if self.practice && playing { self.speed as f32 / 100.0 } else { 1.0 };
+        if !locked && self.mt.ramp_bars > 0 {
+            let tempo = self.metro_tempo(playing);
+            let bar = self.mt.beats as f32 * 60.0 / tempo.max(20.0);
+            if self.mt_step_at.elapsed().as_secs_f32() >= self.mt.ramp_bars as f32 * bar {
+                if tempo + self.mt.ramp_bpm as f32 <= self.mt.ramp_max as f32 {
+                    self.mt_add += self.mt.ramp_bpm as f32;
+                }
+                self.mt_step_at = Instant::now();
+            }
+        }
+        if locked {
+            let pos = self.pos();
+            let (last, at) = self.mt_pos;
+            if (pos - (last + at.elapsed().as_secs_f32() * ratio)).abs() > 0.25 || self.mt_sync_at.elapsed().as_secs() >= 12 {
+                self.mt_gen += 1;
+                self.mt_sync_at = Instant::now();
+            }
+            self.mt_pos = (pos, Instant::now());
+        }
+        let period = self.beat.map_or(0.5, |b| b.1);
+        let tempo = if locked { 60.0 * ratio / period } else { self.metro_tempo(playing) };
+        let m = &self.mt;
+        let mut sig = (tempo * 10.0) as u64 ^ ((m.beats as u64) << 20) ^ ((m.sub as u64) << 24) ^ ((m.gap_play as u64) << 28);
+        sig ^= (m.gap_mute as u64) << 34 ^ (locked as u64) << 40 ^ (self.mt_gen as u64) << 41;
+        for l in &m.levels[..m.beats.clamp(1, 12) as usize] {
+            sig = sig.wrapping_mul(31).wrapping_add(*l as u64 + 1);
+        }
+        sig |= 1 << 63;
+        if sig == self.mt_sig {
+            return;
+        }
+        self.mt_sig = sig;
+        let mut cfg = self.mt.clone();
+        let mut lead = Vec::new();
+        let mut wait = 0.0f32;
+        if locked {
+            cfg.beats = 1;
+            cfg.levels = [2; 12];
+            cfg.gap_play = 0;
+            if let Some((_, period, phase)) = self.beat {
+                let pos = self.pos();
+                let next = phase + ((pos - phase) / period).ceil().max(0.0) * period;
+                let each = period / ratio;
+                wait = ((next - pos).max(0.0) / ratio + self.mt.shift_ms as f32 / 1000.0).rem_euclid(each);
+                lead = vec![0i16; (wait * band::RATE) as usize];
+            }
+        }
+        let body = band::click_loop(&cfg, tempo);
+        let cycle =
+            cfg.beats.clamp(1, 12) as usize * if cfg.gap_play > 0 { (cfg.gap_play + cfg.gap_mute.max(1)) as usize } else { 1 };
+        self.mt_vis = Some((Instant::now() + Duration::from_secs_f32(wait), 60.0 / tempo, cycle));
+        self.player.send(Cmd::Pcm(0, lead, body, 0.8));
+    }
+
+    // ------------------------------------------------------------------ band
+    fn band_sig_now(&self) -> u64 {
+        let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as u64;
+        bpm ^ (self.band_style as u64) << 12
+            ^ (self.band_parts.iter().enumerate().map(|(i, p)| (*p as u64) << i).sum::<u64>()) << 20
+    }
+
+    fn band_start(&mut self) {
+        let Some(text) = self.chart_text() else {
+            self.set_note("NO CHART TO PLAY YET");
+            return;
         };
-        if ms != self.metro_iv {
-            self.metro_iv = ms;
-            self.player.send(Cmd::Metro(if ms == 0 { None } else { Some(ms as f32 / 1000.0) }));
+        let chart = crate::chart::parse_friendly(&text);
+        if chart.bars.is_empty() {
+            return;
+        }
+        let order = chart.play_order();
+        let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32;
+        let body = band::render(&chart, &order, bpm, self.band_style, self.band_parts);
+        let lead = band::count_in(chart.beats, bpm);
+        self.band_bar = chart.beats as f32 * 60.0 / bpm;
+        self.band_lead = self.band_bar;
+        self.band_order = order;
+        self.band_t0 = Instant::now();
+        self.band_on = true;
+        self.band_chart = text;
+        self.band_sig = self.band_sig_now();
+        self.player.send(Cmd::Pcm(1, lead, body, 0.9));
+    }
+
+    pub(crate) fn band_stop(&mut self) {
+        if self.band_on {
+            self.player.send(Cmd::Pcm(1, Vec::new(), Vec::new(), 0.0));
+            self.band_on = false;
+        }
+    }
+
+    /// Restart the band when its tempo, style or parts changed.
+    fn band_tick(&mut self) {
+        if self.band_on && self.band_sig != self.band_sig_now() {
+            self.band_start();
         }
     }
 
@@ -248,6 +426,13 @@ impl App {
                 self.loop_b = None;
                 self.loop_on = false;
             }
+        }
+        match self.store.tune_of(t.id) {
+            Some(i) => {
+                self.chart_pick = Some(i);
+                self.chart_live = false;
+            }
+            None => self.chart_live = true,
         }
         self.semis = 0;
         self.stem_on = [true; 4];
@@ -415,6 +600,22 @@ impl App {
                     }
                 }
             }
+            Msg::Sc(r) => {
+                self.sc_busy = false;
+                match r {
+                    Ok(list) => {
+                        self.sc_msg = format!("{} TRACKS", list.len());
+                        for e in &list {
+                            self.register(&e.to_version());
+                        }
+                        self.sc_results = list;
+                    }
+                    Err(e) => {
+                        api::log(&format!("soundcloud: {}", e));
+                        self.sc_msg = format!("ERROR: {}", e);
+                    }
+                }
+            }
             Msg::YtTool(r) => {
                 self.yt_busy = false;
                 match r {
@@ -479,10 +680,37 @@ impl App {
                         if t.info.is_empty() && !composer.is_empty() {
                             t.info = format!("{} - written by {}", name, composer);
                         }
+                        self.chart_sugg.clear();
                         self.store_dirty = true;
                         self.set_note(&format!("FOUND THE CHANGES FOR {}", name.to_uppercase()));
                     }
-                    Err(e) => self.set_note(&format!("NO CHART FOR {}: {}", name.to_uppercase(), e.to_uppercase())),
+                    Err((e, sugg)) => {
+                        self.chart_sugg = sugg;
+                        self.set_note(&format!("NO CHART FOR {}: {}", name.to_uppercase(), e.to_uppercase()));
+                    }
+                }
+            }
+            Msg::Live(q, r) => {
+                self.chart_busy = false;
+                if q == self.live_q {
+                    match r {
+                        Ok(found) => {
+                            self.live = Some(found);
+                            self.chart_sugg.clear();
+                        }
+                        Err((_, sugg)) => self.chart_sugg = sugg,
+                    }
+                }
+            }
+            Msg::Beats(id, r) => {
+                self.beat_busy = false;
+                match r {
+                    Some((period, phase)) => {
+                        self.beat = Some((id, period, phase));
+                        self.mt_gen += 1;
+                        self.set_note(&format!("FOUND THE BEAT: {:.0} BPM - NOW TURN ON LOCK", 60.0 / period));
+                    }
+                    None => self.set_note("COULDN'T FIND A STEADY BEAT IN THIS TRACK"),
                 }
             }
             _ => {}
@@ -560,6 +788,57 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            Action::ScGo => {
+                if self.sc_busy {
+                    return;
+                }
+                let q = self.sc_in.trim().to_string();
+                if q.is_empty() {
+                    return;
+                }
+                if sources::ytdlp_path().is_none() {
+                    self.sc_msg = "PRESS GET YT-DLP FIRST (ONE-TIME SETUP)".to_string();
+                    return;
+                }
+                self.sc_busy = true;
+                self.sc_msg = "LOOKING...".to_string();
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let r = if q.starts_with("http") { sources::sc_list(&q) } else { sources::sc_search(&q) };
+                    let _ = tx.send(Msg::Sc(r));
+                    ctx.request_repaint();
+                });
+            }
+            Action::ScBrowser => {
+                use std::sync::atomic::Ordering;
+                let n = (sources::SC_BROWSER.load(Ordering::Relaxed) + 1) % 4;
+                sources::SC_BROWSER.store(n, Ordering::Relaxed);
+                self.dirty = true;
+                self.sc_msg = if n == 0 {
+                    "BROWSER LOGIN OFF".to_string()
+                } else {
+                    format!("USING YOUR {} SIGN-IN. CLOSE THAT BROWSER IF IT FAILS.", sources::SC_BROWSERS[n as usize])
+                };
+            }
+            Action::ScKeep(id) => {
+                if let Some(e) = self.sc_results.iter().find(|e| e.id == id).cloned() {
+                    if !self.store.sc.iter().any(|x| x.id == id) {
+                        self.store.sc.insert(0, e);
+                        self.store_dirty = true;
+                    }
+                    self.set_note("KEPT IN MY SOUNDCLOUD");
+                }
+            }
+            Action::Offline(on) => {
+                self.offline = on;
+                self.dirty = true;
+                if on {
+                    self.sec = if crate::PRACTICE { Sec::Files } else { Sec::Sc };
+                } else {
+                    self.sec = Sec::Tidal;
+                }
+                self.serial += 1;
+            }
             Action::GetYtDlp => {
                 if self.yt_busy {
                     return;
@@ -575,6 +854,7 @@ impl App {
             Action::RemoveExt(id) => {
                 self.store.files.retain(|e| e.id != id);
                 self.store.yt.retain(|e| e.id != id);
+                self.store.sc.retain(|e| e.id != id);
                 self.store_dirty = true;
             }
 
@@ -617,6 +897,10 @@ impl App {
             }
             Action::OpenTune(i) => {
                 self.tune_open = i;
+                if i.is_some() {
+                    self.chart_pick = i;
+                    self.chart_live = false;
+                }
                 self.edit_ver = None;
                 self.del_arm = false;
                 self.chart_edit = false;
@@ -646,12 +930,6 @@ impl App {
                 }
                 self.edit_ver = None;
             }
-            Action::CycleStatus(i) => {
-                if let Some(t) = self.store.tunes.get_mut(i) {
-                    t.status = (t.status + 1) % 3;
-                    self.store_dirty = true;
-                }
-            }
             Action::PlayTune(i, shuffled) => {
                 let vs: Vec<Version> = match self.store.tunes.get(i) {
                     Some(t) => t.versions.clone(),
@@ -678,33 +956,96 @@ impl App {
                 }
                 None => self.set_note("PLAY A RECORDING FIRST"),
             },
-            Action::FindChart(i) => {
+            Action::FindChart(i, alt) => {
                 let Some(t) = self.store.tunes.get(i) else { return };
                 let name = t.name.clone();
-                if self.chart_busy || !self.chart_tried.insert(name.clone()) {
+                if self.chart_busy {
                     return;
                 }
                 self.chart_busy = true;
+                self.chart_sugg.clear();
+                let query = alt.unwrap_or_else(|| name.clone());
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
-                    let _ = tx.send(Msg::Chart(name.clone(), sources::find_chart(&name)));
+                    let _ = tx.send(Msg::Chart(name, sources::find_chart(&query)));
                     ctx.request_repaint();
                 });
             }
+            Action::LiveChart(title, alt) => {
+                if self.chart_busy {
+                    return;
+                }
+                self.chart_busy = true;
+                self.live_q = title.clone();
+                self.live = None;
+                self.chart_sugg.clear();
+                let query = alt.unwrap_or_else(|| title.clone());
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Live(title, sources::find_chart(&query)));
+                    ctx.request_repaint();
+                });
+            }
+            Action::SaveLive => {
+                let (Some(t), Some((chart, key, composer))) = (self.cur_track(), self.live.clone()) else { return };
+                let name = tune_name_from(&t.title);
+                let i = self.new_tune_named(&name);
+                let v = self.version_of(&t);
+                self.add_version(i, v);
+                let tu = &mut self.store.tunes[i];
+                tu.chart = chart;
+                tu.key = key;
+                if !composer.is_empty() {
+                    tu.info = format!("{} - written by {}", name, composer);
+                }
+                self.chart_live = false;
+                self.chart_pick = Some(i);
+                self.store_dirty = true;
+                self.set_note("SAVED TO YOUR TUNES");
+            }
             Action::ToggleNumerals => self.chart_rn = !self.chart_rn,
+            Action::Status(i, n) => {
+                if let Some(t) = self.store.tunes.get_mut(i) {
+                    t.status = n.min(3);
+                    self.store_dirty = true;
+                }
+            }
+            Action::Knob(k, d) => {
+                let v = self.knob_val(k) + d as f32 * knob_step(k);
+                self.knob_set(k, v);
+            }
+            Action::SetKnob(k, text) => {
+                let v = if matches!(k, Knob::LoopA | Knob::LoopB) {
+                    parse_time(&text)
+                } else {
+                    text.trim().trim_end_matches('%').trim().parse::<f32>().ok()
+                };
+                match v {
+                    _ if text.trim().is_empty() => {}
+                    Some(v) => self.knob_set(k, v),
+                    None => self.set_note("THAT IS NOT A NUMBER"),
+                }
+            }
+            Action::Opt(o) => self.opt(o),
             Action::LookUp(i) => {
                 if self.look_busy {
                     return;
                 }
                 let Some(t) = self.store.tunes.get(i) else { return };
                 let name = t.name.clone();
+                let known: Vec<String> = self
+                    .store
+                    .tunes
+                    .iter()
+                    .flat_map(|t| t.versions.iter().filter(|v| v.stars >= 3).map(|v| v.artist.clone()))
+                    .collect();
                 self.look_busy = true;
                 self.look_for = name.clone();
                 self.look_tracks.clear();
                 let (api, tx, ctx) = (self.api.clone(), self.tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
                     let info = sources::lookup_composer(&name);
-                    let tracks = api.popular(&name).unwrap_or_default();
+                    let tracks = api.popular(&name, &known).unwrap_or_default();
                     let _ = tx.send(Msg::Lookup(name, info, tracks));
                     ctx.request_repaint();
                 });
@@ -792,16 +1133,6 @@ impl App {
                 }
                 self.sync_loop();
             }
-            Action::Knob(k, d) => {
-                let adj = |v: u32, lo: u32, hi: u32, step: i32| (v as i32 + d * step).clamp(lo as i32, hi as i32) as u32;
-                match k {
-                    Knob::Focus => self.pomo_focus = adj(self.pomo_focus, 5, 90, 5),
-                    Knob::Rest => self.pomo_break = adj(self.pomo_break, 1, 30, 1),
-                    Knob::Blocks => self.pomo_cycles = adj(self.pomo_cycles, 1, 12, 1),
-                    Knob::Loops => self.trainer_n = adj(self.trainer_n, 1, 30, 1),
-                    Knob::Step => self.trainer_step = adj(self.trainer_step, 1, 25, 1),
-                }
-            }
             Action::TapTempo => {
                 let now = Instant::now();
                 if let Some(l) = self.taps.last() {
@@ -818,23 +1149,10 @@ impl App {
                     let n = (self.taps.len() - 1) as f32;
                     let heard = 60.0 / (span / n).max(0.05);
                     let factor = if self.practice { self.speed as f32 / 100.0 } else { 1.0 };
-                    self.set_bpm((heard / factor).round() as i32);
+                    self.knob_set(Knob::Bpm, (heard / factor).round());
                 } else {
                     self.set_note("KEEP TAPPING...");
                 }
-            }
-            Action::BpmAdj(d) => {
-                let base = if self.bpm == 0 { 100 } else { self.bpm as i32 };
-                self.set_bpm(base + d);
-            }
-            Action::MetroToggle => {
-                if self.bpm == 0 {
-                    self.set_note("TAP THE TEMPO (TAP) OR SET BPM FIRST");
-                    return;
-                }
-                self.metro_on = !self.metro_on;
-                self.practice = true;
-                self.sync_loop();
             }
             Action::CountIn => {
                 self.count_in = match self.count_in {
@@ -980,6 +1298,15 @@ impl App {
                 self.pomo_flash = None;
             }
             Action::TimerPanel => self.timer_open = !self.timer_open,
+            Action::PlayAlong(name) => {
+                let q: String = format!("{} backing track play along", name)
+                    .bytes()
+                    .map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{:02X}", b) })
+                    .collect();
+                let _ = webbrowser::open(&format!("https://www.youtube.com/results?search_query={}", q));
+                self.set_note("OPENED YOUTUBE IN YOUR BROWSER");
+            }
+            Action::MetroPanel => self.metro_open = !self.metro_open,
             Action::ImportIreal(target) => {
                 let text = self.ireal_in.trim().to_string();
                 match crate::chart::parse_ireal_url(&text) {
@@ -1030,6 +1357,9 @@ impl App {
             return;
         }
         self.pomo_flash = Some(Instant::now());
+        if self.pomo_sound {
+            self.player.send(Cmd::Chime);
+        }
         self.ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
         if self.pomo == 1 {
             let date = store::today_str();
@@ -1078,6 +1408,126 @@ impl App {
             let bytes = stems::mix_wav(s, on);
             self.player.send(Cmd::Swap(bytes, self.pos(), self.paused));
             self.stem_on = on;
+        }
+    }
+
+    fn knob_val(&self, k: Knob) -> f32 {
+        match k {
+            Knob::Focus => self.pomo_focus as f32,
+            Knob::Rest => self.pomo_break as f32,
+            Knob::Blocks => self.pomo_cycles as f32,
+            Knob::Loops => self.trainer_n as f32,
+            Knob::Step => self.trainer_step as f32,
+            Knob::Speed => self.speed as f32,
+            Knob::LoopA => self.loop_a.unwrap_or(0.0),
+            Knob::LoopB => self.loop_b.unwrap_or(0.0),
+            Knob::Bpm => (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32,
+            Knob::Beats => self.mt.beats as f32,
+            Knob::GapPlay => self.mt.gap_play as f32,
+            Knob::GapMute => self.mt.gap_mute as f32,
+            Knob::RampBars => self.mt.ramp_bars as f32,
+            Knob::RampBpm => self.mt.ramp_bpm as f32,
+            Knob::Shift => self.mt.shift_ms as f32,
+        }
+    }
+
+    fn knob_set(&mut self, k: Knob, v: f32) {
+        let u = |lo: f32, hi: f32| v.round().clamp(lo, hi) as u32;
+        match k {
+            Knob::Focus => self.pomo_focus = u(1.0, 180.0),
+            Knob::Rest => self.pomo_break = u(1.0, 60.0),
+            Knob::Blocks => self.pomo_cycles = u(1.0, 16.0),
+            Knob::Loops => self.trainer_n = u(1.0, 99.0),
+            Knob::Step => self.trainer_step = u(1.0, 50.0),
+            Knob::Speed => self.apply(Action::Speed(u(25.0, 150.0))),
+            Knob::LoopA => self.apply(Action::SetAAt(v.max(0.0))),
+            Knob::LoopB => self.apply(Action::SetBAt(v.max(0.0))),
+            Knob::Bpm => {
+                let b = u(30.0, 300.0);
+                self.mt_bpm = b;
+                self.mt_add = 0.0;
+                self.mt_step_at = Instant::now();
+                self.bpm = b;
+                if self.cur.is_some() && !self.stopped {
+                    self.set_bpm(b as i32);
+                }
+            }
+            Knob::Beats => {
+                self.mt.beats = u(1.0, 12.0);
+                self.mt.preset(0);
+            }
+            Knob::GapPlay => self.mt.gap_play = u(0.0, 32.0),
+            Knob::GapMute => self.mt.gap_mute = u(1.0, 16.0),
+            Knob::RampBars => self.mt.ramp_bars = u(0.0, 32.0),
+            Knob::RampBpm => self.mt.ramp_bpm = u(1.0, 30.0),
+            Knob::Shift => {
+                self.mt.shift_ms = v.round().clamp(-300.0, 300.0) as i32;
+                self.mt_gen += 1;
+            }
+        }
+    }
+
+    fn opt(&mut self, o: Opt) {
+        match o {
+            Opt::MetroOn => {
+                self.mt.on = !self.mt.on;
+                self.mt_add = 0.0;
+                self.mt_step_at = Instant::now();
+                self.mt_sig = 0;
+            }
+            Opt::Preset(n) => self.mt.preset(n),
+            Opt::Level(i) => {
+                let l = &mut self.mt.levels[i.min(11)];
+                *l = if *l == 0 { 3 } else { *l - 1 };
+            }
+            Opt::Sub => self.mt.sub = (self.mt.sub + 1) % 4,
+            Opt::Follow => self.mt.follow = !self.mt.follow,
+            Opt::Sync => {
+                self.mt.sync = !self.mt.sync;
+                if self.mt.sync && self.beat.map(|b| b.0) != self.cur_track().map(|t| t.id) {
+                    self.opt(Opt::FindBeats);
+                }
+            }
+            Opt::Double | Opt::Half => {
+                if let Some(b) = self.beat.as_mut() {
+                    b.1 *= if matches!(o, Opt::Double) { 0.5 } else { 2.0 };
+                    self.mt_gen += 1;
+                }
+            }
+            Opt::FindBeats => {
+                let Some(t) = self.cur_track() else {
+                    self.set_note("PLAY A TRACK FIRST");
+                    return;
+                };
+                if self.beat_busy {
+                    return;
+                }
+                let bytes = match self.srcmap.get(&t.id) {
+                    Some(Src::File(p)) => std::fs::read(p).ok(),
+                    _ => cache::get(t.id),
+                };
+                let Some(bytes) = bytes else {
+                    self.set_note("PLAY IT ONCE FIRST SO IT IS STORED, THEN FIND THE BEAT");
+                    return;
+                };
+                self.beat_busy = true;
+                self.set_note("LISTENING FOR THE BEAT...");
+                let (tx, ctx, id) = (self.tx.clone(), self.ctx.clone(), t.id);
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Beats(id, band::detect_beats(bytes)));
+                    ctx.request_repaint();
+                });
+            }
+            Opt::Band => {
+                if self.band_on {
+                    self.band_stop();
+                } else {
+                    self.band_start();
+                }
+            }
+            Opt::BandStyle => self.band_style = (self.band_style + 1) % band::STYLES.len() as u8,
+            Opt::Part(i) => self.band_parts[i.min(2)] = !self.band_parts[i.min(2)],
+            Opt::PomoSound => self.pomo_sound = !self.pomo_sound,
         }
     }
 

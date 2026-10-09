@@ -16,6 +16,29 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
    time right-click `tidalite` -> Open (or run `xattr -dr com.apple.quarantine tidalite`) because it is not signed.
    Stem separation is Windows-only for now; everything else works on both.
 
+## v9.1: what changed in the last round
+
+- **Chart** follows the song: change tracks and it looks the new one up in the background. REFRESH re-runs it; SAVE TO TUNES keeps it.
+  Repeated bars show as a slash, plus repeat signs, 1st/2nd endings, segno, coda, D.C./D.S./Fine. Gospel songs are not in the free chart list:
+  the lookup suggests close matches (also by partial title) and you can paste an iReal link or type the changes.
+- **Band**: a simple built-in player (drums, bass, comping) that plays the chart in several styles; the current bar lights up.
+- **Metronome** (METRONOME button, floats bottom-right, independent of any track): beats, subdivisions, downbeat on/off,
+  Soundbrenner-style per-beat volumes (click a beat to cycle 3/3, 2/3, 1/3, off), a clickable beat row and a swinging pendulum,
+  gap click (play N bars, mute M), faster-every-N-bars, FOLLOW SPEED (scales with the speed slider) and LOCK TO TRACK (detects
+  the beat of the playing track; x2 / /2 and SHIFT ms fix a wrong guess; approximate on loose-timed music).
+- **Typed values** in practice: click A / B / speed % / trainer loops / +% and type (times like 1:23.5).
+- MORE is tabbed: TRAINER | PITCH & EAR | STEMS.
+- **Skins**: eight, still SKIN button. Pixel buttons, boxes, tabs, bubbles and a pixel logo. Library / queue splitters are shares of the window.
+- **LOOK UP** ranks recordings for studying: Tidal popularity, minus karaoke / tribute / compilation tracks, plus a boost for artists you've starred 3+ in other tunes. **PLAY-ALONG** opens a YouTube search for backing tracks.
+- **SoundCloud** tab (in both builds): search it, or paste a track / playlist / profile-likes link. It uses the same yt-dlp
+  one-time setup as YT. No sign-in is used (public content only); right-click a result to keep it in MY SOUNDCLOUD.
+  SIGN-IN FROM (FIREFOX / CHROME / EDGE) borrows the SoundCloud sign-in of a browser on this PC, for private playlists and Go+. Chrome and Edge
+  sometimes block this while they are open; Firefox is the reliable one.
+- **Tidal login is optional**: USE WITHOUT TIDAL on the first screen (USE SOUNDCLOUD ONLY in the simple build); LOG IN TO TIDAL appears
+  in the library whenever you want it.
+- The album-art view shows your saved loops and the live A-B loop on its seek bar.
+- Like button is hidden for files and YouTube clips.
+
 ## v9: the practice studio
 
 The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
@@ -25,7 +48,7 @@ The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
 - **YT** (YouTube): press GET YT-DLP once (downloads the free yt-dlp tool from its GitHub page), paste a link, ADD.
   First play downloads only the audio (AAC) and stores it; after that it starts instantly and loops like anything else.
   Downloading from YouTube may go against its terms; personal practice use is at your discretion.
-- **TUNES**: your repertoire. Each tune has a status (LEARNING / WORKING / READY), key, tempo, notes and the
+- **TUNES**: your repertoire. Each tune has a comfort level (LEARNING / OK / GOOD / COMFORTABLE, click a pip), key, tempo, notes and the
   *recordings worth studying* (Tidal, files or YouTube) with 1-5 stars and a note each.
   Right-click any song -> "Add to a tune...". LOOK UP (only when you press it) fetches the composer from
   MusicBrainz and lists the most popular recordings on Tidal (Tidal's own popularity score; hover for the album);
@@ -36,10 +59,11 @@ The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
 
 ### Practice panel
 - Waveform timeline. Click to jump, **Shift + drag** to select a loop.
+- **Ctrl + drag** near the A or B marker on the waveform moves it. **Shift + drag inside the loop** slides the whole loop, same length.
 - **SAVE LOOP** keeps named A-B loops per track (chips below; click to go, right-click to delete).
 - **MORE** opens: speed **TRAIN** (set how many loops to play, and how many percent faster after them),
   **PITCH** transpose without changing speed, **EAR** modes (left, right, mono, no-center, bass only),
-  **EXPORT WAV** of the loop (Music/Tidalite loops), **METRONOME** + BPM + **TAP** tempo, **COUNT** in (2 or 4 clicks before each loop pass),
+  **EXPORT WAV** of the loop (Music/Tidalite loops), **COUNT** in (2 or 4 clicks before each loop pass), a METRONOME button,
 
 - **STEMS**: GET STEMS TOOL downloads (once, ~170 MB) the ONNX Runtime library and the HT-Demucs model from
   Hugging Face / GitHub. Then SPLIT THIS TRACK separates a stored track into drums, bass, other (guitar, keys, horns)
@@ -47,7 +71,7 @@ The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
   (drums, bass, other, vocals) switch each stem on or off; right-click an icon to hear only that one.
   Loops, slow-down, pitch and EQ all keep working on the mix.
 - **TIMER** (button in the tools row, works in every mode): set focus minutes, rest minutes and how many blocks, then START.
-  It floats bottom-right. No sound: when a block ends the window flashes and switches to REST; after the rest it waits
+  It floats bottom-right. When a block ends the window flashes (and chimes, unless you untick SOUND) and switches to REST; after the rest it waits
   (flashing) until you press NEXT FOCUS. The time also shows in the window title.
 - **FOCUS** (chip on the player, or in MORE) hides the lists: just the player, your tools and the chart.
 

@@ -137,6 +137,8 @@ pub struct Store {
     pub folders: Vec<String>,
     pub files: Vec<Ext>,
     pub yt: Vec<Ext>,
+    /// SoundCloud tracks you kept (same kind of entry as a YouTube clip, with a link instead of a video id)
+    pub sc: Vec<Ext>,
     pub bpm: HashMap<i64, u32>,
     pub last: Option<Last>,
 }

@@ -20,8 +20,11 @@ pub enum Cmd {
     Resume,
     Seek(f32),
     Volume(f32),
-    /// Metronome click every n seconds (None = off).
-    Metro(Option<f32>),
+    /// A side sound on its own sink (slot 0 metronome, 1 band): `lead` plays once, then `body` repeats
+    /// forever. An empty body switches the slot off. (slot, lead, body, gain)
+    Pcm(u8, Vec<i16>, Vec<i16>, f32),
+    /// short three-note chime (focus timer, only when you switch it on)
+    Chime,
     Stop,
 }
 
@@ -922,6 +925,20 @@ impl<S: Source<Item = i16>> Source for Tap<S> {
     }
 }
 
+/// Three soft rising notes.
+fn chime_buf() -> Vec<i16> {
+    let mut v = Vec::new();
+    for (f, len) in [(659.3f32, 0.16f32), (784.0, 0.16), (1046.5, 0.5)] {
+        let n = (len * 44100.0) as usize;
+        for i in 0..n {
+            let t = i as f32 / 44100.0;
+            let env = (1.0 - i as f32 / n as f32).powi(2) * (i.min(200) as f32 / 200.0);
+            v.push(((t * f * std::f32::consts::TAU).sin() * env * 9000.0) as i16);
+        }
+    }
+    v
+}
+
 /// Play a count-in on its own sink and wait for it to finish.
 fn play_clicks(handle: &OutputStreamHandle, beats: u32, interval: f32, vol: f32) {
     if let Ok(c) = Sink::try_new(handle) {
@@ -983,7 +1000,7 @@ impl Player {
             };
             let mut sink: Option<Sink> = None;
             let mut vol = 0.64f32;
-            let mut metro: Option<Sink> = None;
+            let mut slots: [Option<(Sink, f32)>; 2] = [None, None];
             let mut user_paused = false;
             let mut last_wraps = 0u32;
 
@@ -1089,24 +1106,31 @@ impl Player {
                         if let Some(s) = &sink {
                             s.set_volume(v);
                         }
-                        if let Some(m) = &metro {
-                            m.set_volume((v * 0.8).min(1.0));
+                        for (m, g) in slots.iter().flatten() {
+                            m.set_volume((v * g).min(1.0));
                         }
                     }
-                    Ok(Cmd::Metro(iv)) => {
-                        if let Some(m) = metro.take() {
+                    Ok(Cmd::Pcm(slot, lead, body, gain)) => {
+                        let slot = (slot as usize).min(1);
+                        if let Some((m, _)) = slots[slot].take() {
                             m.stop();
                         }
-                        if let Some(iv) = iv {
+                        if !body.is_empty() {
                             if let Ok(m) = Sink::try_new(&handle) {
-                                let buf = click_buf(1, iv.clamp(0.2, 3.0), true);
-                                let n = (iv.clamp(0.2, 3.0) * 44100.0) as usize;
-                                let mut v = buf;
-                                v.resize(n.max(1), 0);
-                                m.set_volume((vol * 0.8).min(1.0));
-                                m.append(rodio::buffer::SamplesBuffer::new(1, 44100, v).repeat_infinite());
-                                metro = Some(m);
+                                m.set_volume((vol * gain).min(1.0));
+                                if !lead.is_empty() {
+                                    m.append(rodio::buffer::SamplesBuffer::new(1, 44100, lead));
+                                }
+                                m.append(rodio::buffer::SamplesBuffer::new(1, 44100, body).repeat_infinite());
+                                slots[slot] = Some((m, gain));
                             }
+                        }
+                    }
+                    Ok(Cmd::Chime) => {
+                        if let Ok(c) = Sink::try_new(&handle) {
+                            c.set_volume((vol * 1.5).clamp(0.3, 1.0));
+                            c.append(rodio::buffer::SamplesBuffer::new(1, 44100, chime_buf()));
+                            c.detach();
                         }
                     }
                     Ok(Cmd::Stop) => {

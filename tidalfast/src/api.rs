@@ -742,21 +742,58 @@ impl Api {
         Ok(p)
     }
 
-    /// Recordings of a tune, most popular first (Tidal's own 0-100 popularity score), one per artist.
-    pub fn popular(&self, name: &str) -> Res<Vec<(Track, u32)>> {
+    /// Recordings worth studying, best first: Tidal's 0-100 popularity, adjusted for practice. Karaoke, tribute and
+    /// compilation tracks sink; artists already in your tunes float up. One recording per artist.
+    pub fn popular(&self, name: &str, known: &[String]) -> Res<Vec<(Track, u32)>> {
         let v = self.get("/search", &[("query", name), ("limit", "50"), ("types", "TRACKS")])?;
         let mut all: Vec<(Track, u32)> = Vec::new();
         for it in arr(&v["tracks"]["items"]) {
             let pop = unwrap(it)["popularity"].as_u64().unwrap_or(0) as u32;
             all.extend(parse_track(it).map(|t| (t, pop)));
         }
-        all.sort_by(|a, b| b.1.cmp(&a.1));
+        const JUNK: [&str; 14] = [
+            "karaoke",
+            "tribute",
+            "made famous",
+            "originally performed",
+            "backing track",
+            "in the style of",
+            "lullaby",
+            "remix",
+            "sing-along",
+            "play along",
+            "cover version",
+            "workout",
+            "ringtone",
+            "8-bit",
+        ];
+        const COMP: [&str; 9] =
+            ["greatest hits", "best of", "essential", "collection", "anthology", "very best", "ultimate", "playlist", "hits"];
+        let score = |t: &Track, pop: u32| -> i32 {
+            let (ti, al) = (t.title.to_lowercase(), t.album.to_lowercase());
+            let mut s = pop as i32;
+            if JUNK.iter().any(|j| ti.contains(j) || al.contains(j)) {
+                s -= 60;
+            }
+            if COMP.iter().any(|c| al.contains(c)) {
+                s -= 20;
+            }
+            if ti.contains("live") || al.contains("live") {
+                s -= 5;
+            }
+            if known.iter().any(|k| k.eq_ignore_ascii_case(&t.artist)) {
+                s += 15;
+            }
+            s
+        };
         let want = name.to_lowercase();
-        let (named, rest): (Vec<_>, Vec<_>) = all.into_iter().partition(|(t, _)| t.title.to_lowercase().contains(&want));
+        let mut all: Vec<(i32, Track, u32)> = all.into_iter().map(|(t, p)| (score(&t, p), t, p)).collect();
+        all.sort_by(|a, b| b.0.cmp(&a.0));
+        let (named, rest): (Vec<_>, Vec<_>) = all.into_iter().partition(|(_, t, _)| t.title.to_lowercase().contains(&want));
         let mut seen: Vec<String> = Vec::new();
         let mut out = Vec::new();
-        for (t, p) in if named.len() >= 3 { named } else { named.into_iter().chain(rest).collect() } {
-            if !seen.contains(&t.artist) {
+        for (s, t, p) in if named.len() >= 3 { named } else { named.into_iter().chain(rest).collect() } {
+            if s > -25 && !seen.contains(&t.artist) {
                 seen.push(t.artist.clone());
                 out.push((t, p));
             }

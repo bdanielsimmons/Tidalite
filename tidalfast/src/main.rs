@@ -1,6 +1,7 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod api;
+mod band;
 mod cache;
 mod chart;
 mod decode;
@@ -11,6 +12,7 @@ mod player;
 mod sources;
 mod stems;
 mod store;
+mod tools;
 mod views;
 
 use api::{cover_url, Api, Card, Kind, Page, Track};
@@ -54,9 +56,9 @@ const fn c(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-const SKIN_NAMES: [&str; 4] = ["OLIVE", "AQUA", "DARK", "AMBER"];
+const SKIN_NAMES: [&str; 8] = ["OLIVE", "AQUA", "DARK", "AMBER", "PAPER", "PLUM", "SLATE", "CLAY"];
 
-static PALS: [Pal; 4] = [
+static PALS: [Pal; 8] = [
     // OLIVE: the classic beige/olive player
     Pal {
         app_bg: c(8, 8, 10),
@@ -149,6 +151,98 @@ static PALS: [Pal; 4] = [
         bar_txt: c(255, 226, 170),
         edge: c(0, 0, 0),
     },
+    // PAPER: warm white with ink-blue type
+    Pal {
+        app_bg: c(40, 38, 34),
+        trim: c(120, 112, 98),
+        beige: c(236, 230, 214),
+        beige_lt: c(252, 249, 240),
+        beige_dk: c(196, 188, 168),
+        beige_h: c(244, 239, 226),
+        lcd: c(250, 247, 238),
+        lcd_ghost: c(234, 229, 214),
+        groove: c(150, 142, 124),
+        sel: c(214, 206, 186),
+        ink: c(24, 34, 72),
+        ink2: c(70, 84, 128),
+        dim: c(140, 140, 150),
+        red: c(176, 36, 36),
+        btn_face: c(120, 134, 176),
+        btn_hi: c(150, 164, 204),
+        row_alt: c(240, 235, 221),
+        row_sel: c(40, 56, 110),
+        bar_txt: c(246, 244, 236),
+        edge: c(24, 22, 20),
+    },
+    // PLUM: dusky purple with pink phosphor
+    Pal {
+        app_bg: c(10, 6, 14),
+        trim: c(150, 110, 170),
+        beige: c(82, 62, 96),
+        beige_lt: c(124, 98, 140),
+        beige_dk: c(50, 36, 62),
+        beige_h: c(98, 76, 114),
+        lcd: c(28, 16, 34),
+        lcd_ghost: c(40, 26, 48),
+        groove: c(44, 30, 54),
+        sel: c(84, 54, 100),
+        ink: c(255, 150, 214),
+        ink2: c(184, 104, 160),
+        dim: c(110, 70, 100),
+        red: c(255, 110, 100),
+        btn_face: c(132, 96, 150),
+        btn_hi: c(160, 124, 180),
+        row_alt: c(36, 22, 44),
+        row_sel: c(130, 50, 100),
+        bar_txt: c(255, 220, 240),
+        edge: c(2, 0, 4),
+    },
+    // SLATE: cool grey-blue steel
+    Pal {
+        app_bg: c(8, 10, 14),
+        trim: c(140, 156, 176),
+        beige: c(150, 164, 182),
+        beige_lt: c(196, 208, 222),
+        beige_dk: c(104, 118, 138),
+        beige_h: c(166, 180, 198),
+        lcd: c(186, 198, 210),
+        lcd_ghost: c(168, 182, 196),
+        groove: c(86, 100, 120),
+        sel: c(130, 146, 168),
+        ink: c(10, 18, 30),
+        ink2: c(46, 64, 90),
+        dim: c(98, 112, 132),
+        red: c(176, 40, 40),
+        btn_face: c(96, 112, 136),
+        btn_hi: c(130, 148, 172),
+        row_alt: c(158, 172, 188),
+        row_sel: c(30, 52, 88),
+        bar_txt: c(230, 238, 246),
+        edge: c(4, 8, 14),
+    },
+    // CLAY: terracotta and sand
+    Pal {
+        app_bg: c(12, 7, 5),
+        trim: c(196, 130, 92),
+        beige: c(222, 178, 140),
+        beige_lt: c(244, 214, 182),
+        beige_dk: c(176, 128, 96),
+        beige_h: c(232, 192, 156),
+        lcd: c(240, 212, 180),
+        lcd_ghost: c(224, 192, 158),
+        groove: c(142, 98, 70),
+        sel: c(204, 152, 116),
+        ink: c(40, 14, 6),
+        ink2: c(110, 48, 30),
+        dim: c(158, 110, 84),
+        red: c(160, 24, 16),
+        btn_face: c(186, 98, 62),
+        btn_hi: c(214, 128, 88),
+        row_alt: c(228, 188, 152),
+        row_sel: c(120, 44, 24),
+        bar_txt: c(250, 228, 204),
+        edge: c(20, 8, 4),
+    },
 ];
 
 static SKIN: AtomicUsize = AtomicUsize::new(0);
@@ -200,11 +294,14 @@ enum Msg {
     Scanned(Vec<store::Ext>),
     YtAdded(Result<store::Ext, String>),
     YtTool(Result<PathBuf, String>),
+    Sc(Result<Vec<store::Ext>, String>),
     Wave(i64, Option<Vec<u8>>),
     Exported(Result<String, String>),
     /// LOOK UP result: tune name, who wrote it, other versions found on Tidal
     Lookup(String, Result<String, String>, Vec<(Track, u32)>),
-    Chart(String, Result<(String, String, String), String>),
+    Chart(String, Result<(String, String, String), (String, Vec<String>)>),
+    Live(String, Result<(String, String, String), (String, Vec<String>)>),
+    Beats(i64, Option<(f32, f32)>),
     /// stem separation finished for this track id
     Stems(i64, Result<(), String>),
     /// the stem tool (runtime + model) finished downloading
@@ -217,6 +314,7 @@ enum Sec {
     Tidal,
     Files,
     Yt,
+    Sc,
     Tunes,
     Diary,
 }
@@ -296,6 +394,10 @@ enum Action {
     Rescan,
     ForgetFolder(usize),
     AddYt,
+    ScGo,
+    ScBrowser,
+    ScKeep(i64),
+    Offline(bool),
     GetYtDlp,
     RemoveExt(i64),
     // ---- tunes
@@ -305,7 +407,7 @@ enum Action {
     NewTune,
     OpenTune(Option<usize>),
     RemoveTune(usize),
-    CycleStatus(usize),
+    Status(usize, u8),
     PlayTune(usize, bool),
     AddCurrentToTune(usize),
     LookUp(usize),
@@ -318,7 +420,13 @@ enum Action {
     RemoveVersion(usize, usize),
     Pomo,
     TimerPanel,
-    FindChart(usize),
+    FindChart(usize, Option<String>),
+    LiveChart(String, Option<String>),
+    MetroPanel,
+    PlayAlong(String),
+    SaveLive,
+    Opt(extras::Opt),
+    SetKnob(extras::Knob, String),
     ToggleNumerals,
     Knob(extras::Knob, i32),
     StemGet,
@@ -331,8 +439,6 @@ enum Action {
     Continue,
     Trainer,
     TapTempo,
-    MetroToggle,
-    BpmAdj(i32),
     CountIn,
     Chan,
     Transpose(i32),
@@ -506,25 +612,34 @@ fn raised(p: &egui::Painter, r: Rect, down: bool) {
     raised_h(p, r, down, false);
 }
 
-/// Black rounded window frame with beige trim, title tab and beige body at `inner`.
+/// Rectangle with its four corners cut off by `n` (a pixel-art "rounded" box).
+fn notch_fill(p: &egui::Painter, r: Rect, n: f32, c: Color32) {
+    fill_rect(p, Rect::from_min_max(Pos2::new(r.min.x + n, r.min.y), Pos2::new(r.max.x - n, r.max.y)), c);
+    fill_rect(p, Rect::from_min_max(Pos2::new(r.min.x, r.min.y + n), Pos2::new(r.max.x, r.max.y - n)), c);
+}
+
+/// Black window frame with beige trim, title tab and beige body at `inner`; square, with stepped corners.
 fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     let p = ui.painter();
+    let u = thick(2.0);
     let outer = Rect::from_min_max(inner.min - Vec2::new(14.0, 30.0), inner.max + Vec2::new(14.0, 14.0));
-    p.rect_filled(outer, Rounding::same(18.0), Color32::BLACK);
-    p.rect_stroke(outer.shrink(2.5), Rounding::same(16.0), Stroke::new(1.5, pal().trim));
-    p.rect_stroke(outer.shrink(5.5), Rounding::same(13.0), Stroke::new(1.0, pal().groove));
+    notch_fill(p, outer, u * 3.0, Color32::BLACK);
+    notch_fill(p, outer.shrink(u * 1.5), u * 2.0, pal().trim);
+    notch_fill(p, outer.shrink(u * 2.5), u * 2.0, Color32::BLACK);
+    notch_fill(p, outer.shrink(u * 3.5), u, pal().groove);
+    notch_fill(p, outer.shrink(u * 4.0), u, Color32::BLACK);
     // title tab
     let label = format!("-[ {} ]-", title);
     let cy = outer.min.y + 12.0;
     let tw = (text_w(&label, 2.0) + 30.0).min(outer.width() - 120.0).max(60.0);
     let tab = Rect::from_center_size(Pos2::new(outer.center().x, cy), Vec2::new(tw, 22.0));
-    p.rect_filled(tab.expand(3.0), Rounding::same(6.0), Color32::BLACK);
+    notch_fill(p, tab.expand(3.0), u, Color32::BLACK);
     fill_rect(p, Rect::from_min_max(Pos2::new(outer.min.x + 26.0, cy - 1.0), Pos2::new(tab.min.x - 6.0, cy + 1.0)), pal().trim);
     fill_rect(p, Rect::from_min_max(Pos2::new(tab.max.x + 6.0, cy - 1.0), Pos2::new(outer.max.x - 26.0, cy + 1.0)), pal().trim);
     ptext_fit(p, tab.center(), Align::Center, &label, 2.0, tw - 12.0, pal().trim);
     // body
-    p.rect_filled(inner.expand(2.0), Rounding::same(3.0), pal().edge);
-    p.rect_filled(inner, Rounding::same(2.0), pal().beige);
+    fill_rect(p, inner.expand(2.0), pal().edge);
+    fill_rect(p, inner, pal().beige);
 }
 
 const SEGS: [(f32, f32, f32, f32); 7] = [
@@ -564,24 +679,147 @@ fn seg_digit(p: &egui::Painter, o: Pos2, k: f32, d: u32, lit: bool) {
     }
 }
 
-/// Round metal transport button with a pixel icon.
+/// Filled disc built from square pixels of size `u` (pixel-art circle).
+fn pix_disc(p: &egui::Painter, c: Pos2, r: f32, u: f32, col: Color32) {
+    let n = (r / u).round() as i32;
+    for k in -n..n {
+        let y = (k as f32 + 0.5) * u;
+        let hw = ((r * r - y * y).max(0.0)).sqrt();
+        let hw = (hw / u).round() * u;
+        if hw > 0.0 {
+            fill_rect(
+                p,
+                Rect::from_min_max(Pos2::new(c.x - hw, c.y + k as f32 * u), Pos2::new(c.x + hw, c.y + (k + 1) as f32 * u)),
+                col,
+            );
+        }
+    }
+}
+
+/// Round transport button drawn in big pixels, with a pixel icon and a pixel shine.
 fn round_btn(ui: &egui::Ui, center: Pos2, radius: f32, icon: &[&str], px: f32, id: &str) -> egui::Response {
     let rect = Rect::from_center_size(center, Vec2::splat(radius * 2.0));
     let resp = ui.interact(rect, ui.id().with(id), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     let down = resp.is_pointer_button_down_on();
-    let off = if down { 1.5 } else { 0.0 };
+    let u = thick((radius / 9.0).round().max(2.0));
+    let off = if down { u } else { 0.0 };
     let p = ui.painter();
-    p.circle_filled(center, radius, Color32::BLACK);
-    p.circle_filled(center + Vec2::new(0.0, off), radius - 1.5, if resp.hovered() { pal().btn_hi } else { pal().btn_face });
-    p.circle_filled(
-        center + Vec2::new(-radius * 0.18, -radius * 0.28 + off),
-        radius * 0.5,
-        Color32::from_rgba_unmultiplied(255, 255, 225, 55),
-    );
+    let face = if resp.hovered() { pal().btn_hi } else { pal().btn_face };
+    pix_disc(p, center, radius, u, Color32::BLACK);
+    pix_disc(p, center + Vec2::new(0.0, off), radius - u, u, face);
+    if !down {
+        // lower edge shade, then the shine
+        pix_disc(p, center + Vec2::new(0.0, u * 0.5), radius - u * 2.0, u, face);
+        pix_disc(
+            p,
+            center + Vec2::new(-radius * 0.3, -radius * 0.34),
+            radius * 0.3,
+            u,
+            Color32::from_rgba_unmultiplied(255, 255, 225, 70),
+        );
+    }
     let px = px.floor().max(1.0);
     let o = Pos2::new(snap(center.x - 3.5 * px), snap(center.y - 3.5 * px + off));
     pixmap(p, o, px, icon, Color32::from_rgb(34, 32, 16));
     resp
+}
+
+const MARK: [&str; 9] =
+    ["....#....", "...###...", "..#####..", ".#o###o#.", "#o#o#o#o#", ".#o###o#.", "..#####..", "...###...", "....#...."];
+
+/// A little pixel gem with a tide line through it.
+fn logo_mark(p: &egui::Painter, origin: Pos2, px: f32) {
+    for (y, row) in MARK.iter().enumerate() {
+        for (x, ch) in row.chars().enumerate() {
+            let col = match ch {
+                '#' => pal().ink,
+                'o' => pal().ink2,
+                _ => continue,
+            };
+            fill_rect(p, Rect::from_min_size(origin + Vec2::new(x as f32 * px, y as f32 * px), Vec2::splat(px)), col);
+        }
+    }
+}
+
+/// Logo strip at the top of the library window.
+fn logo(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::hover());
+    let p = ui.painter();
+    inset(p, rect, pal().lcd);
+    logo_mark(p, Pos2::new(rect.min.x + 12.0, rect.center().y - 13.5), 3.0);
+    ptext(p, Pos2::new(rect.min.x + 50.0, rect.center().y - 6.0), Align::Min, "TIDALITE", 4.0, pal().ink);
+    ptext(p, Pos2::new(rect.min.x + 51.0, rect.center().y + 13.0), Align::Min, "A RETRO PLAYER FOR TIDAL", 1.0, pal().ink2);
+    ptext(p, Pos2::new(rect.max.x - 10.0, rect.center().y + 13.0), Align::Max, VERSION, 1.0, pal().dim);
+}
+
+/// Folder-style tabs with a baseline; the open tab joins the panel below. Returns the clicked tab.
+fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
+    let h = 26.0;
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 6.0), Sense::hover());
+    let t = thick(2.0);
+    let base = row.max.y - 4.0;
+    fill_rect(ui.painter(), Rect::from_min_max(Pos2::new(row.min.x, base), Pos2::new(row.max.x, base + t)), pal().edge);
+    let (mut x, mut hit) = (row.min.x + 4.0, None);
+    for (i, name) in items.iter().enumerate() {
+        let w = text_w(name, 2.0) + 24.0;
+        let on = i == cur;
+        let r = Rect::from_min_max(
+            Pos2::new(x, if on { row.min.y } else { row.min.y + 5.0 }),
+            Pos2::new(x + w, base + if on { t } else { 0.0 }),
+        );
+        let resp = ui.interact(r, ui.id().with(("tab", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let p = ui.painter();
+        fill_rect(
+            p,
+            r,
+            if on {
+                pal().beige_lt
+            } else if resp.hovered() {
+                pal().beige_h
+            } else {
+                pal().beige_dk
+            },
+        );
+        fill_rect(p, Rect::from_min_size(r.min, Vec2::new(r.width(), t)), pal().edge);
+        fill_rect(p, Rect::from_min_size(r.min, Vec2::new(t, r.height())), pal().edge);
+        fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::new(t, r.height())), pal().edge);
+        // chipped top corners
+        fill_rect(p, Rect::from_min_size(r.min, Vec2::splat(t)), pal().beige);
+        fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::splat(t)), pal().beige);
+        ptext(
+            p,
+            Pos2::new(r.center().x, r.min.y + (base - r.min.y) / 2.0 + 1.0),
+            Align::Center,
+            name,
+            2.0,
+            if on { pal().ink } else { pal().ink2 },
+        );
+        if resp.clicked() {
+            hit = Some(i);
+        }
+        x += w + 3.0;
+    }
+    hit
+}
+
+/// Small pixel check box with a label. Returns the click.
+fn check_box(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
+    let w = text_w(text, 2.0) + 30.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let b = Rect::from_center_size(Pos2::new(rect.min.x + 11.0, rect.center().y), Vec2::splat(16.0));
+    inset(ui.painter(), b, pal().lcd);
+    if on {
+        pixmap(ui.painter(), Pos2::new(b.min.x + 3.0, b.min.y + 4.0), 2.0, &CHECK[..], pal().ink);
+    }
+    ptext(
+        ui.painter(),
+        Pos2::new(rect.min.x + 26.0, rect.center().y),
+        Align::Min,
+        text,
+        2.0,
+        if resp.hovered() { pal().ink } else { pal().ink2 },
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn retro_btn_w(ui: &mut egui::Ui, text: &str, w: f32, active: bool) -> egui::Response {
@@ -947,6 +1185,7 @@ fn art_tex(images: &mut Images, url: &str, gray: bool) -> Option<egui::TextureId
 }
 
 fn paint_art_g(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, round: f32, gray: bool) {
+    let round = round.min(0.0);
     ui.painter().rect_filled(rect, Rounding::same(round), pal().ink2);
     if let Some(id) = art_tex(images, url, gray) {
         egui::Image::new(egui::load::SizedTexture::new(id, rect.size())).rounding(Rounding::same(round)).paint_at(ui, rect);
@@ -1242,6 +1481,14 @@ struct App {
     yt_busy: bool,
     yt_msg: String,
     yt_in: String,
+    sc_in: String,
+    marker_drag: u8,
+    pan_off: f32,
+    pan_len: f32,
+    sc_msg: String,
+    sc_busy: bool,
+    sc_results: Vec<store::Ext>,
+    offline: bool,
     new_tune: String,
     tune_open: Option<usize>,
     edit_ver: Option<usize>,
@@ -1260,8 +1507,6 @@ struct App {
     wave: (i64, Option<Vec<u8>>),
     focus_mode: bool,
     more: bool,
-    metro_on: bool,
-    metro_iv: u32,
     /// stems: 0 idle, 1 downloading the tool, 2 splitting a track
     stem_busy: u8,
     stem_data: Option<(i64, stems::Stems)>,
@@ -1275,6 +1520,7 @@ struct App {
     pomo_n: u32,
     pomo_flash: Option<Instant>,
     timer_open: bool,
+    metro_open: bool,
     bpm: u32,
     count_in: u32,
     taps: Vec<Instant>,
@@ -1298,6 +1544,38 @@ struct App {
     chart_tr: i32,
     chart_edit: bool,
     chart_busy: bool,
+    chart_sugg: Vec<String>,
+    chart_q: String,
+    live_q: String,
+    live: Option<(String, String, String)>,
+    chart_live: bool,
+    chart_pick: Option<usize>,
+    mtab: u8,
+    mt: band::Metro,
+    mt_bpm: u32,
+    mt_add: f32,
+    mt_step_at: Instant,
+    mt_sig: u64,
+    mt_vis: Option<(Instant, f32, usize)>,
+    mt_gen: u32,
+    mt_pos: (f32, Instant),
+    mt_sync_at: Instant,
+    beat: Option<(i64, f32, f32)>,
+    beat_busy: bool,
+    band_on: bool,
+    band_style: u8,
+    band_parts: [bool; 3],
+    band_t0: Instant,
+    band_lead: f32,
+    band_bar: f32,
+    band_order: Vec<usize>,
+    band_sig: u64,
+    band_chart: String,
+    pomo_sound: bool,
+    lib_frac: f32,
+    stack_frac: f32,
+    ebuf: String,
+    ebuf_id: u32,
     chart_tried: std::collections::HashSet<String>,
     chart_rn: bool,
     ireal_in: String,
@@ -1442,6 +1720,14 @@ impl App {
             yt_busy: false,
             yt_msg: String::new(),
             yt_in: String::new(),
+            sc_in: String::new(),
+            marker_drag: 0,
+            pan_off: 0.0,
+            pan_len: 0.0,
+            sc_msg: String::new(),
+            sc_busy: false,
+            sc_results: Vec::new(),
+            offline: false,
             new_tune: String::new(),
             tune_open: None,
             edit_ver: None,
@@ -1458,8 +1744,6 @@ impl App {
             wave: (0, None),
             focus_mode: false,
             more: false,
-            metro_on: false,
-            metro_iv: 0,
             stem_busy: 0,
             stem_data: None,
             stem_on: [true; 4],
@@ -1471,6 +1755,7 @@ impl App {
             pomo_n: 1,
             pomo_flash: None,
             timer_open: false,
+            metro_open: false,
             bpm: 0,
             count_in: 0,
             taps: Vec::new(),
@@ -1492,6 +1777,38 @@ impl App {
             chart_tr: 0,
             chart_edit: false,
             chart_busy: false,
+            chart_sugg: Vec::new(),
+            chart_q: String::new(),
+            live_q: String::new(),
+            live: None,
+            chart_live: false,
+            chart_pick: None,
+            mtab: 0,
+            mt: band::Metro::default(),
+            mt_bpm: 100,
+            mt_add: 0.0,
+            mt_step_at: Instant::now(),
+            mt_sig: 0,
+            mt_vis: None,
+            mt_gen: 0,
+            mt_pos: (0.0, Instant::now()),
+            mt_sync_at: Instant::now(),
+            beat: None,
+            beat_busy: false,
+            band_on: false,
+            band_style: 0,
+            band_parts: [true; 3],
+            band_t0: Instant::now(),
+            band_lead: 0.0,
+            band_bar: 2.0,
+            band_order: Vec::new(),
+            band_sig: 0,
+            band_chart: String::new(),
+            pomo_sound: false,
+            lib_frac: 0.34,
+            stack_frac: 1.0,
+            ebuf: String::new(),
+            ebuf_id: 0,
             chart_tried: Default::default(),
             chart_rn: true,
             ireal_in: String::new(),
@@ -1528,6 +1845,22 @@ impl App {
         }
         if let Some(b) = st["keep_cache"].as_bool() {
             app.keep_cache = b;
+        }
+        if let Some(b) = st["sc_browser"].as_u64() {
+            sources::SC_BROWSER.store((b as u8).min(3), Ordering::Relaxed);
+        }
+        if st["offline"].as_bool() == Some(true) && !app.api.has_token() {
+            app.offline = true;
+            app.sec = if PRACTICE { Sec::Files } else { Sec::Sc };
+        }
+        if let Some(f) = st["lib_frac"].as_f64() {
+            app.lib_frac = (f as f32).clamp(0.2, 0.7);
+        }
+        if let Some(f) = st["stack_frac"].as_f64() {
+            app.stack_frac = (f as f32).clamp(0.3, 1.0);
+        }
+        if let Some(b) = st["pomo_sound"].as_bool() {
+            app.pomo_sound = b;
         }
         if let Some(p) = st["speed"].as_u64() {
             app.speed = (p as u32).clamp(25, 150);
@@ -1578,6 +1911,11 @@ impl App {
             "eq": self.eq_gains.to_vec(),
             "keep_cache": self.keep_cache,
             "speed": self.speed,
+            "lib_frac": self.lib_frac,
+            "offline": self.offline,
+            "sc_browser": sources::SC_BROWSER.load(Ordering::Relaxed),
+            "stack_frac": self.stack_frac,
+            "pomo_sound": self.pomo_sound,
             "loops": self.loops.iter().map(|(k, v)| (k.to_string(), serde_json::json!([v.0, v.1]))).collect::<serde_json::Map<String, serde_json::Value>>(),
         });
         let dir = api::config_dir();
@@ -1716,6 +2054,8 @@ impl App {
 
     fn after_login(&mut self) {
         self.auth = Auth::In;
+        self.offline = false;
+        self.dirty = true;
         self.login_code = None;
         self.back.clear();
         crate::api::log("logged in; loading library");
@@ -2252,6 +2592,9 @@ impl App {
                 self.set_note("LOG COPIED TO CLIPBOARD");
             }
             Action::ToggleLike(t) => {
+                if t.id < 0 {
+                    return;
+                }
                 let like = !self.liked.contains(&t.id);
                 if like {
                     self.liked.insert(t.id);
@@ -2495,6 +2838,8 @@ impl App {
         window_deco(ui, inner, "TIDALITE");
         let p = ui.painter();
         let c = inner.center();
+        logo_mark(p, c + Vec2::new(-214.0, -102.0), 4.0);
+        logo_mark(p, c + Vec2::new(178.0, -102.0), 4.0);
         ptext(p, c + Vec2::new(0.0, -84.0), Align::Center, "TIDALITE", 7.0, pal().ink);
         ptext(p, c + Vec2::new(0.0, -40.0), Align::Center, "A retro player for Tidal", 2.0, pal().ink2);
         match self.auth {
@@ -2526,8 +2871,16 @@ impl App {
                 if r.clicked() {
                     acts.push(Action::StartLogin);
                 }
+                let b2 = Rect::from_center_size(c + Vec2::new(0.0, 80.0), Vec2::new(320.0, 30.0));
+                let r2 = ui.interact(b2, ui.id().with("skip"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                raised_h(ui.painter(), b2, r2.is_pointer_button_down_on(), r2.hovered());
+                let skip = if PRACTICE { "USE WITHOUT TIDAL" } else { "USE SOUNDCLOUD ONLY" };
+                ptext(ui.painter(), b2.center(), Align::Center, skip, 2.0, pal().ink2);
+                if r2.clicked() {
+                    acts.push(Action::Offline(true));
+                }
                 if !self.login_err.is_empty() {
-                    let er = Rect::from_center_size(c + Vec2::new(0.0, 96.0), Vec2::new(430.0, 22.0));
+                    let er = Rect::from_center_size(c + Vec2::new(0.0, 116.0), Vec2::new(430.0, 22.0));
                     inset(ui.painter(), er, pal().lcd);
                     marquee(ui, er, &self.login_err, 2.0, pal().red);
                 }
@@ -2773,39 +3126,51 @@ impl App {
 
     fn library_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         window_deco(ui, ui.max_rect(), "LIBRARY");
-        ui.add_space(2.0);
+        logo(ui);
+        ui.add_space(4.0);
 
         // which list: Tidal / my files / YouTube / tunes / diary
         self.section_bar(ui, acts);
 
         // search row
-        ui.horizontal(|ui| {
-            let go_w = 54.0;
-            let w = (ui.available_width() - go_w - ui.spacing().item_spacing.x).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
-            self.search_input(ui, rect, acts);
-            if retro_btn_w(ui, "GO", go_w, false).clicked() {
-                acts.push(Action::Search(self.search.clone()));
-            }
-        });
-
-        // navigation row
-        ui.horizontal(|ui| {
-            if retro_btn(ui, "HOME", false).clicked() {
-                acts.push(Action::Home);
-            }
-            if retro_btn(ui, "LIBRARY", false).clicked() {
-                acts.push(Action::Library);
-            }
-            if !self.back.is_empty() && retro_btn(ui, "< BACK", false).clicked() {
-                acts.push(Action::Back);
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if retro_btn(ui, "LOG OUT", false).clicked() {
-                    acts.push(Action::Logout);
+        if !self.offline {
+            ui.horizontal(|ui| {
+                let go_w = 54.0;
+                let w = (ui.available_width() - go_w - ui.spacing().item_spacing.x).max(80.0);
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+                self.search_input(ui, rect, acts);
+                if retro_btn_w(ui, "GO", go_w, false).clicked() {
+                    acts.push(Action::Search(self.search.clone()));
                 }
             });
-        });
+        }
+
+        // navigation row
+        if self.offline {
+            ui.horizontal(|ui| {
+                if retro_btn(ui, "LOG IN TO TIDAL", false).tip("Add your Tidal account - everything else keeps working").clicked()
+                {
+                    acts.push(Action::Offline(false));
+                }
+            });
+        } else {
+            ui.horizontal(|ui| {
+                if retro_btn(ui, "HOME", false).clicked() {
+                    acts.push(Action::Home);
+                }
+                if retro_btn(ui, "LIBRARY", false).clicked() {
+                    acts.push(Action::Library);
+                }
+                if !self.back.is_empty() && retro_btn(ui, "< BACK", false).clicked() {
+                    acts.push(Action::Back);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if retro_btn(ui, "LOG OUT", false).clicked() {
+                        acts.push(Action::Logout);
+                    }
+                });
+            });
+        }
 
         // tools row
         ui.horizontal(|ui| {
@@ -2818,6 +3183,7 @@ impl App {
             if retro_btn(ui, "EQ", self.show_eq).clicked() {
                 acts.push(Action::ToggleEq);
             }
+            ui.add_space(8.0);
             let sl = match self.sleep_at {
                 Some(t) => format!("{} MIN", t.saturating_duration_since(Instant::now()).as_secs().div_ceil(60)),
                 None => "SLEEP".to_string(),
@@ -2832,6 +3198,12 @@ impl App {
             {
                 acts.push(Action::TimerPanel);
             }
+            if PRACTICE
+                && retro_btn(ui, "METRONOME", self.metro_open).tip("Metronome with beats, subdivisions and a pendulum").clicked()
+            {
+                acts.push(Action::MetroPanel);
+            }
+            ui.add_space(8.0);
             if retro_btn(ui, "DISK", self.show_cache).tip("Where tracks are stored on this computer").clicked() {
                 acts.push(Action::ToggleCacheView);
             }
@@ -2847,15 +3219,13 @@ impl App {
         // library tabs
         let is_lib = self.sec == Sec::Tidal && self.page.as_ref().map(|p| p.library).unwrap_or(false);
         if is_lib && !self.show_log && !self.show_eq && !self.show_cache {
-            ui.horizontal(|ui| {
-                for (t, label) in
-                    [(Tab::Tracks, "MY TRACKS"), (Tab::Lists, "LISTS"), (Tab::Albums, "ALBUMS"), (Tab::Artists, "ARTISTS")]
-                {
-                    if retro_btn(ui, label, self.lib_tab == t).clicked() {
-                        acts.push(Action::Tab(t));
-                    }
-                }
-            });
+            const TABS: [(Tab, &str); 4] =
+                [(Tab::Tracks, "MY TRACKS"), (Tab::Lists, "LISTS"), (Tab::Albums, "ALBUMS"), (Tab::Artists, "ARTISTS")];
+            let names: Vec<&str> = TABS.iter().map(|t| t.1).collect();
+            let cur = TABS.iter().position(|t| t.0 == self.lib_tab).unwrap_or(0);
+            if let Some(i) = tab_row(ui, &names, cur) {
+                acts.push(Action::Tab(TABS[i].0));
+            }
         }
 
         // persistent error line
@@ -2920,6 +3290,7 @@ impl App {
                     }
                     Sec::Files => self.files_view(ui, acts),
                     Sec::Yt => self.yt_view(ui, acts),
+                    Sec::Sc => self.sc_view(ui, acts),
                     Sec::Tunes => self.tunes_view(ui, acts),
                     Sec::Diary => self.diary_view(ui, acts),
                 });
@@ -3379,8 +3750,8 @@ impl App {
         // ---- lyrics
         if lyrics_on {
             let ly = Rect::from_min_max(Pos2::new(area.min.x + area.width() * 0.5 + 10.0, area.min.y), area.max);
-            p.rect_filled(ly, Rounding::same(10.0), Color32::from_black_alpha(150));
-            p.rect_stroke(ly, Rounding::same(10.0), Stroke::new(1.5, pal().trim));
+            p.rect_filled(ly, Rounding::same(0.0), Color32::from_black_alpha(150));
+            p.rect_stroke(ly, Rounding::same(0.0), Stroke::new(2.0, pal().trim));
             let cp = p.with_clip_rect(ly.shrink(4.0));
             let lh = 38.0;
             let cyl = ly.center().y;
@@ -3447,6 +3818,36 @@ impl App {
             ),
             pal().bar_txt,
         );
+        // saved loops and the live A-B loop, laid over the bar so you can see where the work is
+        if PRACTICE && active && dur > 0.0 {
+            let x_at = |t: f32| sb.min.x + 2.0 + (sb.width() - 4.0) * (t / dur).clamp(0.0, 1.0);
+            let secs: Vec<(String, f32, f32)> = self
+                .cur_track()
+                .and_then(|t| self.store.sections.get(&t.id))
+                .map(|l| l.iter().map(|s| (s.name.clone(), s.a, s.b)).collect())
+                .unwrap_or_default();
+            let mut last_label_x = f32::MIN;
+            for (name, a, b) in &secs {
+                let band = Rect::from_min_max(
+                    Pos2::new(x_at(*a), sb.min.y - 7.0),
+                    Pos2::new(x_at(*b).max(x_at(*a) + 3.0), sb.min.y - 2.0),
+                );
+                fill_rect(&p, band, pal().ink2);
+                if band.min.x - last_label_x > 40.0 {
+                    ptext_fit(&p, Pos2::new(band.min.x, sb.min.y - 16.0), Align::Min, name, 1.0, 120.0, pal().ink2);
+                    last_label_x = band.min.x;
+                }
+            }
+            if let (Some(a), Some(b)) = (self.loop_a, self.loop_b) {
+                let on = self.loop_on;
+                let r = Rect::from_min_max(Pos2::new(x_at(a), sb.min.y), Pos2::new(x_at(b).max(x_at(a) + 3.0), sb.max.y));
+                fill_rect(&p, r, pal().red.gamma_multiply(if on { 0.55 } else { 0.25 }));
+                fill_rect(&p, Rect::from_min_max(r.min, Pos2::new(r.min.x + 2.0, r.max.y)), pal().red);
+                fill_rect(&p, Rect::from_min_max(Pos2::new(r.max.x - 2.0, r.min.y), r.max), pal().red);
+            } else if let Some(a) = self.loop_a {
+                fill_rect(&p, Rect::from_min_max(Pos2::new(x_at(a), sb.min.y), Pos2::new(x_at(a) + 2.0, sb.max.y)), pal().red);
+            }
+        }
         ptext(&p, Pos2::new(sb.min.x, sb.max.y + 14.0), Align::Min, &fmt_time(if active { pos } else { 0.0 }), 2.0, pal().trim);
         ptext(&p, Pos2::new(sb.max.x, sb.max.y + 14.0), Align::Max, &fmt_time(dur), 2.0, pal().trim);
 
@@ -3477,7 +3878,10 @@ impl App {
                 if retro_btn(ui, if fs { "WINDOWED" } else { "FULLSCREEN" }, false).clicked() {
                     acts.push(Action::ToggleFullscreen);
                 }
-                if retro_btn(ui, if liked_now { "LIKED" } else { "LIKE" }, liked_now).clicked() {
+                // files and YouTube clips are not on Tidal, so there is nothing to like
+                if cur_t.as_ref().map_or(false, |t| t.id >= 0)
+                    && retro_btn(ui, if liked_now { "LIKED" } else { "LIKE" }, liked_now).clicked()
+                {
                     if let Some(t) = &cur_t {
                         acts.push(Action::ToggleLike(t.clone()));
                     }
@@ -3797,7 +4201,7 @@ impl eframe::App for App {
             self.save_settings();
         }
 
-        if self.auth != Auth::In {
+        if self.auth != Auth::In && !self.offline {
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(pal().app_bg))
                 .show(ctx, |ui| self.login_ui(ui, &mut acts));
@@ -3834,7 +4238,7 @@ impl eframe::App for App {
                     acts.push(Action::ToggleArt);
                 }
                 if kp(egui::Key::H) {
-                    if let Some(t) = self.cur_track() {
+                    if let Some(t) = self.cur_track().filter(|t| t.id >= 0) {
                         acts.push(Action::ToggleLike(t));
                     }
                 }
@@ -3903,36 +4307,73 @@ impl eframe::App for App {
                     .show(ctx, |ui| self.art_ui(ui, &mut acts));
             } else {
                 let screen = ctx.screen_rect();
-                let right_w = if self.focus_mode { screen.width() } else { (screen.width() - LIB_W).max(420.0) };
+                // library width is a share of the window, so it scales with it
+                let lib_w = if self.focus_mode {
+                    0.0
+                } else {
+                    (self.lib_frac * screen.width()).clamp(280.0, (screen.width() - 440.0).max(280.0))
+                };
+                let right_w = screen.width() - lib_w;
                 let inner_w = right_w - 28.0;
                 let practice_h = if !self.practice {
                     0.0
                 } else if self.more {
-                    412.0
+                    348.0
                 } else {
                     262.0
                 };
+                let stack_max = self.stack_frac * screen.height();
                 let max_inner_h = ((screen.height() - practice_h) * 0.5 - 44.0).max(120.0);
-                let s = (inner_w / 300.0).min(max_inner_h / 138.0).clamp(0.8, 3.0);
+                let drag_inner_h = (stack_max - practice_h - 44.0).max(110.0);
+                let s = (inner_w / 300.0).min(max_inner_h / 138.0).min(drag_inner_h / 138.0).clamp(0.8, 3.0);
                 let player_h = 138.0 * s + 44.0;
 
                 if !self.focus_mode {
                     egui::SidePanel::left("library")
-                        .exact_width(LIB_W)
+                        .exact_width(lib_w)
+                        .resizable(false)
+                        .show_separator_line(false)
                         .frame(panel_frame())
                         .show(ctx, |ui| self.library_ui(ui, &mut acts));
                 }
                 egui::TopBottomPanel::top("player")
                     .exact_height(player_h)
+                    .resizable(false)
+                    .show_separator_line(false)
                     .frame(panel_frame())
                     .show(ctx, |ui| self.player_window(ui, &mut acts));
                 if self.practice {
                     egui::TopBottomPanel::top("practice")
                         .exact_height(practice_h)
+                        .resizable(false)
+                        .show_separator_line(false)
                         .frame(panel_frame())
                         .show(ctx, |ui| self.practice_ui(ui, &mut acts));
                 }
                 egui::CentralPanel::default().frame(panel_frame()).show(ctx, |ui| self.playlist_ui(ui, &mut acts));
+
+                // drag handles between the windows
+                if !self.focus_mode {
+                    let r = Rect::from_min_size(Pos2::new(lib_w - 7.0, screen.min.y), Vec2::new(14.0, screen.height()));
+                    match splitter(ctx, "split_v", r, true) {
+                        Some(Some(x)) => {
+                            self.lib_frac = (x / screen.width()).clamp(0.2, 0.7);
+                            self.dirty = true;
+                        }
+                        Some(None) => self.lib_frac = 0.34,
+                        None => {}
+                    }
+                }
+                let y = player_h + practice_h;
+                let r = Rect::from_min_size(Pos2::new(lib_w, y - 7.0), Vec2::new(right_w, 14.0));
+                match splitter(ctx, "split_h", r, false) {
+                    Some(Some(y)) => {
+                        self.stack_frac = (y / screen.height()).clamp(0.3, 1.0);
+                        self.dirty = true;
+                    }
+                    Some(None) => self.stack_frac = 1.0,
+                    None => {}
+                }
             }
         }
 
@@ -3943,19 +4384,62 @@ impl eframe::App for App {
             p.rect_filled(r, Rounding::same(0.0), Color32::from_black_alpha(170));
             ptext(&p, r.center(), Align::Center, "DROP AUDIO FILES OR FOLDERS TO ADD THEM", 3.0, pal().bar_txt);
         }
-        self.timer_overlay(ctx, &mut acts);
+        self.floating_tools(ctx, &mut acts);
         for a in acts {
             self.apply(a);
         }
         let busy = self.cur.is_some() && !self.stopped && !self.paused;
         ctx.request_repaint_after(Duration::from_millis(if self.art_view {
             16
-        } else if busy || self.search_focus {
+        } else if busy || self.search_focus || self.band_on || self.mt.on {
             33
         } else {
             250
         }));
     }
+}
+
+/// A drag handle drawn in the gap between two windows. Some(Some(pos)) while dragging, Some(None) on double click.
+fn splitter(ctx: &egui::Context, id: &str, rect: Rect, vertical: bool) -> Option<Option<f32>> {
+    let mut out = None;
+    egui::Area::new(egui::Id::new(id)).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+        let (r, resp) = ui.allocate_exact_size(rect.size(), Sense::click_and_drag());
+        let hot = resp.hovered() || resp.dragged();
+        let p = ui.painter();
+        let t = thick(2.0);
+        let (line, grip) = if vertical {
+            (Rect::from_center_size(r.center(), Vec2::new(t * 2.0, r.height())), Vec2::new(t * 3.0, t * 6.0))
+        } else {
+            (Rect::from_center_size(r.center(), Vec2::new(r.width(), t * 2.0)), Vec2::new(t * 6.0, t * 3.0))
+        };
+        if hot {
+            fill_rect(p, line, pal().trim);
+            let g = Rect::from_center_size(r.center(), grip + if vertical { Vec2::new(t, 0.0) } else { Vec2::new(0.0, t) });
+            fill_rect(p, g.expand(t), Color32::BLACK);
+            fill_rect(p, g, pal().beige_lt);
+            let step = if vertical { Vec2::new(0.0, t * 2.0) } else { Vec2::new(t * 2.0, 0.0) };
+            for k in [-1.0f32, 0.0, 1.0] {
+                let d = Rect::from_center_size(r.center() + step * k, Vec2::splat(t));
+                fill_rect(p, d, pal().edge);
+            }
+        }
+        if resp.dragged() {
+            if let Some(pp) = resp.interact_pointer_pos() {
+                out = Some(Some(if vertical { pp.x } else { pp.y }));
+            }
+        }
+        if resp.double_clicked() {
+            out = Some(None);
+        }
+        if hot {
+            ui.ctx().set_cursor_icon(if vertical {
+                egui::CursorIcon::ResizeHorizontal
+            } else {
+                egui::CursorIcon::ResizeVertical
+            });
+        }
+    });
+    out
 }
 
 fn setup_style(ctx: &egui::Context) {
