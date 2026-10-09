@@ -7,6 +7,23 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
+/// A playlist you built inside the player: any mix of Tidal, SoundCloud, YouTube and file tracks.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct Playlist {
+    pub name: String,
+    pub items: Vec<Version>,
+}
+
+/// A playlist link kept for later: SoundCloud or YouTube (`kind` = "sc" | "yt").
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct SavedList {
+    pub kind: String,
+    pub name: String,
+    pub url: String,
+}
+
 /// A recording of a tune: from Tidal, a file on this computer, or a YouTube clip.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -141,6 +158,9 @@ pub struct Store {
     pub sc: Vec<Ext>,
     /// Hearted tracks that are not on Tidal (files, YouTube, SoundCloud); kept on this computer only
     pub hearts: Vec<Ext>,
+    /// SoundCloud / YouTube playlists you saved by link
+    pub lists: Vec<SavedList>,
+    pub playlists: Vec<Playlist>,
     pub bpm: HashMap<i64, u32>,
     pub last: Option<Last>,
 }

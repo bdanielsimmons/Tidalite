@@ -310,6 +310,8 @@ pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, col
             Align::Center => egui::Align2::CENTER_CENTER,
             Align::Max => egui::Align2::RIGHT_CENTER,
         };
+        // egui's default face is thin; a second pass half a pixel over gives it the weight small text needs
+        p.text(Pos2::new(anchor.x + 0.45, anchor.y + 0.5), al, text, mfont(px), color);
         p.text(Pos2::new(anchor.x, anchor.y + 0.5), al, text, mfont(px), color);
         return w;
     }

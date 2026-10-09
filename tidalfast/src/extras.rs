@@ -623,6 +623,23 @@ impl App {
                     }
                 }
             }
+            Msg::YtList(url, r) => {
+                self.yt_busy = false;
+                match r {
+                    Ok(list) => {
+                        self.yt_msg = format!("{} VIDEOS - RIGHT-CLICK ONE TO KEEP IT", list.len());
+                        for e in &list {
+                            self.register(&e.to_version());
+                        }
+                        self.yt_results = list;
+                        self.yt_cur = Some(url);
+                    }
+                    Err(e) => {
+                        api::log(&format!("youtube playlist: {}", e));
+                        self.yt_msg = format!("ERROR: {}", e);
+                    }
+                }
+            }
             Msg::ScSets(r) => {
                 self.sc_busy = false;
                 match r {
@@ -823,6 +840,15 @@ impl App {
                 if s != Sec::Tunes {
                     self.pick = None;
                 }
+                if s != Sec::Lists {
+                    self.pl_pick = None;
+                } else {
+                    // saved file / YouTube / SoundCloud items need their sources known before they can play
+                    let vs: Vec<Version> = self.store.playlists.iter().flat_map(|p| p.items.iter().cloned()).collect();
+                    for v in &vs {
+                        self.register(v);
+                    }
+                }
             }
             Action::AddFiles => self.pick_files(false),
             Action::AddFolder => self.pick_files(true),
@@ -838,6 +864,22 @@ impl App {
             }
             Action::AddYt => {
                 if self.yt_busy {
+                    return;
+                }
+                if sources::is_yt_list(&self.yt_in) {
+                    if sources::ytdlp_path().is_none() {
+                        self.yt_msg = "PRESS GET YT-DLP FIRST (ONE-TIME SETUP)".to_string();
+                        return;
+                    }
+                    self.yt_busy = true;
+                    self.yt_msg = "READING THE PLAYLIST...".to_string();
+                    let url = self.yt_in.trim().to_string();
+                    let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = sources::yt_list(&url);
+                        let _ = tx.send(Msg::YtList(url, r));
+                        ctx.request_repaint();
+                    });
                     return;
                 }
                 let Some(vid) = sources::yt_video_id(&self.yt_in) else {
@@ -869,6 +911,7 @@ impl App {
                     return;
                 }
                 self.sc_busy = true;
+                self.sc_cur = if q.starts_with("http") { Some(q.clone()) } else { None };
                 self.sc_msg = "LOOKING...".to_string();
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
@@ -898,6 +941,10 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            Action::CopyLink(url) => {
+                self.ctx.output_mut(|o| o.copied_text = url.clone());
+                self.set_note(&format!("LINK COPIED: {}", url.trim_start_matches("https://")));
+            }
             Action::ScOpenSet(url) => {
                 self.sc_in = url;
                 self.apply(Action::ScGo);
@@ -914,6 +961,104 @@ impl App {
                 };
             }
             Action::LookStyle => self.look_style = (self.look_style + 1) % 4,
+            Action::PlaylistPick(t) => {
+                self.set_note(&format!("PICK A PLAYLIST FOR: {}", t.title.to_uppercase()));
+                self.pl_pick = Some(t);
+                self.apply(Action::Section(Sec::Lists));
+            }
+            Action::PlaylistAdd(i, t) => {
+                if i < self.store.playlists.len() {
+                    let v = self.version_of(&t);
+                    self.store.playlists[i].items.push(v);
+                    self.store_dirty = true;
+                    let n = self.store.playlists[i].name.to_uppercase();
+                    self.set_note(&format!("ADDED TO {}", n));
+                }
+                self.pl_pick = None;
+                self.serial += 1;
+            }
+            Action::PlaylistNew(t) => {
+                let typed = self.new_pl.trim().to_string();
+                let name = if typed.is_empty() { format!("Playlist {}", self.store.playlists.len() + 1) } else { typed };
+                let items = t.iter().map(|t| self.version_of(t)).collect();
+                self.store.playlists.push(store::Playlist { name, items });
+                self.new_pl.clear();
+                self.pl_pick = None;
+                self.pl_open = Some(self.store.playlists.len() - 1);
+                self.store_dirty = true;
+                self.serial += 1;
+            }
+            Action::PlaylistFromQueue => {
+                if self.queue.is_empty() {
+                    self.set_note("THE QUEUE IS EMPTY");
+                    return;
+                }
+                let typed = self.new_pl.trim().to_string();
+                let name = if typed.is_empty() { format!("Playlist {}", self.store.playlists.len() + 1) } else { typed };
+                let items: Vec<Version> = self.queue.iter().map(|t| self.version_of(t)).collect();
+                self.store.playlists.push(store::Playlist { name, items });
+                self.new_pl.clear();
+                self.store_dirty = true;
+                self.set_note("QUEUE SAVED AS A PLAYLIST");
+                self.serial += 1;
+            }
+            Action::PlaylistRemove(pi, ti) => {
+                if let Some(p) = self.store.playlists.get_mut(pi) {
+                    if ti < p.items.len() {
+                        p.items.remove(ti);
+                        self.store_dirty = true;
+                    }
+                }
+            }
+            Action::PlaylistMove(pi, ti, d) => {
+                if let Some(p) = self.store.playlists.get_mut(pi) {
+                    let to = ti as i32 + d;
+                    if to >= 0 && (to as usize) < p.items.len() {
+                        p.items.swap(ti, to as usize);
+                        self.store_dirty = true;
+                    }
+                }
+            }
+            Action::PlaylistDelete(pi) => {
+                if pi < self.store.playlists.len() {
+                    self.store.playlists.remove(pi);
+                    self.pl_open = None;
+                    self.store_dirty = true;
+                }
+            }
+            Action::PlaylistOpen(i) => {
+                self.pl_open = i;
+                self.serial += 1;
+            }
+            Action::SaveList(kind, url) => {
+                if !self.store.lists.iter().any(|l| l.url == url) {
+                    let name = self
+                        .sc_sets
+                        .iter()
+                        .find(|(_, u)| *u == url)
+                        .map(|(t, _)| t.clone())
+                        .unwrap_or_else(|| sources::list_name(&url));
+                    self.store.lists.push(store::SavedList { kind: (if kind == 0 { "sc" } else { "yt" }).to_string(), name, url });
+                    self.store_dirty = true;
+                }
+                self.set_note("PLAYLIST SAVED");
+            }
+            Action::RemoveList(i) => {
+                if i < self.store.lists.len() {
+                    self.store.lists.remove(i);
+                    self.store_dirty = true;
+                }
+            }
+            Action::YtKeep(id) => {
+                if let Some(e) = self.yt_results.iter().find(|e| e.id == id).cloned() {
+                    if !self.store.yt.iter().any(|x| x.id == id) {
+                        self.register(&e.to_version());
+                        self.store.yt.insert(0, e);
+                        self.store_dirty = true;
+                    }
+                    self.set_note("KEPT IN SAVED CLIPS");
+                }
+            }
             Action::ScKeep(id) => {
                 if let Some(e) = self.sc_results.iter().find(|e| e.id == id).cloned() {
                     if !self.store.sc.iter().any(|x| x.id == id) {
@@ -1708,5 +1853,16 @@ impl Drop for App {
         self.flush_practice();
         self.capture_last();
         self.store.save();
+    }
+}
+
+impl App {
+    /// The saved external item (YouTube / SoundCloud / file) behind a negative track id.
+    pub(crate) fn ext_of(&self, id: i64) -> Option<crate::store::Ext> {
+        if id > 0 {
+            return None;
+        }
+        let s = &self.store;
+        s.yt.iter().chain(&s.sc).chain(&s.files).chain(&s.hearts).find(|e| e.id == id).cloned()
     }
 }

@@ -55,6 +55,7 @@ const F_SEC: u32 = 11;
 pub(crate) const F_CHART: u32 = 12;
 pub(crate) const F_IREAL: u32 = 13;
 const F_SC: u32 = 14;
+const F_NEW_PL: u32 = 50;
 
 // -------------------------------------------------------------- text field
 pub struct FieldOut {
@@ -353,20 +354,21 @@ fn stars_text(n: u8) -> String {
 impl App {
     // ------------------------------------------------------------ switchers
     pub(crate) fn section_bar(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        const ALL: [(Sec, &str); 6] = [
+        const ALL: [(Sec, &str); 7] = [
             (Sec::Tidal, "TIDAL"),
             (Sec::Sc, "SOUNDCLOUD"),
             (Sec::Files, "FILES"),
             (Sec::Yt, "YT"),
             (Sec::Tunes, "TUNES"),
             (Sec::Diary, "DIARY"),
+            (Sec::Lists, "LISTS"),
         ];
         let secs: Vec<(Sec, &str)> = ALL
             .iter()
             .copied()
             .filter(|s| match s.0 {
                 Sec::Tidal => !self.offline,
-                Sec::Sc => true,
+                Sec::Sc | Sec::Lists => true,
                 _ => PRACTICE,
             })
             .collect();
@@ -448,6 +450,7 @@ impl App {
                 hearts = self.store.hearts.iter().filter(|e| heart_group(e) == which - 4).cloned().collect();
                 &hearts
             }
+            7 => &self.yt_results,
             _ => &self.sc_results,
         };
         let playing = self.cur_track().map(|t| t.id);
@@ -491,18 +494,56 @@ impl App {
                         acts.push(Action::PickTune(e.to_track()));
                         ui.close_menu();
                     }
+                    if menu_item(ui, "Add to a playlist...") {
+                        acts.push(Action::PlaylistPick(e.to_track()));
+                        ui.close_menu();
+                    }
+                    crate::link_item(ui, acts, crate::track_link(&e.to_track(), Some(e)));
                     if which >= 4 {
                         if menu_item(ui, "Remove from LIKED") {
                             acts.push(Action::ToggleLike(e.to_track()));
                             ui.close_menu();
                         }
-                    } else if which == 3 {
-                        if menu_item(ui, "Keep in my SoundCloud list") {
+                    } else if which == 3 || which == 7 {
+                        if which == 3 && menu_item(ui, "Keep in my SoundCloud list") {
                             acts.push(Action::ScKeep(e.id));
+                            ui.close_menu();
+                        }
+                        if which == 7 && menu_item(ui, "Keep in my saved clips") {
+                            acts.push(Action::YtKeep(e.id));
                             ui.close_menu();
                         }
                     } else if menu_item(ui, "Remove from this list") {
                         acts.push(Action::RemoveExt(e.id));
+                        ui.close_menu();
+                    }
+                });
+            }
+        }
+    }
+
+    /// Saved playlist links of one kind ("sc" / "yt"); click opens, right-click removes.
+    fn saved_lists(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, kind: &str) {
+        let mine: Vec<(usize, store::SavedList)> =
+            self.store.lists.iter().enumerate().filter(|(_, l)| l.kind == kind).map(|(i, l)| (i, l.clone())).collect();
+        if mine.is_empty() {
+            return;
+        }
+        section_header(ui, "MY PLAYLISTS (CLICK TO OPEN, RIGHT-CLICK TO REMOVE)");
+        for (k, (i, l)) in mine.iter().enumerate() {
+            if let Some(r) = list_row(ui, k, Some(k + 1), || l.name.clone(), || "OPEN".to_string(), RowState::Normal, false, false) {
+                if r.clicked() {
+                    if kind == "sc" {
+                        acts.push(Action::ScOpenSet(l.url.clone()));
+                    } else {
+                        self.yt_in = l.url.clone();
+                        acts.push(Action::AddYt);
+                    }
+                }
+                r.context_menu(|ui| {
+                    crate::link_item(ui, acts, Some(l.url.clone()));
+                    if menu_item(ui, "Remove from my playlists") {
+                        acts.push(Action::RemoveList(*i));
                         ui.close_menu();
                     }
                 });
@@ -596,7 +637,7 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
-            let o = field(ui, &mut self.ed, F_YT, &mut self.yt_in, rect, "Paste a YouTube link...", false);
+            let o = field(ui, &mut self.ed, F_YT, &mut self.yt_in, rect, "Paste a YouTube link or playlist...", false);
             if o.enter || retro_btn_w(ui, "ADD", 70.0, false).clicked() {
                 acts.push(Action::AddYt);
             }
@@ -608,6 +649,23 @@ impl App {
                 pal().ink2
             };
             para(ui, &self.yt_msg.clone(), col);
+        }
+        self.saved_lists(ui, acts, "yt");
+        if !self.yt_results.is_empty() {
+            section_header(ui, "PLAYLIST (RIGHT-CLICK TO KEEP A VIDEO)");
+            let tracks: Vec<Track> = self.yt_results.iter().map(|e| e.to_track()).collect();
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                let saved = self.yt_cur.as_ref().map_or(true, |u| self.store.lists.iter().any(|l| &l.url == u));
+                if !saved && retro_btn(ui, "SAVE THIS PLAYLIST", false).tip("Keep the link so you can open it again later").clicked() {
+                    if let Some(u) = self.yt_cur.clone() {
+                        acts.push(Action::SaveList(1, u));
+                    }
+                }
+            });
+            play_buttons(ui, &tracks, acts);
+            ui.add_space(4.0);
+            self.ext_list(ui, acts, 7);
         }
         if self.store.yt.is_empty() {
             para(ui, "One-time setup: press GET YT-DLP. Then paste a link and press ADD. The first play downloads just the audio (a few MB); after that it is stored and starts instantly, like everything in this player. Play-along videos, lessons, live takes - anything you want to loop and slow down.", pal().ink2);
@@ -677,6 +735,7 @@ impl App {
             para(ui, "Your own account: paste your profile's likes link (soundcloud.com/YOU/likes) or a playlist link and press GO - public ones list right here. Click a track to play; the first play stores just its audio so looping and slow-down work like everywhere else.", pal().ink2);
             para(ui, "Note: no sign-in is used, so private and Go+ tracks may play as previews or not at all. Downloading may go against SoundCloud's terms; personal practice use is at your discretion.", pal().dim);
         }
+        self.saved_lists(ui, acts, "sc");
         if !self.sc_sets.is_empty() {
             section_header(ui, "PLAYLISTS (CLICK TO OPEN)");
             for (i, (title, url)) in self.sc_sets.iter().enumerate() {
@@ -693,6 +752,13 @@ impl App {
             section_header(ui, "RESULTS (RIGHT-CLICK TO KEEP)");
             let tracks: Vec<Track> = self.sc_results.iter().map(|e| e.to_track()).collect();
             ui.add_space(4.0);
+            if let Some(u) = self.sc_cur.clone().filter(|u| tracks.len() > 1 && !self.store.lists.iter().any(|l| l.url == *u)) {
+                ui.horizontal_wrapped(|ui| {
+                    if retro_btn(ui, "SAVE THIS PLAYLIST", false).tip("Keep the link so you can open it again later").clicked() {
+                        acts.push(Action::SaveList(0, u.clone()));
+                    }
+                });
+            }
             play_buttons(ui, &tracks, acts);
             ui.add_space(4.0);
             self.ext_list(ui, acts, 3);
@@ -706,6 +772,161 @@ impl App {
             self.ext_list(ui, acts, 2);
         }
         self.liked_block(ui, acts, 2);
+        ui.add_space(20.0);
+    }
+
+    // ------------------------------------------------------------ PLAYLISTS
+    pub(crate) fn playlists_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        ui.add_space(6.0);
+        let open = self.pl_open.filter(|&i| i < self.store.playlists.len());
+        let picking = self.pl_pick.is_some();
+        if let (Some(i), false) = (open, picking) {
+            self.playlist_detail(ui, acts, i);
+            return;
+        }
+        if let Some(t) = self.pl_pick.clone() {
+            para(ui, &format!("ADD \"{} - {}\" TO WHICH PLAYLIST?", t.artist, t.title), pal().ink);
+            ui.horizontal_wrapped(|ui| {
+                if retro_btn(ui, "CANCEL", false).clicked() {
+                    self.pl_pick = None;
+                }
+            });
+            ui.add_space(4.0);
+            for (i, pl) in self.store.playlists.iter().enumerate() {
+                let n = pl.items.len();
+                if let Some(r) = list_row(
+                    ui,
+                    i,
+                    Some(i + 1),
+                    || pl.name.clone(),
+                    || format!("{} tracks", n),
+                    RowState::Normal,
+                    false,
+                    false,
+                ) {
+                    if r.clicked() {
+                        acts.push(Action::PlaylistAdd(i, t.clone()));
+                    }
+                }
+            }
+            ui.add_space(6.0);
+        } else {
+            title_line(ui, "PLAYLISTS", 3.0, pal().ink);
+            title_line(ui, "your own lists - mix Tidal, SoundCloud, YouTube and files", 2.0, pal().ink2);
+            ui.add_space(4.0);
+        }
+        ui.horizontal_wrapped(|ui| {
+            let w = (ui.available_width() - 78.0).max(80.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let o = field(ui, &mut self.ed, F_NEW_PL, &mut self.new_pl, rect, "New playlist name...", false);
+            if o.enter || retro_btn_w(ui, "NEW", 70.0, false).clicked() {
+                acts.push(Action::PlaylistNew(self.pl_pick.clone()));
+            }
+        });
+        if self.pl_pick.is_none() {
+            ui.horizontal_wrapped(|ui| {
+                if retro_btn(ui, "SAVE QUEUE AS PLAYLIST", false)
+                    .tip("Turns what is in the queue right now into a playlist (type a name above first, or it gets a number)")
+                    .clicked()
+                {
+                    acts.push(Action::PlaylistFromQueue);
+                }
+            });
+            if self.store.playlists.is_empty() {
+                para(ui, "Right-click any song, anywhere, and choose Add to a playlist. Playlists live on this PC only; they can hold tracks from every source at once.", pal().ink2);
+            }
+            ui.add_space(4.0);
+            for (i, pl) in self.store.playlists.iter().enumerate() {
+                let n = pl.items.len();
+                if let Some(r) = list_row(
+                    ui,
+                    i,
+                    Some(i + 1),
+                    || pl.name.clone(),
+                    || format!("{} tracks", n),
+                    RowState::Normal,
+                    false,
+                    false,
+                ) {
+                    if r.clicked() {
+                        acts.push(Action::PlaylistOpen(Some(i)));
+                    }
+                    r.context_menu(|ui| {
+                        if menu_item(ui, "Delete this playlist") {
+                            acts.push(Action::PlaylistDelete(i));
+                            ui.close_menu();
+                        }
+                    });
+                }
+            }
+        }
+        ui.add_space(20.0);
+    }
+
+    fn playlist_detail(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, pi: usize) {
+        let name = self.store.playlists[pi].name.clone();
+        ui.horizontal_wrapped(|ui| {
+            if retro_btn(ui, "< ALL PLAYLISTS", false).clicked() {
+                acts.push(Action::PlaylistOpen(None));
+            }
+        });
+        title_line(ui, &name.to_uppercase(), 3.0, pal().ink);
+        let items = self.store.playlists[pi].items.clone();
+        title_line(ui, &format!("{} tracks - right-click a track to move or remove it", items.len()), 2.0, pal().ink2);
+        ui.add_space(4.0);
+        if items.is_empty() {
+            para(ui, "Empty. Right-click songs anywhere and choose Add to a playlist.", pal().ink2);
+            return;
+        }
+        let tracks: Vec<Track> = items.iter().map(|v| v.to_track()).collect();
+        play_buttons(ui, &tracks, acts);
+        ui.add_space(4.0);
+        let playing = self.cur_track().map(|t| t.id);
+        col_header(ui, true);
+        for (k, v) in items.iter().enumerate() {
+            let state = if playing == Some(v.id) { RowState::Playing } else { RowState::Normal };
+            let stored = v.kind == "file" || cache::has(v.id);
+            let r = list_row(
+                ui,
+                k,
+                Some(k + 1),
+                || track_cells(&v.title, &v.artist, &v.album),
+                || if col_on(2) { fmt_time(v.dur) } else { String::new() },
+                state,
+                false,
+                stored,
+            );
+            if let Some(r) = r {
+                if r.clicked() {
+                    acts.push(Action::Play(tracks.clone(), k));
+                }
+                r.context_menu(|ui| {
+                    let t = v.to_track();
+                    if menu_item(ui, "Play next") {
+                        acts.push(Action::PlayNext(t.clone()));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Add to queue") {
+                        acts.push(Action::Enqueue(t.clone()));
+                        ui.close_menu();
+                    }
+                    if k > 0 && menu_item(ui, "Move up") {
+                        acts.push(Action::PlaylistMove(pi, k, -1));
+                        ui.close_menu();
+                    }
+                    if k + 1 < items.len() && menu_item(ui, "Move down") {
+                        acts.push(Action::PlaylistMove(pi, k, 1));
+                        ui.close_menu();
+                    }
+                    let ext = self.ext_of(v.id);
+                    crate::link_item(ui, acts, crate::track_link(&t, ext.as_ref()));
+                    if menu_item(ui, "Remove from this playlist") {
+                        acts.push(Action::PlaylistRemove(pi, k));
+                        ui.close_menu();
+                    }
+                });
+            }
+        }
         ui.add_space(20.0);
     }
 
@@ -950,6 +1171,7 @@ impl App {
                         acts.push(Action::Enqueue(vtracks[vi].clone()));
                         ui.close_menu();
                     }
+                    crate::link_item(ui, acts, crate::track_link(&vtracks[vi], self.ext_of(vtracks[vi].id).as_ref()));
                     if menu_item(ui, "Remove from this tune") {
                         acts.push(Action::RemoveVersion(i, vi));
                         ui.close_menu();

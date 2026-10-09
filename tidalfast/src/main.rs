@@ -13,6 +13,7 @@ mod sources;
 mod stems;
 mod store;
 mod tools;
+mod vicon;
 mod views;
 
 use api::{cover_url, Api, Card, Kind, Page, Track};
@@ -73,8 +74,8 @@ static PALS: [Pal; 11] = [
         groove: c(120, 118, 84),
         sel: c(184, 181, 142),
         ink: c(12, 12, 8),
-        ink2: c(64, 64, 46),
-        dim: c(96, 94, 70),
+        ink2: c(55, 55, 38),
+        dim: c(80, 78, 58),
         red: c(150, 30, 20),
         btn_face: c(150, 146, 92),
         btn_hi: c(190, 186, 128),
@@ -96,9 +97,9 @@ static PALS: [Pal; 11] = [
         groove: c(92, 138, 162),
         sel: c(150, 200, 222),
         ink: c(6, 24, 34),
-        ink2: c(28, 70, 92),
-        dim: c(67, 101, 117),
-        red: c(163, 38, 38),
+        ink2: c(24, 62, 81),
+        dim: c(55, 87, 101),
+        red: c(153, 34, 34),
         btn_face: c(70, 150, 190),
         btn_hi: c(110, 190, 225),
         row_alt: c(188, 224, 230),
@@ -119,9 +120,9 @@ static PALS: [Pal; 11] = [
         groove: c(30, 32, 35),
         sel: c(50, 66, 54),
         ink: c(126, 255, 150),
-        ink2: c(144, 194, 156),
-        dim: c(142, 163, 148),
-        red: c(255, 141, 129),
+        ink2: c(136, 235, 156),
+        dim: c(136, 191, 148),
+        red: c(255, 152, 141),
         btn_face: c(88, 92, 98),
         btn_hi: c(118, 122, 130),
         row_alt: c(20, 30, 22),
@@ -142,9 +143,9 @@ static PALS: [Pal; 11] = [
         groove: c(36, 28, 18),
         sel: c(70, 52, 28),
         ink: c(255, 184, 64),
-        ink2: c(209, 177, 130),
-        dim: c(174, 155, 129),
-        red: c(255, 137, 118),
+        ink2: c(246, 177, 74),
+        dim: c(215, 169, 96),
+        red: c(255, 149, 132),
         btn_face: c(110, 92, 60),
         btn_hi: c(140, 118, 80),
         row_alt: c(32, 22, 10),
@@ -165,8 +166,8 @@ static PALS: [Pal; 11] = [
         groove: c(150, 142, 124),
         sel: c(214, 206, 186),
         ink: c(24, 34, 72),
-        ink2: c(66, 79, 120),
-        dim: c(112, 112, 120),
+        ink2: c(60, 73, 114),
+        dim: c(96, 97, 112),
         red: c(176, 36, 36),
         btn_face: c(120, 134, 176),
         btn_hi: c(150, 164, 204),
@@ -188,9 +189,9 @@ static PALS: [Pal; 11] = [
         groove: c(44, 30, 54),
         sel: c(84, 54, 100),
         ink: c(255, 221, 242),
-        ink2: c(220, 180, 208),
-        dim: c(180, 159, 174),
-        red: c(255, 151, 143),
+        ink2: c(246, 212, 232),
+        dim: c(203, 178, 194),
+        red: c(255, 161, 154),
         btn_face: c(132, 96, 150),
         btn_hi: c(160, 124, 180),
         row_alt: c(36, 22, 44),
@@ -211,9 +212,9 @@ static PALS: [Pal; 11] = [
         groove: c(86, 100, 120),
         sel: c(146, 162, 184),
         ink: c(10, 18, 30),
-        ink2: c(40, 56, 82),
-        dim: c(70, 84, 106),
-        red: c(135, 25, 25),
+        ink2: c(29, 41, 61),
+        dim: c(54, 66, 86),
+        red: c(131, 24, 24),
         btn_face: c(96, 112, 136),
         btn_hi: c(130, 148, 172),
         row_alt: c(178, 190, 206),
@@ -234,9 +235,9 @@ static PALS: [Pal; 11] = [
         groove: c(142, 98, 70),
         sel: c(204, 152, 116),
         ink: c(13, 4, 2),
-        ink2: c(84, 36, 23),
-        dim: c(111, 77, 59),
-        red: c(147, 22, 15),
+        ink2: c(77, 32, 21),
+        dim: c(93, 64, 48),
+        red: c(139, 20, 13),
         btn_face: c(186, 98, 62),
         btn_hi: c(214, 128, 88),
         row_alt: c(228, 188, 152),
@@ -257,9 +258,9 @@ static PALS: [Pal; 11] = [
         groove: c(150, 184, 212),
         sel: c(188, 222, 246),
         ink: c(14, 40, 72),
-        ink2: c(43, 92, 133),
-        dim: c(92, 122, 147),
-        red: c(196, 55, 45),
+        ink2: c(38, 81, 119),
+        dim: c(77, 106, 133),
+        red: c(189, 52, 43),
         btn_face: c(46, 150, 210),
         btn_hi: c(96, 206, 120),
         row_alt: c(232, 244, 254),
@@ -280,8 +281,8 @@ static PALS: [Pal; 11] = [
         groove: c(44, 47, 58),
         sel: c(40, 52, 84),
         ink: c(236, 238, 245),
-        ink2: c(160, 166, 181),
-        dim: c(120, 125, 138),
+        ink2: c(168, 173, 187),
+        dim: c(142, 146, 158),
         red: c(255, 92, 102),
         btn_face: c(70, 122, 255),
         btn_hi: c(120, 160, 255),
@@ -303,9 +304,9 @@ static PALS: [Pal; 11] = [
         groove: c(206, 211, 224),
         sel: c(216, 227, 252),
         ink: c(22, 25, 34),
-        ink2: c(86, 93, 110),
-        dim: c(114, 119, 131),
-        red: c(201, 53, 64),
+        ink2: c(74, 81, 96),
+        dim: c(97, 102, 113),
+        red: c(194, 50, 61),
         btn_face: c(48, 100, 240),
         btn_hi: c(92, 142, 255),
         row_alt: c(242, 244, 250),
@@ -408,7 +409,23 @@ fn viz_draw(
             (pri, sec, pri)
         }
     } else if art {
-        (Color32::from_white_alpha(a1), Color32::from_white_alpha(a2), Color32::from_white_alpha(a2.max(110)))
+        // the skin's own colours, picked to stand out against the dark cover backdrop
+        let pl = pal();
+        let score = |c: &Color32| {
+            let (_, sat, v) = rgb_to_hsv(*c);
+            sat * 0.6 + v
+        };
+        let lum = |c: &Color32| rgb_to_hsv(*c).2;
+        let body_c = [pl.ink, pl.ink2, pl.trim, pl.btn_hi, pl.btn_face, pl.red, pl.lcd]
+            .into_iter()
+            .max_by(|x, y| score(x).total_cmp(&score(y)))
+            .unwrap_or(pl.ink);
+        let cap_c = [pl.beige_lt, pl.beige_h, pl.trim, pl.ink2, pl.btn_hi]
+            .into_iter()
+            .max_by(|x, y| lum(x).total_cmp(&lum(y)))
+            .unwrap_or(pl.beige_lt);
+        let f = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
+        (f(body_c, a1), f(cap_c, a2), f(body_c, a2.max(130)))
     } else if modern {
         (pal().btn_hi, pal().ink2, pal().btn_face)
     } else {
@@ -462,6 +479,19 @@ fn viz_draw(
             let pts: Vec<Pos2> =
                 (0..n).map(|k| Pos2::new(r.min.x + r.width() * k as f32 / (n - 1) as f32, cy - wave[k] * amp)).collect();
             let w: f32 = if art { 3.0 } else { 1.5 };
+            // the area under the wave is lit too, fading toward the bottom like the bars do
+            let mut mesh = egui::Mesh::default();
+            let uv = egui::epaint::WHITE_UV;
+            let (ft, fb) = (body.linear_multiply(0.5), body.linear_multiply(0.08));
+            for pt in &pts {
+                mesh.vertices.push(egui::epaint::Vertex { pos: *pt, uv, color: ft });
+                mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(pt.x, r.max.y), uv, color: fb });
+            }
+            for k in 0..(pts.len() as u32 - 1) {
+                let b = k * 2;
+                mesh.indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
+            }
+            p.add(egui::Shape::mesh(mesh));
             if style() == 1 || art {
                 // soft glow under the line
                 p.add(egui::Shape::line(
@@ -485,6 +515,17 @@ fn viz_draw(
                     None => (y, y),
                 };
                 let col = Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), line.a());
+                let top = y + step.min(3.0);
+                if r.max.y > top {
+                    fill_rect(
+                        p,
+                        Rect::from_min_max(
+                            Pos2::new(r.min.x + c as f32 * step, top),
+                            Pos2::new(r.min.x + c as f32 * step + step.min(4.0), r.max.y),
+                        ),
+                        body.linear_multiply(0.4),
+                    );
+                }
                 fill_rect(
                     p,
                     Rect::from_min_size(
@@ -551,6 +592,7 @@ enum Msg {
     YtTool(Result<PathBuf, String>),
     Sc(Result<Vec<store::Ext>, String>),
     ScSets(Result<Vec<(String, String)>, String>),
+    YtList(String, Result<Vec<store::Ext>, String>),
     ScMeta(store::Ext),
     Wave(i64, Option<Vec<u8>>),
     Exported(Result<String, String>),
@@ -574,6 +616,7 @@ enum Sec {
     Sc,
     Tunes,
     Diary,
+    Lists,
 }
 
 /// Which text field has the keyboard (0 = none) and where its caret is.
@@ -656,6 +699,18 @@ enum Action {
     ScGo,
     ScSets,
     ScOpenSet(String),
+    CopyLink(String),
+    SaveList(u8, String),
+    PlaylistPick(Track),
+    PlaylistAdd(usize, Track),
+    PlaylistNew(Option<Track>),
+    PlaylistFromQueue,
+    PlaylistRemove(usize, usize),
+    PlaylistMove(usize, usize, i32),
+    PlaylistDelete(usize),
+    PlaylistOpen(Option<usize>),
+    RemoveList(usize),
+    YtKeep(i64),
     LookStyle,
     ScBrowser,
     ScKeep(i64),
@@ -803,6 +858,22 @@ const PAUSE_S: [&str; 5] = ["##.##", "##.##", "##.##", "##.##", "##.##"];
 const STOP_S: [&str; 5] = ["#####", "#####", "#####", "#####", "#####"];
 
 fn pixmap(p: &egui::Painter, origin: Pos2, px: f32, rows: &[&str], color: Color32) {
+    if style() != 0 {
+        // modern skins: smooth vector icons; anything without one gets soft rounded dots instead of hard squares
+        let size = Vec2::new(rows.first().map_or(0, |r| r.len()) as f32 * px, rows.len() as f32 * px);
+        if vicon::draw(p, Rect::from_min_size(origin, size), rows, color) {
+            return;
+        }
+        for (y, row) in rows.iter().enumerate() {
+            for (x, ch) in row.chars().enumerate() {
+                if ch == '#' {
+                    let min = origin + Vec2::new(x as f32 * px, y as f32 * px);
+                    rfill(p, Rect::from_min_size(min, Vec2::splat(px)).shrink(px * 0.06), px * 0.4, color);
+                }
+            }
+        }
+        return;
+    }
     for (y, row) in rows.iter().enumerate() {
         for (x, ch) in row.chars().enumerate() {
             if ch == '#' {
@@ -1101,9 +1172,10 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
         let o = Pos2::new((tab.min.x + 9.0).round(), (cy - rows.len() as f32).round());
         for (y, row) in rows.iter().enumerate() {
             for (x, ch) in row.chars().enumerate() {
+                // 'o' pixels get a mid tone between tab text and tab fill so they never vanish on any skin
                 let col = match ch {
                     '#' => pal().trim,
-                    'o' => pal().dim,
+                    'o' => pal().trim.lerp_to_gamma(pal().edge, 0.4),
                     _ => continue,
                 };
                 fill_rect(p, Rect::from_min_size(o + Vec2::new(x as f32 * 2.0, y as f32 * 2.0), Vec2::splat(2.0)), col);
@@ -1152,13 +1224,9 @@ fn modern_deco(p: &egui::Painter, outer: Rect, inner: Rect, title: &str) {
     let mut x = outer.min.x + 14.0;
     if let Some(rows) = icon {
         let k = 2.0;
-        let o = Pos2::new((x).round(), (cy - rows.len() as f32 * k / 2.0).round());
-        for (y, row) in rows.iter().enumerate() {
-            for (cx, ch) in row.chars().enumerate() {
-                if ch == '#' || ch == 'o' {
-                    fill_rect(p, Rect::from_min_size(o + Vec2::new(cx as f32 * k, y as f32 * k), Vec2::splat(k)), icon_col);
-                }
-            }
+        let ir = Rect::from_center_size(Pos2::new(x + 10.0, cy), Vec2::splat(rows.len() as f32 * k));
+        if !vicon::draw(p, ir, rows, icon_col) {
+            pixmap(p, ir.min, k, rows, icon_col);
         }
         x += 26.0;
     }
@@ -1262,6 +1330,10 @@ const MARK: [&str; 9] =
 
 /// A little pixel gem with a tide line through it.
 fn logo_mark(p: &egui::Painter, origin: Pos2, px: f32) {
+    if style() != 0 {
+        vicon::gem(p, Rect::from_min_size(origin, Vec2::splat(px * 9.0)), pal().ink, pal().ink2);
+        return;
+    }
     for (y, row) in MARK.iter().enumerate() {
         for (x, ch) in row.chars().enumerate() {
             let col = match ch {
@@ -1276,15 +1348,16 @@ fn logo_mark(p: &egui::Painter, origin: Pos2, px: f32) {
 
 /// Logo strip at the top of the library window.
 fn logo(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.0), Sense::hover());
     let p = ui.painter();
     inset(p, rect, pal().lcd);
     logo_mark(p, Pos2::new(rect.min.x + 12.0, rect.center().y - 13.5), 3.0);
-    ptext(p, Pos2::new(rect.min.x + 50.0, rect.center().y - 6.0), Align::Min, "TIDALITE", 4.0, pal().ink);
+    let (tsz, ty, gy) = if style() == 0 { (3.0, -8.0, 13.0) } else { (2.6, -9.0, 14.0) };
+    ptext(p, Pos2::new(rect.min.x + 50.0, rect.center().y + ty), Align::Min, "TIDALITE", tsz, pal().ink);
     let tag =
         if PRACTICE { "A RETRO PLAYER FOR TIDAL AND MORE - MADE FOR PRACTICE" } else { "A RETRO PLAYER FOR TIDAL AND MORE" };
-    ptext_fit(p, Pos2::new(rect.min.x + 51.0, rect.center().y + 13.0), Align::Min, tag, 1.0, rect.width() - 110.0, pal().ink2);
-    ptext(p, Pos2::new(rect.max.x - 10.0, rect.center().y + 13.0), Align::Max, VERSION, 1.0, pal().dim);
+    ptext_fit(p, Pos2::new(rect.min.x + 51.0, rect.center().y + gy), Align::Min, tag, 1.0, rect.width() - 110.0, pal().ink2);
+    ptext(p, Pos2::new(rect.max.x - 10.0, rect.center().y + gy), Align::Max, VERSION, 1.0, pal().dim);
 }
 
 /// Folder-style tabs with a baseline; the open tab joins the panel below. Returns the clicked tab.
@@ -1946,7 +2019,35 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
                     acts.push(Action::PickTune(t.clone()));
                     ui.close_menu();
                 }
+                if menu_item(ui, "Add to a playlist...") {
+                    acts.push(Action::PlaylistPick(t.clone()));
+                    ui.close_menu();
+                }
+                link_item(ui, acts, track_link(t, None));
             });
+        }
+    }
+}
+
+/// The public link for a track: Tidal by id, YouTube / SoundCloud from the saved source. None for files.
+fn track_link(t: &Track, ext: Option<&store::Ext>) -> Option<String> {
+    if t.id > 0 {
+        return Some(format!("https://tidal.com/browse/track/{}", t.id));
+    }
+    let e = ext?;
+    if e.kind == "file" || e.src.is_empty() {
+        return None;
+    }
+    Some(if e.src.starts_with("http") { e.src.clone() } else { format!("https://www.youtube.com/watch?v={}", e.src) })
+}
+
+/// Menu entry that shows the link and copies it. Nothing is shown when there is no link (local files).
+fn link_item(ui: &mut egui::Ui, acts: &mut Vec<Action>, link: Option<String>) {
+    if let Some(l) = link {
+        let short: String = if l.chars().count() > 46 { format!("{}...", l.chars().take(44).collect::<String>()) } else { l.clone() };
+        if menu_item(ui, &format!("Copy link   {}", short.trim_start_matches("https://"))) {
+            acts.push(Action::CopyLink(l));
+            ui.close_menu();
         }
     }
 }
@@ -2159,6 +2260,7 @@ struct App {
     show_spec: bool,
     spec_op: f32,
     spec_h: f32,
+    spec_w: f32,
     viz_mode: u8,
     viz_w: f32,
     viz_gain: f32,
@@ -2215,6 +2317,12 @@ struct App {
     sc_busy: bool,
     sc_results: Vec<store::Ext>,
     sc_sets: Vec<(String, String)>,
+    sc_cur: Option<String>,
+    new_pl: String,
+    pl_open: Option<usize>,
+    pl_pick: Option<Track>,
+    yt_results: Vec<store::Ext>,
+    yt_cur: Option<String>,
     offline: bool,
     new_tune: String,
     tune_open: Option<usize>,
@@ -2417,7 +2525,7 @@ impl App {
             bands: vec![0.0; 32],
             peaks: vec![0.0; 32],
             viz_n: 32,
-            viz_color: 1,
+            viz_color: 0,
             show_log: false,
             audio_err_shown: false,
             art_view: false,
@@ -2425,6 +2533,7 @@ impl App {
             show_spec: true,
             spec_op: 0.2,
             spec_h: 0.42,
+            spec_w: 0.6,
             viz_mode: 0,
             viz_w: 0.8,
             viz_gain: 1.0,
@@ -2477,6 +2586,12 @@ impl App {
             sc_busy: false,
             sc_results: Vec::new(),
             sc_sets: Vec::new(),
+            sc_cur: None,
+            new_pl: String::new(),
+            pl_open: None,
+            pl_pick: None,
+            yt_results: Vec::new(),
+            yt_cur: None,
             offline: false,
             new_tune: String::new(),
             tune_open: None,
@@ -2593,7 +2708,7 @@ impl App {
         if let Some(n) = st["viz_n"].as_u64() {
             app.viz_n = (n as usize).clamp(8, 96);
         }
-        if let Some(n) = st["viz_color"].as_u64() {
+        if let Some(n) = st["viz_color2"].as_u64() {
             app.viz_color = (n as u8).min(2);
         }
         if let Some(n) = st["viz_mode"].as_u64() {
@@ -2604,6 +2719,9 @@ impl App {
         }
         if let Some(f) = st["viz_gain"].as_f64() {
             app.viz_gain = (f as f32).clamp(0.4, 3.0);
+        }
+        if let Some(f) = st["spec_w"].as_f64() {
+            app.spec_w = (f as f32).clamp(0.2, 1.0);
         }
         if let Some(f) = st["spec_h"].as_f64() {
             app.spec_h = (f as f32).clamp(0.15, 0.9);
@@ -2697,9 +2815,10 @@ impl App {
             "spec": self.show_spec,
             "spec_op": self.spec_op,
             "spec_h": self.spec_h,
+            "spec_w": self.spec_w,
             "viz_mode": self.viz_mode,
             "viz_n": self.viz_n,
-            "viz_color": self.viz_color,
+            "viz_color2": self.viz_color,
             "viz_w": self.viz_w,
             "viz_gain": self.viz_gain,
             "lyrics": self.show_lyrics,
@@ -4237,6 +4356,7 @@ impl App {
                     Sec::Sc => self.sc_view(ui, acts),
                     Sec::Tunes => self.tunes_view(ui, acts),
                     Sec::Diary => self.diary_view(ui, acts),
+                    Sec::Lists => self.playlists_view(ui, acts),
                 });
             });
         });
@@ -4680,9 +4800,12 @@ impl App {
         // ---- visualizer, soft and behind everything (only under the cover when lyrics split the view)
         if self.show_spec {
             let zone = if lyrics_on { Rect::from_min_max(full.min, Pos2::new(art_zone.max.x + 14.0, full.max.y)) } else { full };
+            // WIDTH = how much of the zone the visualizer spans, centred (the zone is the cover's side when lyrics are up)
+            let half = (zone.width() * self.spec_w / 2.0).max(40.0);
+            let mid = zone.center().x;
             let r = Rect::from_min_max(
-                Pos2::new(zone.min.x + 6.0, zone.max.y - zone.height() * self.spec_h),
-                Pos2::new(zone.max.x - 6.0, zone.max.y),
+                Pos2::new((mid - half).max(zone.min.x + 6.0), zone.max.y - zone.height() * self.spec_h),
+                Pos2::new((mid + half).min(zone.max.x - 6.0), zone.max.y),
             );
             viz_draw(
                 &p,
@@ -4857,8 +4980,8 @@ impl App {
             ),
             pal().bar_txt,
         );
-        // saved loops and the live A-B loop, laid over the bar so you can see where the work is
-        if PRACTICE && active && dur > 0.0 {
+        // saved loops and the live A-B loop, laid over the bar so you can see where the work is (practice mode only)
+        if PRACTICE && self.practice && active && dur > 0.0 {
             let x_at = |t: f32| sb.min.x + 2.0 + (sb.width() - 4.0) * (t / dur).clamp(0.0, 1.0);
             let secs: Vec<(String, f32, f32)> = self
                 .cur_track()
@@ -4877,14 +5000,20 @@ impl App {
                     last_label_x = band.min.x;
                 }
             }
+            let on = self.loop_on;
+            let flag = |x: f32, lab: &str| {
+                fill_rect(&p, Rect::from_min_max(Pos2::new(x - 1.5, sb.min.y - 4.0), Pos2::new(x + 1.5, sb.max.y + 4.0)), pal().red);
+                if x - sb.min.x > 44.0 && sb.max.x - x > 44.0 {
+                    ptext(&p, Pos2::new(x, sb.max.y + 14.0), Align::Center, lab, 2.0, pal().red);
+                }
+            };
             if let (Some(a), Some(b)) = (self.loop_a, self.loop_b) {
-                let on = self.loop_on;
                 let r = Rect::from_min_max(Pos2::new(x_at(a), sb.min.y), Pos2::new(x_at(b).max(x_at(a) + 3.0), sb.max.y));
-                fill_rect(&p, r, pal().red.gamma_multiply(if on { 0.55 } else { 0.25 }));
-                fill_rect(&p, Rect::from_min_max(r.min, Pos2::new(r.min.x + 2.0, r.max.y)), pal().red);
-                fill_rect(&p, Rect::from_min_max(Pos2::new(r.max.x - 2.0, r.min.y), r.max), pal().red);
+                fill_rect(&p, r, pal().red.gamma_multiply(if on { 0.7 } else { 0.4 }));
+                flag(r.min.x, "A");
+                flag(r.max.x, "B");
             } else if let Some(a) = self.loop_a {
-                fill_rect(&p, Rect::from_min_max(Pos2::new(x_at(a), sb.min.y), Pos2::new(x_at(a) + 2.0, sb.max.y)), pal().red);
+                flag(x_at(a), "A");
             }
         }
         ptext(&p, Pos2::new(sb.min.x, sb.max.y + 14.0), Align::Min, &fmt_time(if active { pos } else { 0.0 }), 2.0, pal().trim);
@@ -4949,8 +5078,25 @@ impl App {
                     };
                     step(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8);
                     step(ui, "HEIGHT", &mut self.spec_h, 0.08, 0.15, 0.9);
+                    step(ui, "WIDTH", &mut self.spec_w, 0.1, 0.2, 1.0);
                     self.viz_menu(ui);
                     self.dirty = true;
+                });
+                let skin_b = icon_btn(ui, &IC_SKIN, false, ink).tip(format!(
+                    "Skin: {}  (click for the next, right-click to pick one)",
+                    SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]
+                ));
+                if skin_b.clicked() {
+                    acts.push(Action::Skin);
+                }
+                skin_b.context_menu(|ui| {
+                    for (n, name) in SKIN_NAMES.iter().enumerate() {
+                        let mark = if n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
+                        if menu_item(ui, &format!("{}{}", mark, name)) {
+                            acts.push(Action::SkinSet(n));
+                            ui.close_menu();
+                        }
+                    }
                 });
                 if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
                     acts.push(Action::ToggleLyrics);
@@ -5110,6 +5256,7 @@ impl App {
                                     acts.push(Action::PlayIndex(i));
                                 }
                                 let lk = if self.liked.contains(&t.id) { "Remove from My Tracks" } else { "Add to My Tracks" };
+                                let link = track_link(&t, self.ext_of(t.id).as_ref());
                                 r.context_menu(|ui| {
                                     if menu_item(ui, lk) {
                                         acts.push(Action::ToggleLike(t.clone()));
@@ -5123,6 +5270,11 @@ impl App {
                                         acts.push(Action::PickTune(t.clone()));
                                         ui.close_menu();
                                     }
+                                    if menu_item(ui, "Add to a playlist...") {
+                                        acts.push(Action::PlaylistPick(t.clone()));
+                                        ui.close_menu();
+                                    }
+                                    link_item(ui, acts, link.clone());
                                     if cur != Some(i) && menu_item(ui, "Remove from queue") {
                                         acts.push(Action::Remove(i));
                                         ui.close_menu();

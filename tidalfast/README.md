@@ -237,5 +237,12 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 ## v9.25
 - Rows of buttons in the practice panel, tune pages, lists and the lead sheet now wrap onto a second line instead of stretching past the edge. SAVE LOOP is sized from its real width and drops below the name box when the panel is narrow.
 
-## v9.26
+## v9.27
 - Band chords: #11, 11, 13 and b13 now change the voicing (they were ignored, so Fmaj7#11 sounded like Fmaj7 and, in the middle voices, like F#m7b5).
+
+## v9.28
+- Modern skins (AERO GLASS, SLEEK DARK, SLEEK LIGHT) draw smooth vector icons and a vector gem logo (`vicon.rs`); only the visualizer stays pixelated. Icons without a vector form fall back to rounded dots.
+- Logo strip is taller so the title no longer touches the top edge.
+- Album-art view: skin picker button, spectrum WIDTH setting, filled waveform, skin-coloured bars.
+- Saved playlists for SoundCloud and YouTube (links kept in library.json); YouTube playlist links list their videos; right-click a song for Copy link.
+- LISTS tab: your own playlists mixing any source; right-click a song > Add to a playlist; SAVE QUEUE AS PLAYLIST.

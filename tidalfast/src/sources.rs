@@ -332,6 +332,56 @@ pub fn sc_list(url: &str) -> Result<Vec<Ext>, String> {
     Ok(list)
 }
 
+/// A YouTube playlist link (not a single video that happens to sit in one).
+pub fn is_yt_list(s: &str) -> bool {
+    s.contains("youtu") && s.contains("playlist?list=")
+}
+
+/// A readable name from a link's last part: ".../sets/my-cool-mix" -> "My Cool Mix".
+pub fn list_name(url: &str) -> String {
+    let last = url.split('?').next().unwrap_or(url).trim_end_matches('/').rsplit('/').next().unwrap_or("playlist");
+    let name: Vec<String> = last
+        .split(|c| c == '-' || c == '_')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        })
+        .collect();
+    if name.is_empty() { "Playlist".to_string() } else { name.join(" ") }
+}
+
+/// A YouTube playlist: what is in it (first 200), quick listing without per-video requests.
+pub fn yt_list(url: &str) -> Result<Vec<Ext>, String> {
+    let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
+    let out = command(&exe)
+        .args(["--no-warnings", "--flat-playlist", "--dump-json", "--playlist-end", "200"])
+        .arg(url.trim())
+        .output()
+        .map_err(|e| format!("could not run yt-dlp: {}", e))?;
+    let mut list: Vec<Ext> = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Some(vid) = v["id"].as_str().filter(|s| valid_id(s)) else { continue };
+        if list.iter().any(|e| e.src == vid) {
+            continue;
+        }
+        list.push(Ext {
+            kind: "yt".to_string(),
+            id: hash_id(&format!("yt:{}", vid)),
+            src: vid.to_string(),
+            title: v["title"].as_str().unwrap_or("YouTube clip").to_string(),
+            artist: v["channel"].as_str().or_else(|| v["uploader"].as_str()).unwrap_or("YouTube").replace(" - Topic", ""),
+            dur: v["duration"].as_f64().unwrap_or(0.0) as f32,
+            cover: format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", vid),
+        });
+    }
+    if list.is_empty() {
+        return Err(if out.status.success() { "nothing found at that link".to_string() } else { last_line(&out.stderr) });
+    }
+    Ok(list)
+}
+
 /// A SoundCloud user (name or profile link): their playlists as (title, link).
 pub fn sc_sets(user: &str) -> Result<Vec<(String, String)>, String> {
     let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
