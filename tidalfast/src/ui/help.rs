@@ -149,6 +149,7 @@ fn start_tab(ui: &mut egui::Ui) {
 
 fn keys_tab(ui: &mut egui::Ui, binds: &[Option<egui::Key>], open_prefs: &mut bool) {
     para(ui, "Keys work whenever you are not typing in a box. You can change any of them in Preferences.", pal().ink2);
+    para(ui, "CTRL+K (CMD+K on a Mac) opens the command palette: type what you want to do and press ENTER. 1 2 3 4 switch between LIBRARY, PLAYER, ALBUM and MINI.", pal().ink);
     if retro_btn(ui, "CHANGE SHORTCUTS", false).clicked() {
         *open_prefs = true;
     }

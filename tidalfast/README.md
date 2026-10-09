@@ -271,3 +271,14 @@ CI caches compiled dependencies (Swatinem/rust-cache), and the release profile u
 - `src/data/` - Tidal API, files/YouTube sources, library store, cache, lead-sheet charts, self-update
 - `src/ui/` - fonts, skins, icons, visualizer, views, tools, help, tour, preferences
 (Modules keep short names like `crate::player`; the folders just group the files.)
+
+## Mac menu bar, fullscreen, softer album view
+- macOS gets a real menu bar (Tidalite / File / Playback / View / Window / Help) via the `muda` crate (`src/ui/macmenu.rs`). Shortcuts use Cmd, never bare letters. Cmd+, opens Preferences, Ctrl+Cmd+F toggles full screen.
+- Fullscreen (F, or F11) now works from any view, and the app follows the window when it goes fullscreen by itself (green Mac button), so it can't get stuck.
+- Album view, modern skins: bars are a soft gradient and neighbours are blended; the waveform is smoothed. The right-click menu on the spectrum icon has a new COVER setting (cover opacity, 50-100%, default 90%) so the visualizer shows faintly through the cover.
+
+## Modes, command palette, size, overflow fixes
+- **Modes:** LIBRARY / PLAYER / ALBUM / MINI as a button row (top of the library window, and floating in album and player modes). Keys 1-4 switch from anywhere and are rebindable.
+- **Command palette:** Ctrl+K (Cmd+K on a Mac). Type part of an action name, arrows + Enter. Same names are used by the Mac menu bar (`run_named` in `src/ui/palette.rs`).
+- **Size of everything:** Preferences -> 90% to 175% (also Ctrl +/-). Saved with the settings.
+- **Library tabs** now tighten their padding and shrink their text to stay inside the window; the **metronome** is wider/bigger, its rows wrap instead of spilling, and the pendulum and beat boxes are larger.

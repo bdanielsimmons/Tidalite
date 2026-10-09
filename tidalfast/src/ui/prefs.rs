@@ -1,11 +1,15 @@
 //! Preferences: how updates behave and which keys do what. Opened with the PREFS button (or from Help).
 //! Key bindings live in `App::binds` (one slot per entry of CMDS, None = unbound) and are saved with the settings.
 
-use crate::{check_box, pal, para, retro_btn, section_header, title_line, Action, App, Tip, PRACTICE};
+use crate::{check_box, pal, para, retro_btn, retro_btn_w, section_header, title_line, Action, App, Tip, PRACTICE};
 use eframe::egui::{self, Key};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Cmd {
+    ModeLibrary,
+    ModePlayer,
+    ModeAlbum,
+    ModeMini,
     PlayPause,
     SeekBack,
     SeekFwd,
@@ -39,6 +43,10 @@ pub struct CmdDef {
 }
 
 pub const CMDS: &[CmdDef] = &[
+    CmdDef { cmd: Cmd::ModeLibrary, id: "mode1", label: "Mode: library", def: Key::Num1, group: 0 },
+    CmdDef { cmd: Cmd::ModePlayer, id: "mode2", label: "Mode: player only", def: Key::Num2, group: 0 },
+    CmdDef { cmd: Cmd::ModeAlbum, id: "mode3", label: "Mode: album view", def: Key::Num3, group: 0 },
+    CmdDef { cmd: Cmd::ModeMini, id: "mode4", label: "Mode: mini player", def: Key::Num4, group: 0 },
     CmdDef { cmd: Cmd::PlayPause, id: "toggle", label: "Play / pause", def: Key::Space, group: 0 },
     CmdDef { cmd: Cmd::SeekBack, id: "back5", label: "Back 5 seconds", def: Key::ArrowLeft, group: 0 },
     CmdDef { cmd: Cmd::SeekFwd, id: "fwd5", label: "Forward 5 seconds", def: Key::ArrowRight, group: 0 },
@@ -52,7 +60,7 @@ pub const CMDS: &[CmdDef] = &[
     CmdDef { cmd: Cmd::Art, id: "art", label: "Album view on / off", def: Key::A, group: 1 },
     CmdDef { cmd: Cmd::Lyrics, id: "lyrics", label: "Lyrics", def: Key::L, group: 1 },
     CmdDef { cmd: Cmd::Gray, id: "gray", label: "Black and white art", def: Key::G, group: 1 },
-    CmdDef { cmd: Cmd::Fullscreen, id: "full", label: "Fullscreen (album view)", def: Key::F, group: 1 },
+    CmdDef { cmd: Cmd::Fullscreen, id: "full", label: "Fullscreen", def: Key::F, group: 0 },
     CmdDef { cmd: Cmd::Practice, id: "practice", label: "Practice mode on / off", def: Key::P, group: 2 },
     CmdDef { cmd: Cmd::MarkA, id: "mark_a", label: "Set loop start (A)", def: Key::OpenBracket, group: 2 },
     CmdDef { cmd: Cmd::MarkB, id: "mark_b", label: "Set loop end (B)", def: Key::CloseBracket, group: 2 },
@@ -151,6 +159,10 @@ impl App {
 
     pub(crate) fn run_cmd(&mut self, cmd: Cmd, acts: &mut Vec<Action>) {
         match cmd {
+            Cmd::ModeLibrary => acts.push(Action::SetMode(0)),
+            Cmd::ModePlayer => acts.push(Action::SetMode(1)),
+            Cmd::ModeAlbum => acts.push(Action::SetMode(2)),
+            Cmd::ModeMini => acts.push(Action::SetMode(3)),
             Cmd::PlayPause => acts.push(Action::Toggle),
             Cmd::SeekBack => acts.push(Action::SeekRel(-5.0)),
             Cmd::SeekFwd => acts.push(Action::SeekRel(5.0)),
@@ -168,11 +180,7 @@ impl App {
             Cmd::Art => acts.push(Action::ToggleArt),
             Cmd::Lyrics => acts.push(Action::ToggleLyrics),
             Cmd::Gray => acts.push(Action::ToggleGray),
-            Cmd::Fullscreen => {
-                if self.art_view {
-                    acts.push(Action::ToggleFullscreen)
-                }
-            }
+            Cmd::Fullscreen => acts.push(Action::ToggleFullscreen),
             Cmd::Practice => acts.push(Action::TogglePractice),
             Cmd::MarkA => acts.push(Action::SetAAt(self.pos())),
             Cmd::MarkB => acts.push(Action::SetBAt(self.pos())),
@@ -281,7 +289,20 @@ impl App {
                             self.start_update_check();
                         }
 
+                        section_header(ui, "SIZE OF EVERYTHING");
+                        para(ui, "Makes buttons and text bigger or smaller. Ctrl and + / - (Cmd on a Mac) does the same.", pal().ink2);
+                        ui.horizontal_wrapped(|ui| {
+                            let now = (ctx.zoom_factor() * 100.0).round() as i32;
+                            for pct in [90, 100, 115, 130, 150, 175] {
+                                if retro_btn_w(ui, &format!("{}%", pct), 64.0, now == pct).clicked() {
+                                    ctx.set_zoom_factor(pct as f32 / 100.0);
+                                    self.dirty = true;
+                                }
+                            }
+                        });
+
                         section_header(ui, "KEYBOARD SHORTCUTS");
+                        para(ui, "Ctrl+K (Cmd+K on a Mac) opens the command palette: type any action and press ENTER.", pal().ink2);
                         para(ui, "Click a key, then press the new one. ESC cancels. Giving a key to something else unbinds the old one.", pal().ink2);
                         if !self.bind_note.is_empty() {
                             para(ui, &self.bind_note.clone(), pal().ink);

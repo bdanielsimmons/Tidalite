@@ -77,6 +77,23 @@ pub(crate) fn resample(src: &[f32], n: usize, k: f32) -> Vec<f32> {
         .collect()
 }
 
+/// Moving average with a window of `2 * half + 1`, repeated `passes` times (ends are clamped, not wrapped).
+pub(crate) fn smooth(src: &[f32], passes: usize, half: usize) -> Vec<f32> {
+    let n = src.len();
+    let mut cur = src.to_vec();
+    if n < 3 {
+        return cur;
+    }
+    for _ in 0..passes {
+        let prev = cur.clone();
+        for i in 0..n {
+            let (a, b) = (i.saturating_sub(half), (i + half).min(n - 1));
+            cur[i] = prev[a..=b].iter().sum::<f32>() / (b - a + 1) as f32;
+        }
+    }
+    cur
+}
+
 /// Bars and/or waveform inside `r`. `art` = soft white overlay (album view); otherwise the skin's own colours.
 pub(crate) fn viz_draw(
     p: &egui::Painter,
@@ -90,8 +107,19 @@ pub(crate) fn viz_draw(
     alpha: f32,
     tint: Option<(Color32, Color32)>,
 ) {
-    let nb = bands.len().max(1);
     let modern = style() != 0;
+    // album view in a modern skin: ease neighbouring bars and wave samples into each other so it looks fluid, not blocky
+    let soft = art && modern;
+    let (bands_s, peaks_s, wave_s);
+    let (bands, peaks, wave) = if soft {
+        bands_s = smooth(bands, 1, 1);
+        peaks_s = smooth(peaks, 1, 1);
+        wave_s = smooth(wave, 2, 3);
+        (&bands_s[..], &peaks_s[..], &wave_s[..])
+    } else {
+        (bands, peaks, wave)
+    };
+    let nb = bands.len().max(1);
     let a1 = (alpha * 255.0) as u8;
     let a2 = ((alpha * 2.0).min(0.9) * 255.0) as u8;
     let (body, cap, line) = if let Some((pri, sec)) = tint {
@@ -134,6 +162,7 @@ pub(crate) fn viz_draw(
         } else {
             2.0
         };
+        let mut soft_mesh = egui::Mesh::default();
         for i in 0..nb.min(peaks.len()) {
             let x = r.min.x + i as f32 * slot + (slot - bw) / 2.0;
             let mut h = bands[i] * r.height();
@@ -145,7 +174,18 @@ pub(crate) fn viz_draw(
             let rad = if modern { (bw * 0.35).min(3.0) } else { 0.0 };
             if h > 0.5 {
                 let br = Rect::from_min_size(Pos2::new(x, r.max.y - h), Vec2::new(bw, h));
-                if modern {
+                if soft {
+                    // a gentle gradient: solid at the base, fading toward the tip
+                    let uv = egui::epaint::WHITE_UV;
+                    let (tc, bc) = (body.linear_multiply(0.22), body);
+                    let b = soft_mesh.vertices.len() as u32;
+                    for (pos, color) in
+                        [(br.left_top(), tc), (br.right_top(), tc), (br.right_bottom(), bc), (br.left_bottom(), bc)]
+                    {
+                        soft_mesh.vertices.push(egui::epaint::Vertex { pos, uv, color });
+                    }
+                    soft_mesh.indices.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
+                } else if modern {
                     rfill(p, br, rad, body);
                 } else {
                     fill_rect(p, br, body);
@@ -156,12 +196,17 @@ pub(crate) fn viz_draw(
                     Pos2::new(x, r.max.y - ph - 2.0),
                     Vec2::new(bw, if modern { 2.0 } else { 1.0_f32.max(q / 2.0) }),
                 );
-                if modern {
+                if soft {
+                    rfill(p, pr, 1.0, cap.linear_multiply(0.55));
+                } else if modern {
                     rfill(p, pr, 1.0, cap);
                 } else {
                     fill_rect(p, pr, cap);
                 }
             }
+        }
+        if !soft_mesh.vertices.is_empty() {
+            p.add(egui::Shape::mesh(soft_mesh));
         }
     }
     if mode >= 1 && wave.len() > 1 {

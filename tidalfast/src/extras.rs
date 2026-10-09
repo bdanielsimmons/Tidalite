@@ -59,7 +59,8 @@ pub enum Opt {
 
 /// "1:23.5", "83" -> seconds
 pub fn parse_time(t: &str) -> Option<f32> {
-    let t = t.trim();
+    // the box shows "A 1:23.4" / "B 1:23.4": a leading letter is just the label
+    let t = t.trim().trim_start_matches(|c: char| c.is_ascii_alphabetic()).trim();
     match t.split_once(':') {
         Some((m, s)) => Some(m.trim().parse::<f32>().ok()? * 60.0 + s.trim().parse::<f32>().ok()?),
         None => t.parse::<f32>().ok(),
@@ -795,6 +796,7 @@ impl App {
                     self.upd_state = 3;
                 }
             },
+            Msg::Menu(id) => self.run_named(&id),
             Msg::Tuning(id, r) => {
                 self.tuning_busy = false;
                 match r {
@@ -1103,6 +1105,13 @@ impl App {
                     let _ = tx.send(Msg::Tuning(id, crate::tuning::detect(bytes)));
                     ctx.request_repaint();
                 });
+            }
+            Action::SetMode(m) => self.set_mode(m),
+            Action::QuitApp => {
+                self.flush_practice();
+                self.save_settings();
+                self.store.save();
+                std::process::exit(0);
             }
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;

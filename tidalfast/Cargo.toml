@@ -27,6 +27,10 @@ base64 = "0.22"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+# the real macOS menu bar
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.15", default-features = false }
+
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 

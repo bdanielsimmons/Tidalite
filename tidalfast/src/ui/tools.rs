@@ -180,9 +180,11 @@ impl App {
 
     // ------------------------------------------------------------ METRONOME
     fn metro_box(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        let frame = egui::Frame::none().fill(pal().app_bg).stroke(egui::Stroke::new(2.0, pal().edge)).inner_margin(8.0);
+        let frame = egui::Frame::none().fill(pal().app_bg).stroke(egui::Stroke::new(2.0, pal().edge)).inner_margin(12.0);
         frame.show(ui, |ui| {
-            ui.set_width(560.0);
+            let full_w = (ui.ctx().screen_rect().width() - 40.0).clamp(300.0, 700.0);
+            ui.set_width(full_w);
+            ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
             let on = self.mt.on;
             ui.horizontal(|ui| {
                 if retro_btn_w(ui, if on { "STOP" } else { "START" }, 84.0, on).clicked() {
@@ -205,7 +207,7 @@ impl App {
                 self.metro_vis(ui, acts);
             });
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 label(ui, "METER", 60.0);
                 let s = self.mt.beats.to_string();
                 self.num_step(
@@ -234,7 +236,7 @@ impl App {
             });
             let gs = band::groupings(self.mt.beats);
             if gs.len() > 1 {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     label(ui, "ACCENT", 60.0);
                     let txt = match self.mt_group {
                         0 => "GROUPS".to_string(),
@@ -248,7 +250,7 @@ impl App {
                     }
                 });
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 label(ui, "SOUND", 60.0);
                 let sub = ["NO SUBDIV", "EIGHTHS", "TRIPLETS", "SIXTEENTHS"][(self.mt.sub as usize).min(3)];
                 if retro_btn_w(ui, sub, 130.0, self.mt.sub > 0).tip("Quiet ticks between the beats").clicked() {
@@ -260,7 +262,7 @@ impl App {
                     }
                 }
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 label(ui, "GAP", 60.0);
                 let p = if self.mt.gap_play == 0 { "OFF".to_string() } else { self.mt.gap_play.to_string() };
                 self.num_step(ui, acts, F_GAP_PLAY, 44.0, Knob::GapPlay, p, "Bars of click, then silence (0 = off)");
@@ -268,7 +270,7 @@ impl App {
                 let m = self.mt.gap_mute.to_string();
                 self.num_step(ui, acts, F_GAP_MUTE, 36.0, Knob::GapMute, m, "Silent bars");
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 label(ui, "FASTER", 60.0);
                 let r = if self.mt.ramp_bars == 0 { "OFF".to_string() } else { self.mt.ramp_bars.to_string() };
                 self.num_step(ui, acts, F_RAMP_BARS, 44.0, Knob::RampBars, r, "Every this many bars the tempo goes up (0 = off)");
@@ -278,7 +280,7 @@ impl App {
                 label(ui, "BPM", 40.0);
             });
             if self.cur.is_some() && !self.stopped {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if check_box(ui, "FOLLOW SPEED", self.mt.follow).tip("Click gets slower / faster with the track").clicked() {
                         acts.push(Action::Opt(Opt::Follow));
                     }
@@ -305,7 +307,7 @@ impl App {
                     dim_line(ui, msg, 1.0, if red { pal().red } else { pal().ink2 });
                 }
                 if self.beat.is_some() {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         label(ui, "TRACK BEAT", 100.0);
                         let bpm = self.beat.map_or(0.0, |b| 60.0 / b.1);
                         lcd_box(ui, &format!("{:.0} BPM", bpm), 80.0, pal().ink);
@@ -356,10 +358,10 @@ impl App {
         }
 
         // pendulum
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(96.0, 104.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(124.0, 132.0), Sense::hover());
         inset(ui.painter(), rect, pal().lcd);
         let p = ui.painter();
-        let pivot = Pos2::new(rect.center().x, rect.max.y - 12.0);
+        let pivot = Pos2::new(rect.center().x, rect.max.y - 14.0);
         let swing = match (self.mt.on, self.mt_vis) {
             (true, Some((t0, spb, _))) if Instant::now() >= t0 => {
                 let e = (Instant::now() - t0).as_secs_f32() / spb.max(0.05);
@@ -367,7 +369,7 @@ impl App {
             }
             _ => 0.0,
         };
-        let len = 82.0;
+        let len = 106.0;
         // scale marks: both ends of the swing and the middle
         for a in [-0.62f32, 0.0, 0.62] {
             let q = pivot + Vec2::new(a.sin() * (len + 8.0), -a.cos() * (len + 8.0));
@@ -420,7 +422,7 @@ impl App {
         ui.add_space(6.0);
         let per = beats.min(16);
         let rows = beats.div_ceil(per);
-        let bh = if rows > 1 { 49.0 } else { 104.0 };
+        let bh = if rows > 1 { 63.0 } else { 132.0 };
         let w = ((ui.available_width() - 6.0) / per as f32 - 4.0).clamp(12.0, 56.0);
         ui.vertical(|ui| {
             for row in 0..rows {

@@ -37,6 +37,11 @@ mod font;
 mod help;
 #[path = "ui/icons.rs"]
 mod icons;
+#[cfg(target_os = "macos")]
+#[path = "ui/macmenu.rs"]
+mod macmenu;
+#[path = "ui/palette.rs"]
+mod palette;
 #[path = "ui/prefs.rs"]
 mod prefs;
 #[path = "ui/skin.rs"]
@@ -112,6 +117,8 @@ enum Msg {
     Sc(Result<Vec<store::Ext>, String>),
     ScSets(Result<Vec<(String, String)>, String>),
     UpdateFound(Result<Option<update::Info>, String>),
+    /// a click in the macOS menu bar
+    Menu(String),
     Tuning(i64, Option<(i32, f32)>),
     UpdateStaged(Result<(), String>),
     YtList(String, Result<Vec<store::Ext>, String>),
@@ -225,6 +232,8 @@ enum Action {
     SaveList(u8, String),
     ApplyUpdate,
     ToggleHelp,
+    SetMode(u8),
+    QuitApp,
     TogglePrefs,
     FindTuning,
     PlaylistPick(Track),
@@ -774,8 +783,17 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
     let base = row.max.y - 4.0;
     fill_rect(ui.painter(), Rect::from_min_max(Pos2::new(row.min.x, base), Pos2::new(row.max.x, base + t)), pal().edge);
     let (mut x, mut hit) = (row.min.x + 4.0, None);
+    // too many tabs for the width: tighten the padding first, then squeeze them evenly (the text shrinks to fit)
+    let avail = (row.width() - 8.0).max(60.0);
+    let gaps = 3.0 * items.len().saturating_sub(1) as f32;
+    let total = |pad: f32| items.iter().map(|n| text_w(n, 2.0) + pad).sum::<f32>() + gaps;
+    let mut pad = 24.0;
+    while pad > 10.0 && total(pad) > avail {
+        pad -= 2.0;
+    }
+    let shrink = (avail / total(pad)).min(1.0);
     for (i, name) in items.iter().enumerate() {
-        let w = text_w(name, 2.0) + 24.0;
+        let w = (text_w(name, 2.0) + pad) * shrink;
         let on = i == cur;
         let r = Rect::from_min_max(
             Pos2::new(x, if on { row.min.y } else { row.min.y + 5.0 }),
@@ -805,7 +823,7 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
             } else {
                 pal().ink2
             };
-            ptext(p, r.center(), Align::Center, name, 2.0, col);
+            ptext_fit(p, r.center(), Align::Center, name, 2.0, w - 8.0, col);
             if resp.clicked() {
                 hit = Some(i);
             }
@@ -829,12 +847,13 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
         // chipped top corners
         fill_rect(p, Rect::from_min_size(r.min, Vec2::splat(t)), pal().beige);
         fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::splat(t)), pal().beige);
-        ptext(
+        ptext_fit(
             p,
             Pos2::new(r.center().x, r.min.y + (base - r.min.y) / 2.0 + 1.0),
             Align::Center,
             name,
             2.0,
+            w - 8.0,
             if on { pal().ink } else { pal().ink2 },
         );
         if resp.clicked() {
@@ -1727,6 +1746,13 @@ struct App {
     upd_state: u8,
     last_active: Instant,
     show_help: bool,
+    palette_open: bool,
+    palette_q: String,
+    palette_sel: usize,
+    palette_frame: u32,
+    menu_keep: Option<Box<dyn std::any::Any>>,
+    fs_cmd_at: Option<Instant>,
+    art_op: f32,
     show_prefs: bool,
     auto_restart: bool,
     binds: Vec<Option<egui::Key>>,
@@ -2011,6 +2037,13 @@ impl App {
             upd_state: 0,
             last_active: Instant::now(),
             show_help: false,
+            palette_open: false,
+            palette_q: String::new(),
+            palette_sel: 0,
+            palette_frame: 0,
+            menu_keep: None,
+            fs_cmd_at: None,
+            art_op: 0.9,
             show_prefs: false,
             auto_restart: false,
             binds: prefs::default_binds(),
@@ -2147,6 +2180,12 @@ impl App {
                 app.viz[k].load(v);
             }
         }
+        if let Some(z) = st["zoom"].as_f64() {
+            app.ctx.set_zoom_factor((z as f32).clamp(0.8, 2.0));
+        }
+        if let Some(f) = st["art_op"].as_f64() {
+            app.art_op = (f as f32).clamp(0.5, 1.0);
+        }
         if let Some(b) = st["auto_restart"].as_bool() {
             app.auto_restart = b;
         }
@@ -2251,6 +2290,8 @@ impl App {
             "spec": self.show_spec,
             "tour_seen": self.tour_seen,
             "auto_restart": self.auto_restart,
+            "art_op": self.art_op,
+            "zoom": self.ctx.zoom_factor(),
             "binds": prefs::binds_to_json(&self.binds),
             "spec_op": self.spec_op,
             "spec_h": self.spec_h,
@@ -3294,6 +3335,7 @@ impl App {
             }
             Action::ToggleFullscreen => {
                 self.fullscreen = !self.fullscreen;
+                self.fs_cmd_at = Some(Instant::now());
                 self.ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
             }
             Action::Logout => {
@@ -3659,6 +3701,9 @@ impl App {
                 });
             });
         }
+
+        // mode row: LIBRARY / PLAYER / ALBUM / MINI
+        self.mode_strip(ui, acts);
 
         // tools row
         ui.horizontal(|ui| {
@@ -4281,15 +4326,25 @@ impl App {
         // shadow, frame, cover
         let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 20.0);
         let shadow: Vec<Pos2> = corners(h + 6.0).iter().map(|c| *c + off).collect();
-        p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(120), Stroke::NONE));
-        p.add(egui::Shape::convex_polygon(corners(h + 9.0).to_vec(), Color32::BLACK, Stroke::new(2.0, pal().trim)));
+        let see = self.art_op < 0.99;
+        p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(if see { 50 } else { 120 }), Stroke::NONE));
+        // when the cover is see-through the frame is only an outline, so the visualizer behind it stays visible
+        p.add(egui::Shape::convex_polygon(
+            corners(h + 9.0).to_vec(),
+            if see { Color32::TRANSPARENT } else { Color32::BLACK },
+            Stroke::new(2.0, pal().trim),
+        ));
         let cs = corners(h);
         match tex {
             Some(id) => {
                 let mut mesh = egui::Mesh::with_texture(id);
                 let uvs = [Pos2::new(0.0, 0.0), Pos2::new(1.0, 0.0), Pos2::new(1.0, 1.0), Pos2::new(0.0, 1.0)];
                 for (c, uv) in cs.iter().zip(uvs.iter()) {
-                    mesh.vertices.push(egui::epaint::Vertex { pos: *c, uv: *uv, color: Color32::WHITE });
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: *c,
+                        uv: *uv,
+                        color: Color32::from_white_alpha((self.art_op * 255.0) as u8),
+                    });
                 }
                 mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
                 p.add(egui::Shape::mesh(mesh));
@@ -4510,6 +4565,7 @@ impl App {
                         }
                     };
                     step(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8);
+                    step(ui, "COVER", &mut self.art_op, 0.05, 0.5, 1.0);
                     step(ui, "HEIGHT", &mut self.spec_h, 0.08, 0.15, 0.9);
                     step(ui, "WIDTH", &mut self.spec_w, 0.1, 0.2, 1.0);
                     self.viz_menu(ui, 1);
@@ -4776,6 +4832,11 @@ fn panel_frame() -> egui::Frame {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // This app draws and handles its own buttons and text boxes. egui's own keyboard focus would make Enter / Space
+        // "press" whichever button was clicked last (typing a loop time and pressing Enter also hit the + next to it), so drop it.
+        if let Some(id) = ctx.memory(|mem| mem.focused()) {
+            ctx.memory_mut(|mem| mem.surrender_focus(id));
+        }
         font::set_ppp(ctx.pixels_per_point());
         font::set_modern(style() != 0);
         tour::begin_frame();
@@ -4881,7 +4942,13 @@ impl eframe::App for App {
         } else {
             // Keyboard: Space = play/pause, arrows = seek, classic Winamp keys Z X C V B,
             // A = art viewer, G = black & white, L = lyrics, F / F11 = fullscreen, Esc = back.
-            if !self.search_focus && self.ed.id == 0 && !self.show_help && !self.show_prefs && self.tour.is_none() {
+            if !self.search_focus
+                && self.ed.id == 0
+                && !self.show_help
+                && !self.show_prefs
+                && !self.palette_open
+                && self.tour.is_none()
+            {
                 let kp = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
                 for cmd in self.key_commands(ctx) {
                     self.run_cmd(cmd, &mut acts);
@@ -4987,8 +5054,21 @@ impl eframe::App for App {
             ptext(&p, r.center(), Align::Center, "DROP AUDIO FILES OR FOLDERS TO ADD THEM", 3.0, pal().bar_txt);
         }
         self.floating_tools(ctx, &mut acts);
+        // the window can also go fullscreen/windowed by itself (the green Mac button, F11): follow it,
+        // except for a moment after our own command, while the window reports the old state
+        if self.fs_cmd_at.map_or(true, |t| t.elapsed() > Duration::from_millis(1500)) {
+            if let Some(f) = ctx.input(|i| i.viewport().fullscreen) {
+                self.fullscreen = f;
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if self.frames == 3 {
+            self.menu_keep = macmenu::install(&self.tx, &self.ctx);
+        }
         self.update_banner(ctx, &mut acts);
+        self.floating_modes(ctx, &mut acts);
         self.help_overlay(ctx, &mut acts);
+        self.palette_overlay(ctx);
         self.prefs_overlay(ctx, &mut acts);
         // first time in: open the help on the tour page
         if !self.tour_seen && (self.auth == Auth::In || self.offline) && self.frames >= 10 {
@@ -4998,6 +5078,9 @@ impl eframe::App for App {
             self.dirty = true;
         }
         self.tour_overlay(ctx);
+        if self.tour.is_none() && !self.show_prefs && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+            self.open_palette();
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             acts.push(Action::ToggleHelp);
         }
