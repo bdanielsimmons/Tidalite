@@ -235,10 +235,35 @@ pub fn today() -> (i32, u32, u32) {
     }
 }
 
+/// Mac / Linux: ask the system for the local date (so the diary rolls over at local midnight, not UTC midnight).
 #[cfg(not(windows))]
 pub fn today() -> (i32, u32, u32) {
+    #[repr(C)]
+    struct Tm {
+        sec: i32,
+        min: i32,
+        hour: i32,
+        mday: i32,
+        mon: i32,
+        year: i32,
+        wday: i32,
+        yday: i32,
+        isdst: i32,
+        gmtoff: i64,
+        zone: *const u8,
+    }
+    extern "C" {
+        fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
+    }
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-    civil_from_days(secs.div_euclid(86400))
+    let mut tm =
+        Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
+    let ok = unsafe { !localtime_r(&secs, &mut tm).is_null() };
+    if ok && tm.mday > 0 {
+        (tm.year + 1900, (tm.mon + 1) as u32, tm.mday as u32)
+    } else {
+        civil_from_days(secs.div_euclid(86400))
+    }
 }
 
 pub fn today_str() -> String {

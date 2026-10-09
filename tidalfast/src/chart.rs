@@ -452,6 +452,10 @@ pub fn parse_friendly(text: &str) -> Chart {
                 chart.bars.push(std::mem::take(&mut cur));
             }
         } else if tok == "{" {
+            // a repeat sign starts a new bar even when the bar line was left out
+            if !cur.chords.is_empty() {
+                chart.bars.push(std::mem::take(&mut cur));
+            }
             cur.start_rep = true;
         } else if tok == "}" {
             if cur.chords.is_empty() {
@@ -462,6 +466,9 @@ pub fn parse_friendly(text: &str) -> Chart {
                 cur.end_rep = true;
             }
         } else if tok.len() == 2 && tok.starts_with('[') && tok[1..].chars().all(|c| c.is_ascii_digit()) {
+            if !cur.chords.is_empty() {
+                chart.bars.push(std::mem::take(&mut cur));
+            }
             cur.ending = format!("{}.", &tok[1..]);
         } else if let Some(t) = mark_text(tok) {
             // end marks (D.C. ...) belong to the bar before when this bar has no chords yet
@@ -885,4 +892,92 @@ pub fn clean_title(t: &str) -> String {
     }
     let head = out.split(" - ").next().unwrap_or("").split(" / ").next().unwrap_or("");
     head.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn order(t: &str) -> Vec<usize> {
+        parse_friendly(t).play_order()
+    }
+
+    #[test]
+    fn plain_repeat() {
+        // | { A | B } | C |  -> A B A B C
+        assert_eq!(order("{ A | B } | C |"), vec![0, 1, 0, 1, 2]);
+    }
+
+    #[test]
+    fn first_and_second_ending() {
+        // { A | B | [1 C } [2 D |  ->  A B C A B D
+        let c = parse_friendly("{ A | B | [1 C } | [2 D |");
+        assert_eq!(c.bars.len(), 4);
+        assert_eq!(c.play_order(), vec![0, 1, 2, 0, 1, 3]);
+    }
+
+    #[test]
+    fn two_repeat_groups() {
+        // second group has no explicit start: it begins after the first one ended
+        let o = order("{ A | B } | C | D } | E |");
+        assert_eq!(o, vec![0, 1, 0, 1, 2, 3, 2, 3, 4]);
+    }
+
+    #[test]
+    fn da_capo() {
+        assert_eq!(order("A | B | C @dc |"), vec![0, 1, 2, 0, 1, 2]);
+    }
+
+    #[test]
+    fn text_round_trip() {
+        let t = "T34 *A { Dm7 G7 | Cmaj7 } | *B [1 Em7 | A7 } | [2 D6 @fine |";
+        let c = parse_friendly(t);
+        let again = parse_friendly(&c.to_text());
+        assert_eq!(c.bars.len(), again.bars.len());
+        assert_eq!(c.beats, again.beats);
+        for (a, b) in c.bars.iter().zip(again.bars.iter()) {
+            assert_eq!(a.chords, b.chords);
+            assert_eq!(a.label, b.label);
+            assert_eq!(a.start_rep, b.start_rep);
+            assert_eq!(a.end_rep, b.end_rep);
+            assert_eq!(a.ending, b.ending);
+            assert_eq!(a.marks, b.marks);
+        }
+    }
+
+    #[test]
+    fn edits() {
+        let mut c = parse_friendly("A | B | C |");
+        c.edit(1, "ins");
+        assert_eq!(c.bars.len(), 4);
+        c.edit(1, "del");
+        assert_eq!(c.bars.len(), 3);
+        c.edit(0, "{");
+        c.edit(2, "}");
+        assert_eq!(c.play_order(), vec![0, 1, 2, 0, 1, 2]);
+        c.edit(0, "*A");
+        assert_eq!(parse_friendly(&c.to_text()).bars[0].label, "A");
+        c.edit(2, "@coda");
+        assert!(parse_friendly(&c.to_text()).bars[2].marks.contains(&"CODA".to_string()));
+    }
+
+    #[test]
+    fn transposing() {
+        assert_eq!(transpose("Dm7", 2), "Em7");
+        assert_eq!(transpose("C/E", 2), "D/F#");
+        assert_eq!(transpose("N.C.", 5), "N.C.");
+    }
+
+    #[test]
+    fn implicit_start_and_long_ending() {
+        // no { at all: repeat from the top; first ending spans two bars
+        assert_eq!(order("A | B | [1 C | D } [2 E |"), vec![0, 1, 2, 3, 0, 1, 4]);
+    }
+
+    #[test]
+    fn ending_in_second_section() {
+        // { A | B } | { C | [1 D } [2 E | F |
+        let o = order("{ A | B } | { C | [1 D } | [2 E | F |");
+        assert_eq!(o, vec![0, 1, 0, 1, 2, 3, 2, 4, 5]);
+    }
 }

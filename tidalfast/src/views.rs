@@ -529,7 +529,7 @@ impl App {
         title_line(ui, "MY FILES", 3.0, pal().ink);
         title_line(ui, &format!("{} files - played from where they are", self.store.files.len()), 2.0, pal().ink2);
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "ADD FILES", false).clicked() {
                 acts.push(Action::AddFiles);
             }
@@ -576,7 +576,7 @@ impl App {
         title_line(ui, "audio only, saved on this computer for looping", 2.0, pal().ink2);
         ui.add_space(4.0);
         let have = sources::ytdlp_path().is_some();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(150.0, BTN_H), Sense::hover());
             ptext(
                 ui.painter(),
@@ -593,7 +593,7 @@ impl App {
                 acts.push(Action::GetYtDlp);
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
             let o = field(ui, &mut self.ed, F_YT, &mut self.yt_in, rect, "Paste a YouTube link...", false);
@@ -632,7 +632,7 @@ impl App {
         ui.add_space(4.0);
         let have = sources::ytdlp_path().is_some();
         if !have {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 label(ui, "ONE-TIME SETUP", 150.0);
                 if retro_btn(ui, "GET YT-DLP", true).tip("Downloads the free yt-dlp tool, which also reads SoundCloud").clicked()
                 {
@@ -643,7 +643,7 @@ impl App {
                 para(ui, &self.yt_msg.clone(), pal().ink2);
             }
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
             let o = field(ui, &mut self.ed, F_SC, &mut self.sc_in, rect, "Search SoundCloud, or paste a link...", false);
@@ -651,7 +651,7 @@ impl App {
                 acts.push(Action::ScGo);
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "THEIR PLAYLISTS", false)
                 .tip("Type a SoundCloud user name (or paste their profile link) above, then press this to list all their public playlists")
                 .clicked()
@@ -659,7 +659,7 @@ impl App {
                 acts.push(Action::ScSets);
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let n = sources::SC_BROWSER.load(Ordering::Relaxed) as usize;
             label(ui, "SIGN-IN FROM", 130.0);
             if retro_btn_w(ui, sources::SC_BROWSERS[n], 110.0, n > 0)
@@ -720,7 +720,7 @@ impl App {
         ui.add_space(6.0);
         if let Some(t) = self.pick.clone() {
             para(ui, &format!("ADD \"{} - {}\" TO WHICH TUNE?", t.artist, t.title), pal().ink);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if retro_btn(ui, "+ NEW TUNE FROM THIS", false).clicked() {
                     acts.push(Action::NewTuneFrom(t.clone()));
                 }
@@ -734,7 +734,7 @@ impl App {
             title_line(ui, &format!("{} tunes - your repertoire", self.store.tunes.len()), 2.0, pal().ink2);
             ui.add_space(4.0);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
             let o = field(ui, &mut self.ed, F_NEW_TUNE, &mut self.new_tune, rect, "New tune name...", false);
@@ -795,7 +795,7 @@ impl App {
             let t = &self.store.tunes[i];
             (t.status, t.versions.len(), self.store.tune_secs(&t.name), t.name.clone())
         };
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "< TUNES", false).clicked() {
                 acts.push(Action::OpenTune(None));
             }
@@ -811,7 +811,7 @@ impl App {
         self.store_dirty |= o.changed;
         let o = field_row(ui, &mut self.ed, F_T_KEY, "KEY", &mut self.store.tunes[i].key, "e.g. Bb, Dm", None);
         self.store_dirty |= o.changed;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             label(ui, "BPM", 74.0);
             if retro_btn_w(ui, "-", 28.0, false).clicked() {
                 let t = &mut self.store.tunes[i];
@@ -844,7 +844,7 @@ impl App {
             para(ui, &info, pal().ink2);
         }
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "PLAY ALL", false).clicked() {
                 acts.push(Action::PlayTune(i, false));
             }
@@ -864,7 +864,7 @@ impl App {
                 acts.push(Action::LookStyle);
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 4.0).max(120.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
             let o = field(
@@ -880,7 +880,7 @@ impl App {
                 acts.push(Action::LookUp(i));
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "PLAY-ALONG", false)
                 .tip("Search YouTube for backing tracks of this tune (opens your browser)")
                 .clicked()
@@ -888,7 +888,7 @@ impl App {
                 acts.push(Action::PlayAlong(tname.clone()));
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "ADD CURRENT", false).tip("Add the recording that is playing now").clicked() {
                 acts.push(Action::AddCurrentToTune(i));
             }
@@ -957,7 +957,7 @@ impl App {
                 });
             }
             if self.edit_ver == Some(vi) {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     label(ui, "RATING", 74.0);
                     for n in 1..=5u8 {
                         if retro_btn_w(ui, &n.to_string(), 34.0, stars == n).clicked() {
@@ -1097,7 +1097,7 @@ impl App {
             "NOVEMBER",
             "DECEMBER",
         ];
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn_w(ui, "<", 34.0, false).tip("Previous month").clicked() {
                 self.diary_ym = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
             }
@@ -1204,7 +1204,7 @@ impl App {
             let _ = field_row(ui, &mut self.ed, F_MINS, "MINUTES", &mut self.f_mins, &mins_hint, None);
             let _ = field_row(ui, &mut self.ed, F_BPM, "BPM", &mut self.f_bpm, "tempo you reached", None);
             let _ = field_row(ui, &mut self.ed, F_NOTE, "NOTE", &mut self.f_note, "What went well? What next?", Some(70.0));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if retro_btn(ui, "SAVE ENTRY", false).clicked() {
                     acts.push(Action::SaveEntry);
                 }
@@ -1415,7 +1415,7 @@ impl App {
         // ---- A / B
         let a_txt = format!("A {}", self.loop_a.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()));
         let b_txt = format!("B {}", self.loop_b.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if retro_btn_w(ui, "SET A", 64.0, false).tip("Loop start at the current position  ([ key)").clicked() && active {
                 acts.push(Action::SetAAt(pos));
             }
@@ -1442,7 +1442,7 @@ impl App {
                 "Nudge earlier / later - or click the box and type a time like 2:05",
             );
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let ink = pal().ink;
             if crate::icon_btn_w(ui, &crate::IC_REP, self.loop_on && both, ink, 44.0).tip("Loop on / off  (\\ key)").clicked() {
                 acts.push(Action::LoopToggle);
@@ -1465,7 +1465,7 @@ impl App {
                 acts.push(Action::ToggleMore);
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             label(ui, "SPEED", 64.0);
             for pct in [50u32, 70, 85, 100] {
                 if retro_btn_w(ui, &format!("{}", pct), 44.0, self.speed == pct).clicked() {
@@ -1485,8 +1485,10 @@ impl App {
         });
 
         // ---- saved loops for this track
-        ui.horizontal(|ui| {
-            let w = (ui.available_width() - 100.0 - 6.0).max(60.0);
+        ui.horizontal_wrapped(|ui| {
+            // the save button's real width; if the name box cannot keep a usable size, the button drops to the next line
+            let bw = 10.0 + 18.0 + 8.0 + text_w("SAVE LOOP", 2.0) + 10.0;
+            let w = (ui.available_width() - bw - 12.0).max(150.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
             let o = field(ui, &mut self.ed, F_SEC, &mut self.sec_name, rect, "Name this loop (bridge, head, lick...)", false);
             if o.enter {
@@ -1547,7 +1549,7 @@ impl App {
                             ui.add_space(2.0);
                             match self.mtab {
                                 0 => {
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         label(ui, "TRAIN", 56.0);
                                         if retro_btn_w(ui, if self.trainer { "ON" } else { "OFF" }, 56.0, self.trainer)
                                             .tip("Practice the loop a set number of times, then speed up by a set percent")
@@ -1559,7 +1561,7 @@ impl App {
                                             lcd_box(ui, &format!("PASS {}/{}", self.passes, self.trainer_n), 100.0, pal().ink);
                                         }
                                     });
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         label(ui, "EVERY", 60.0);
                                         self.num_step(
                                             ui,
@@ -1582,7 +1584,7 @@ impl App {
                                         );
                                     });
                                     dim_line(ui, "STARTS AT THE SPEED SET ABOVE AND STOPS AT 100%", 1.0, pal().dim);
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         let ci = if self.count_in == 0 {
                                             "COUNT OFF".to_string()
                                         } else {
@@ -1609,7 +1611,7 @@ impl App {
                                     });
                                 }
                                 1 => {
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         label(ui, "PITCH", 56.0);
                                         if retro_btn_w(ui, "-", 28.0, false)
                                             .tip("Lower the pitch a semitone (speed stays)")
@@ -1637,7 +1639,7 @@ impl App {
                                     });
                                 }
                                 _ => {
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         label(ui, "STEMS", 56.0);
                                         if self.stem_busy == 1 {
                     lcd_box(ui, &stems::stage_text(), 300.0, pal().ink2);
@@ -1703,7 +1705,7 @@ const COMFORT: [&str; 4] = ["LEARNING", "OK", "GOOD", "COMFORTABLE"];
 fn comfort_meter(ui: &mut egui::Ui, level: u8) -> Option<u8> {
     let level = level.min(3);
     let mut hit = None;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         label(ui, "KNOW IT", 74.0);
         for n in 0..4u8 {
             let (r, resp) = ui.allocate_exact_size(Vec2::new(30.0, BTN_H), Sense::click());

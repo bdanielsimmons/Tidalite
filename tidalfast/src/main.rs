@@ -461,7 +461,7 @@ fn viz_draw(
         if modern {
             let pts: Vec<Pos2> =
                 (0..n).map(|k| Pos2::new(r.min.x + r.width() * k as f32 / (n - 1) as f32, cy - wave[k] * amp)).collect();
-            let w = if art { 3.0 } else { 1.5 };
+            let w: f32 = if art { 3.0 } else { 1.5 };
             if style() == 1 || art {
                 // soft glow under the line
                 p.add(egui::Shape::line(
@@ -2162,7 +2162,7 @@ struct App {
     viz_mode: u8,
     viz_w: f32,
     viz_gain: f32,
-    wave: Vec<f32>,
+    viz_wave: Vec<f32>,
     show_lyrics: bool,
     fullscreen: bool,
     art_tilt: Vec2,
@@ -2428,7 +2428,7 @@ impl App {
             viz_mode: 0,
             viz_w: 0.8,
             viz_gain: 1.0,
-            wave: vec![0.0; WAVE_N],
+            viz_wave: vec![0.0; WAVE_N],
             show_lyrics: true,
             fullscreen: false,
             art_tilt: Vec2::ZERO,
@@ -3253,8 +3253,8 @@ impl App {
             }
         }
         // waveform: the loudest swing in each slice of the latest samples
-        if self.wave.len() != WAVE_N {
-            self.wave = vec![0.0; WAVE_N];
+        if self.viz_wave.len() != WAVE_N {
+            self.viz_wave = vec![0.0; WAVE_N];
         }
         for k in 0..WAVE_N {
             let tv = if n >= WAVE_N {
@@ -3269,7 +3269,7 @@ impl App {
             } else {
                 0.0
             };
-            self.wave[k] = self.wave[k] * 0.45 + tv * 0.55;
+            self.viz_wave[k] = self.viz_wave[k] * 0.45 + tv * 0.55;
         }
         for i in 0..nb {
             let old = self.bands[i];
@@ -4336,7 +4336,7 @@ impl App {
             sp.shrink2(Vec2::new(3.0, 3.0)),
             &self.bands,
             &self.peaks,
-            &self.wave,
+            &self.viz_wave,
             self.viz_mode,
             self.viz_w,
             false,
@@ -4684,7 +4684,18 @@ impl App {
                 Pos2::new(zone.min.x + 6.0, zone.max.y - zone.height() * self.spec_h),
                 Pos2::new(zone.max.x - 6.0, zone.max.y),
             );
-            viz_draw(&p, r, &self.bands, &self.peaks, &self.wave, self.viz_mode, self.viz_w, true, self.spec_op, self.viz_tint());
+            viz_draw(
+                &p,
+                r,
+                &self.bands,
+                &self.peaks,
+                &self.viz_wave,
+                self.viz_mode,
+                self.viz_w,
+                true,
+                self.spec_op,
+                self.viz_tint(),
+            );
             if self.cur.is_some() && !self.paused && !self.stopped {
                 ui.ctx().request_repaint();
             }

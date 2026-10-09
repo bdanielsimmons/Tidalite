@@ -342,11 +342,20 @@ fn parse_chord(c: &str) -> Option<Chord> {
     } else {
         None
     };
+    // the colour note that replaces the fifth in the voicing (b9, #9, #11, b13, 13, 11, 9)
     let ext = if r.contains("b9") {
         Some(13)
     } else if r.contains("#9") {
         Some(15)
-    } else if r.contains('9') || r.contains("13") {
+    } else if r.contains("#11") {
+        Some(18)
+    } else if r.contains("b13") {
+        Some(20)
+    } else if r.contains("13") {
+        Some(21)
+    } else if r.contains("11") {
+        Some(17)
+    } else if r.contains('9') {
         Some(14)
     } else {
         None

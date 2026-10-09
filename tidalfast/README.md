@@ -227,3 +227,15 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 
 ## v9.23
 - Metronome LOCK TO TRACK: finds the beat by itself as soon as the track's audio is stored, shows its status (listening / locked / waiting / no beat found), and falls back to your own tempo when no steady beat exists instead of going silent.
+
+## v9.24
+- Fixed the build error from a field name clash (`wave`).
+- Diary and streaks use your local date on Mac/Linux (they used UTC before, so the day rolled over in the evening).
+- A repeat sign or ending typed without a bar line before it now starts its own bar.
+- Unit tests for the chart module (`cargo test`): repeats, 1st/2nd endings, D.C., the bar editor round trip, transposing.
+
+## v9.25
+- Rows of buttons in the practice panel, tune pages, lists and the lead sheet now wrap onto a second line instead of stretching past the edge. SAVE LOOP is sized from its real width and drops below the name box when the panel is narrow.
+
+## v9.26
+- Band chords: #11, 11, 13 and b13 now change the voicing (they were ignored, so Fmaj7#11 sounded like Fmaj7 and, in the middle voices, like F#m7b5).

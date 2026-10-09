@@ -547,7 +547,7 @@ impl App {
 
         let chart = self.chart_for(&text);
         let has = !chart.bars.is_empty();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let mut keys: Vec<(String, i32)> =
                 vec![("CONCERT (C)".into(), 0), ("Bb HORNS".into(), 2), ("Eb HORNS".into(), 9), ("F HORN".into(), 7)];
             // every other key: the chart moved so it sits in that key
@@ -563,7 +563,7 @@ impl App {
             if retro_btn(ui, "I-IV-V", self.chart_rn).tip("Roman numerals under the chords, relative to the key").clicked() {
                 acts.push(Action::ToggleNumerals);
             }
-            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            {
                 if let Some(i) = ti {
                     if retro_btn(ui, if self.chart_edit { "DONE" } else { "EDIT" }, self.chart_edit).clicked() {
                         self.chart_edit = !self.chart_edit;
@@ -580,12 +580,12 @@ impl App {
                         self.live_q.clear();
                     }
                 }
-            });
+            }
         });
 
         // ---- the band
         if has {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let on = self.band_on;
                 if retro_btn_w(ui, if on { "STOP BAND" } else { "PLAY BAND" }, 116.0, on)
                     .tip("A little band plays the changes: bass, chords and drums")
