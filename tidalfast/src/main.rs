@@ -15,6 +15,8 @@ mod sources;
 mod stems;
 mod store;
 mod tools;
+mod tuning;
+mod update;
 mod vicon;
 mod views;
 mod viz;
@@ -78,6 +80,9 @@ enum Msg {
     YtTool(Result<PathBuf, String>),
     Sc(Result<Vec<store::Ext>, String>),
     ScSets(Result<Vec<(String, String)>, String>),
+    UpdateFound(Result<Option<update::Info>, String>),
+    Tuning(i64, Option<(i32, f32)>),
+    UpdateStaged(Result<(), String>),
     YtList(String, Result<Vec<store::Ext>, String>),
     ScMeta(store::Ext),
     Wave(i64, Option<Vec<u8>>),
@@ -187,6 +192,8 @@ enum Action {
     ScOpenSet(String),
     CopyLink(String),
     SaveList(u8, String),
+    ApplyUpdate,
+    FindTuning,
     PlaylistPick(Track),
     PlaylistAdd(usize, Track),
     PlaylistNew(Option<Track>),
@@ -715,7 +722,14 @@ fn logo(ui: &mut egui::Ui) {
     let tag =
         if PRACTICE { "A RETRO PLAYER FOR TIDAL AND MORE - MADE FOR PRACTICE" } else { "A RETRO PLAYER FOR TIDAL AND MORE" };
     ptext_fit(p, Pos2::new(rect.min.x + 51.0, rect.center().y + gy), Align::Min, tag, 1.0, rect.width() - 110.0, pal().ink2);
-    ptext(p, Pos2::new(rect.max.x - 10.0, rect.center().y + gy), Align::Max, VERSION, 1.0, pal().dim);
+    ptext(
+        p,
+        Pos2::new(rect.max.x - 10.0, rect.center().y + gy),
+        Align::Max,
+        &if update::build() > 0 { format!("{} .{}", VERSION, update::build()) } else { VERSION.to_string() },
+        1.0,
+        pal().dim,
+    );
 }
 
 /// Folder-style tabs with a baseline; the open tab joins the panel below. Returns the clicked tab.
@@ -1677,6 +1691,12 @@ struct App {
     sc_results: Vec<store::Ext>,
     sc_sets: Vec<(String, String)>,
     sc_cur: Option<String>,
+    upd: Option<update::Info>,
+    upd_state: u8,
+    /// (track id, cents from A440, confidence) from the tuning check
+    tuning: Option<(i64, i32, f32)>,
+    tuning_busy: bool,
+    upd_checked: Option<Instant>,
     new_pl: String,
     pl_open: Option<usize>,
     pl_pick: Option<Track>,
@@ -1723,6 +1743,7 @@ struct App {
     trainer_n: u32,
     passes: u32,
     last_wraps: u32,
+    /// pitch shift in cents (100 = a semitone)
     semis: i32,
     chan: u32,
     acc: f32,
@@ -1946,6 +1967,11 @@ impl App {
             sc_results: Vec::new(),
             sc_sets: Vec::new(),
             sc_cur: None,
+            upd: None,
+            upd_state: 0,
+            tuning: None,
+            tuning_busy: false,
+            upd_checked: None,
             new_pl: String::new(),
             pl_open: None,
             pl_pick: None,
@@ -4973,6 +4999,7 @@ impl eframe::App for App {
             ptext(&p, r.center(), Align::Center, "DROP AUDIO FILES OR FOLDERS TO ADD THEM", 3.0, pal().bar_txt);
         }
         self.floating_tools(ctx, &mut acts);
+        self.update_banner(ctx, &mut acts);
         for a in acts {
             self.apply(a);
         }
@@ -5087,6 +5114,10 @@ fn main() -> eframe::Result<()> {
         };
         crate::api::log(&format!("PANIC at {}: {}", loc, msg));
     }));
+    // an update downloaded last time is installed before anything opens
+    if update::apply_staged_at_start() {
+        return Ok(());
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Tidalite")

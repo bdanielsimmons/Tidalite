@@ -1837,11 +1837,45 @@ impl App {
                                             .tip("Lower the pitch a semitone (speed stays)")
                                             .clicked()
                                         {
-                                            acts.push(Action::Transpose(-1));
+                                            acts.push(Action::Transpose(-100));
                                         }
-                                        lcd_box(ui, &format!("{:+}", self.semis), 52.0, pal().ink);
-                                        if retro_btn_w(ui, "+", 28.0, false).clicked() {
-                                            acts.push(Action::Transpose(1));
+                                        if retro_btn_w(ui, "-10c", 44.0, false)
+                                            .tip("Fine tune: lower the pitch 10 cents (a tenth of a semitone) - for records not tuned to A440")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::Transpose(-10));
+                                        }
+                                        lcd_box(ui, &format!("{:+.2}", self.semis as f32 / 100.0), 64.0, pal().ink);
+                                        if retro_btn_w(ui, "+10c", 44.0, false)
+                                            .tip("Fine tune: raise the pitch 10 cents")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::Transpose(10));
+                                        }
+                                        if retro_btn_w(ui, "+", 28.0, false).tip("Raise the pitch a semitone (speed stays)").clicked() {
+                                            acts.push(Action::Transpose(100));
+                                        }
+                                        let cur_id = self.cur_track().map(|t| t.id);
+                                        match self.tuning {
+                                            Some((id, c, _)) if Some(id) == cur_id && c.abs() > 4 => {
+                                                if retro_btn_w(ui, &format!("TUNE TO A440 ({:+}c)", -c), 150.0, self.semis == -c)
+                                                    .tip("Shifts the track to standard A440 pitch so you can play along without retuning")
+                                                    .clicked()
+                                                {
+                                                    acts.push(Action::Transpose(-c - self.semis));
+                                                }
+                                            }
+                                            _ => {
+                                                if retro_btn_w(ui, if self.tuning_busy { "LISTENING..." } else { "FIND TUNING" }, 116.0, false)
+                                                    .tip("Measures how far this recording is from A440 (old records and some modern tracks are off) and offers to fix it")
+                                                    .clicked()
+                                                {
+                                                    acts.push(Action::FindTuning);
+                                                }
+                                            }
+                                        }
+                                        if self.semis != 0 && retro_btn_w(ui, "0", 28.0, false).tip("Back to the original pitch").clicked() {
+                                            acts.push(Action::Transpose(-self.semis));
                                         }
                                         ui.add_space(8.0);
                                         if retro_btn_w(ui, CHAN_NAMES[self.chan as usize % 6], 100.0, self.chan != 0)

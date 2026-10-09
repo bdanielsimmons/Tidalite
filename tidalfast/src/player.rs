@@ -63,6 +63,7 @@ pub struct Ctl {
     speed: AtomicU32,
     pos_fr: AtomicU64,
     rate: AtomicU32,
+    /// transpose in cents (100 = one semitone)
     semis: AtomicI32,
     chan: AtomicU32,
     wraps: AtomicU32,
@@ -87,9 +88,9 @@ impl Ctl {
         }
     }
 
-    /// Transpose in semitones (speed is unaffected).
-    pub fn set_semis(&self, n: i32) {
-        self.semis.store(n.clamp(-12, 12), Ordering::Relaxed);
+    /// Transpose in cents, 100 per semitone (speed is unaffected).
+    pub fn set_semis(&self, cents: i32) {
+        self.semis.store(cents.clamp(-1200, 1200), Ordering::Relaxed);
     }
 
     /// 0 stereo, 1 left, 2 right, 3 mono, 4 center-cancel, 5 bass only
@@ -423,7 +424,7 @@ impl<S: Source<Item = i16>> Iterator for Stretch<S> {
                 *t = 0.0;
             }
         }
-        let tempo = pct as f64 / 100.0 / 2f64.powf(semis as f64 / 12.0);
+        let tempo = pct as f64 / 100.0 / 2f64.powf(semis as f64 / 1200.0);
         if !self.step(tempo) {
             return None;
         }
@@ -452,7 +453,7 @@ impl<S: Source<Item = i16>> Source for Stretch<S> {
     }
 }
 
-/// Transpose: resamples the (tempo-corrected) audio so the pitch moves by `semis` semitones.
+/// Transpose: resamples the (tempo-corrected) audio so the pitch moves by `semis` cents.
 struct Resample<S: Source<Item = i16>> {
     inner: S,
     ctl: Arc<Ctl>,
@@ -529,7 +530,7 @@ impl<S: Source<Item = i16>> Iterator for Resample<S> {
         if self.done {
             return None;
         }
-        let r = 2f64.powf(semis as f64 / 12.0);
+        let r = 2f64.powf(semis as f64 / 1200.0);
         if !self.ready {
             self.a = self.read_frame()?;
             self.b = self.read_frame().unwrap_or_else(|| self.a.clone());

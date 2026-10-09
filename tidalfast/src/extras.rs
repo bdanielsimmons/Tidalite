@@ -770,6 +770,46 @@ impl App {
                     }
                 }
             }
+            Msg::UpdateFound(r) => match r {
+                Ok(Some(info)) => {
+                    if self.upd.as_ref().map_or(true, |u| u.build < info.build) {
+                        self.upd = Some(info.clone());
+                        self.upd_state = 1;
+                        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                        std::thread::spawn(move || {
+                            let _ = tx.send(Msg::UpdateStaged(crate::update::stage(&info)));
+                            ctx.request_repaint();
+                        });
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => api::log(&format!("update check: {}", e)),
+            },
+            Msg::Tuning(id, r) => {
+                self.tuning_busy = false;
+                match r {
+                    Some((c, conf)) if conf >= 0.04 => {
+                        self.tuning = Some((id, c, conf));
+                        let how = if c.abs() <= 4 {
+                            "IT IS TUNED TO A440".to_string()
+                        } else {
+                            format!("THIS TRACK IS {} CENTS {} OF A440", c.abs(), if c > 0 { "SHARP" } else { "FLAT" })
+                        };
+                        self.set_note(&how);
+                    }
+                    _ => self.set_note("COULD NOT TELL - TOO LITTLE PITCHED MUSIC TO MEASURE"),
+                }
+            }
+            Msg::UpdateStaged(r) => match r {
+                Ok(()) => {
+                    self.upd_state = 2;
+                    self.set_note("UPDATE READY - CLICK THE BAR AT THE TOP");
+                }
+                Err(e) => {
+                    api::log(&format!("update download: {}", e));
+                    self.upd_state = 3;
+                }
+            },
             Msg::Live(q, r) => {
                 self.chart_busy = false;
                 if q == self.live_q {
@@ -1029,6 +1069,43 @@ impl App {
             Action::PlaylistOpen(i) => {
                 self.pl_open = i;
                 self.serial += 1;
+            }
+            Action::FindTuning => {
+                let Some(t) = self.cur_track() else {
+                    self.set_note("PLAY A TRACK FIRST");
+                    return;
+                };
+                if self.tuning_busy {
+                    return;
+                }
+                let bytes = match self.srcmap.get(&t.id) {
+                    Some(Src::File(p)) => std::fs::read(p).ok(),
+                    _ => cache::get(t.id),
+                };
+                let Some(bytes) = bytes else {
+                    self.set_note("PLAY IT ONCE FIRST SO IT IS STORED, THEN CHECK THE TUNING");
+                    return;
+                };
+                self.tuning_busy = true;
+                self.set_note("LISTENING FOR THE TUNING...");
+                let (tx, ctx, id) = (self.tx.clone(), self.ctx.clone(), t.id);
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Tuning(id, crate::tuning::detect(bytes)));
+                    ctx.request_repaint();
+                });
+            }
+            Action::ApplyUpdate => {
+                self.flush_practice();
+                self.save_settings();
+                self.store.save();
+                match crate::update::apply() {
+                    Ok(()) => std::process::exit(0),
+                    Err(e) => {
+                        api::log(&format!("update install: {}", e));
+                        self.set_note("UPDATE FAILED - IT WILL RETRY");
+                        self.upd_state = 3;
+                    }
+                }
             }
             Action::SaveList(kind, url) => {
                 if !self.store.lists.iter().any(|l| l.url == url) {
@@ -1441,12 +1518,12 @@ impl App {
                 self.set_note(&format!("EAR: {}", CHAN_NAMES[self.chan as usize]));
             }
             Action::Transpose(d) => {
-                self.semis = (self.semis + d).clamp(-12, 12);
+                self.semis = (self.semis + d).clamp(-1200, 1200);
                 if self.cur.is_some() {
                     self.practice = true;
                 }
                 self.sync_loop();
-                self.set_note(&format!("PITCH {:+} SEMITONES (SPEED UNCHANGED)", self.semis));
+                self.set_note(&format!("PITCH {:+.2} SEMITONES (SPEED UNCHANGED)", self.semis as f32 / 100.0));
             }
             Action::Export => {
                 let (Some(a), Some(b)) = (self.loop_a, self.loop_b) else {

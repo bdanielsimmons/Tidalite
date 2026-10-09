@@ -248,3 +248,6 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - LISTS tab: your own playlists mixing any source; right-click a song > Add to a playlist; SAVE QUEUE AS PLAYLIST.
 - v9.29: main.rs split: skin.rs (palettes, colour helpers), viz.rs (visualizer), icons.rs (pixel icons); one shared skin menu. Behaviour unchanged.
 - Simple build now includes Files and YouTube (only practice tools are left out). Every green build publishes a Release (build-N).
+- Self-update (update.rs): checks GitHub Releases, downloads the new build in the background, installs on next start or on click. Needs a public repo; builds from the workflow carry TIDALITE_BUILD.
+- Pitch is now in cents: -10c / +10c fine-tune buttons next to the semitone +/- (for records not tuned to A440).
+- FIND TUNING (tuning.rs): measures how many cents a track is from A440 and offers TUNE TO A440. Unit-tested on synthetic chords (+-3 cents).

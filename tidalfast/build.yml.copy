@@ -1,6 +1,7 @@
 name: build
 on:
   push:
+    branches: ['**']
   workflow_dispatch:
 jobs:
   build:
@@ -21,6 +22,9 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - name: Build
         shell: bash
+        env:
+          # lets the app know which build it is, so it can find newer releases
+          TIDALITE_BUILD: ${{ github.run_number }}
         run: |
           manifest=$(find . -name Cargo.toml -not -path '*/target/*' | head -1)
           if [ -z "$manifest" ]; then
@@ -63,10 +67,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            tag="${{ github.ref_name }}"
-          else
-            tag="build-${{ github.run_number }}"
-          fi
+          tag="v9.${{ github.run_number }}"
           gh release create "$tag" dist/* --repo "${{ github.repository }}" --target "${{ github.sha }}" \
             --title "Tidalite $tag" --notes "Automatic build of commit ${GITHUB_SHA::7}. Windows: tidalite-practice.exe (everything) or tidalite-simple.exe (no practice tools). Mac: the .tar.gz files." --latest
