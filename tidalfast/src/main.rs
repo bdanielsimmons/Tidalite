@@ -366,6 +366,7 @@ enum Action {
     CopyLog,
     ToggleArt,
     ToggleGray,
+    ToggleSpec,
     ToggleLyrics,
     ToggleFullscreen,
     ToggleLike(Track),
@@ -576,6 +577,8 @@ const IC_MIC: [&str; 9] =
 const IC_BW: [&str; 9] =
     ["...###...", ".###..##.", ".###...#.", "####....#", "####....#", "####....#", ".###...#.", ".###..##.", "...###..."];
 
+const IC_SPEC: [&str; 9] =
+    [".........", "......#..", "..#...#..", "..#.#.#..", "#.#.#.#.#", "#.#.#.#.#", "#.#.#.#.#", "#########", "........."];
 const IC_SHUF: [&str; 9] = [
     "...........",
     "........#..",
@@ -1069,8 +1072,14 @@ fn list_row(
     };
     let cy = rect.center().y;
     let rtxt = right();
-    let rw = ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, &rtxt, 2.0, fg2);
-    let mut rw = rw;
+    let mut rw = if let Some((a, b)) = rtxt.split_once('\t') {
+        // two right-hand columns, lined up with `table_header`
+        ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, b, 2.0, fg2);
+        let w = ptext(p, Pos2::new(rect.max.x - 10.0 - TBL_W2, cy), Align::Max, a, 2.0, fg2);
+        TBL_W2 + w
+    } else {
+        ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, &rtxt, 2.0, fg2)
+    };
     if stored {
         pixmap(p, Pos2::new(rect.max.x - 10.0 - rw - 16.0, cy - 4.0), 2.0, &CHECK[..], fg2);
         rw += 16.0;
@@ -1435,6 +1444,23 @@ fn paint_art_g(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, round:
     }
 }
 
+/// Width of the last right-hand column in two-column rows.
+const TBL_W2: f32 = 140.0;
+
+/// Header bar for a list: a title on the left and up to two right-aligned column titles.
+fn table_header(ui: &mut egui::Ui, left: &str, mid: &str, last: &str, numbered: bool) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
+    fill_rect(ui.painter(), rect, pal().edge);
+    let cy = rect.center().y;
+    let p = ui.painter();
+    if numbered {
+        ptext(p, Pos2::new(rect.min.x + 8.0, cy), Align::Min, "#", 2.0, pal().trim);
+    }
+    ptext(p, Pos2::new(rect.min.x + 8.0 + if numbered { 44.0 } else { 0.0 }, cy), Align::Min, left, 2.0, pal().trim);
+    ptext(p, Pos2::new(rect.max.x - 10.0 - TBL_W2, cy), Align::Max, mid, 2.0, pal().trim);
+    ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, last, 2.0, pal().trim);
+}
+
 // ------------------------------------------------------------------ list columns
 /// Which extra columns the track lists show: bit0 artist, bit1 album, bit2 length (name is always shown).
 static COLS: AtomicU32 = AtomicU32::new(0b101);
@@ -1739,6 +1765,9 @@ struct App {
 
     art_view: bool,
     art_gray: bool,
+    show_spec: bool,
+    spec_op: f32,
+    spec_h: f32,
     show_lyrics: bool,
     fullscreen: bool,
     art_tilt: Vec2,
@@ -1994,6 +2023,9 @@ impl App {
             audio_err_shown: false,
             art_view: false,
             art_gray: false,
+            show_spec: true,
+            spec_op: 0.2,
+            spec_h: 0.42,
             show_lyrics: true,
             fullscreen: false,
             art_tilt: Vec2::ZERO,
@@ -2147,6 +2179,15 @@ impl App {
         if let Some(b) = st["lossless"].as_bool() {
             app.prefer_lossless = b;
         }
+        if let Some(b) = st["spec"].as_bool() {
+            app.show_spec = b;
+        }
+        if let Some(f) = st["spec_op"].as_f64() {
+            app.spec_op = (f as f32).clamp(0.05, 0.8);
+        }
+        if let Some(f) = st["spec_h"].as_f64() {
+            app.spec_h = (f as f32).clamp(0.15, 0.9);
+        }
         if let Some(b) = st["art_gray"].as_bool() {
             app.art_gray = b;
         }
@@ -2233,6 +2274,9 @@ impl App {
             "volume": self.volume,
             "lossless": self.prefer_lossless,
             "art_gray": self.art_gray,
+            "spec": self.show_spec,
+            "spec_op": self.spec_op,
+            "spec_h": self.spec_h,
             "lyrics": self.show_lyrics,
             "repeat": match self.repeat { Repeat::Off => 0, Repeat::All => 1, Repeat::One => 2 },
             "eq_on": self.eq_on,
@@ -3163,6 +3207,10 @@ impl App {
                 self.sync_loop();
             }
             Action::ToggleArt => self.art_view = !self.art_view,
+            Action::ToggleSpec => {
+                self.show_spec = !self.show_spec;
+                self.dirty = true;
+            }
             Action::ToggleGray => {
                 self.art_gray = !self.art_gray;
                 self.dirty = true;
@@ -3865,7 +3913,7 @@ impl App {
         // ---- volume
         let vg = rc(112.0, 54.0, 138.0, 7.0);
         for i in 0..28 {
-            let h = 2.0 + i as f32 * 0.14;
+            let h = 1.0 + i as f32 * 0.09;
             fill_rect(p, rc(113.0 + i as f32 * 4.85, 52.0 - h, 1.0, h), pal().ink2);
         }
         inset(p, vg, pal().groove);
@@ -4095,6 +4143,39 @@ impl App {
             p.add(egui::Shape::mesh(mesh));
         }
 
+        // ---- spectrum, soft and behind everything (only under the cover when lyrics split the view)
+        if self.show_spec {
+            let zone = if lyrics_on { Rect::from_min_max(full.min, Pos2::new(art_zone.max.x + 14.0, full.max.y)) } else { full };
+            let n = NB;
+            let gap = 6.0;
+            let bw = ((zone.width() - gap * (n as f32 + 1.0)) / n as f32).max(4.0);
+            let maxh = zone.height() * self.spec_h;
+            let a1 = (self.spec_op * 255.0) as u8;
+            let a2 = ((self.spec_op * 2.0).min(0.9) * 255.0) as u8;
+            for i in 0..n {
+                let x = zone.min.x + gap + i as f32 * (bw + gap);
+                let h = (self.bands[i] * maxh / 6.0).floor() * 6.0;
+                if h > 0.0 {
+                    fill_rect(
+                        &p,
+                        Rect::from_min_size(Pos2::new(x, zone.max.y - h), Vec2::new(bw, h)),
+                        Color32::from_white_alpha(a1),
+                    );
+                }
+                let ph = (self.peaks[i] * maxh / 6.0).floor() * 6.0;
+                if ph > 0.0 {
+                    fill_rect(
+                        &p,
+                        Rect::from_min_size(Pos2::new(x, zone.max.y - ph - 6.0), Vec2::new(bw, 3.0)),
+                        Color32::from_white_alpha(a2),
+                    );
+                }
+            }
+            if self.cur.is_some() && !self.paused && !self.stopped {
+                ui.ctx().request_repaint();
+            }
+        }
+
         // ---- mild tilt, only while the mouse is on or right next to the cover
         let reach = a / 2.0 * 1.35;
         let target = match hover {
@@ -4299,6 +4380,24 @@ impl App {
                 {
                     acts.push(Action::ToggleGray);
                 }
+                let sp = icon_btn(ui, &IC_SPEC, self.show_spec, ink)
+                    .tip("Spectrum behind the cover  (right-click for size and opacity)");
+                if sp.clicked() {
+                    acts.push(Action::ToggleSpec);
+                }
+                sp.context_menu(|ui| {
+                    let mut step = |ui: &mut egui::Ui, name: &str, v: &mut f32, d: f32, lo: f32, hi: f32| {
+                        if menu_item(ui, &format!("{}  {}%   (+)", name, (*v * 100.0).round() as i32)) {
+                            *v = (*v + d).min(hi);
+                        }
+                        if menu_item(ui, &format!("{}  {}%   (-)", name, (*v * 100.0).round() as i32)) {
+                            *v = (*v - d).max(lo);
+                        }
+                    };
+                    step(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8);
+                    step(ui, "HEIGHT", &mut self.spec_h, 0.08, 0.15, 0.9);
+                    self.dirty = true;
+                });
                 if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
                     acts.push(Action::ToggleLyrics);
                 }

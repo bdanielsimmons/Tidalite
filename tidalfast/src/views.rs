@@ -10,8 +10,8 @@ use crate::store::{self, Ext};
 use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
     cache, check_box, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal,
-    para, play_buttons, retro_btn, retro_btn_w, section_header, tab_row, title_line, track_cells, window_deco, Action, App, Ed,
-    RowState, Sec, Tip, BTN_H, PRACTICE,
+    para, play_buttons, retro_btn, retro_btn_w, section_header, tab_row, table_header, title_line, track_cells, window_deco,
+    Action, App, Ed, RowState, Sec, Tip, BTN_H, PRACTICE,
 };
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::sync::atomic::Ordering;
@@ -742,29 +742,22 @@ impl App {
                 acts.push(Action::NewTune);
             }
         });
-        ui.horizontal(|ui| {
-            let w = (ui.available_width() - 138.0).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
-            let _ = field(
-                ui,
-                &mut self.ed,
-                F_TUNE_IREAL,
-                &mut self.tunes_ireal,
-                rect,
-                "iReal Pro link or playlist: irealb://...",
-                false,
-            );
-            if retro_btn_w(ui, "IMPORT IREAL", 130.0, false)
-                .tip("Paste an iReal Pro link or a whole playlist - every song becomes a tune with its chart")
-                .clicked()
-            {
-                self.ireal_in = std::mem::take(&mut self.tunes_ireal);
-                acts.push(Action::ImportIreal(None));
-            }
-        });
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), BTN_H), Sense::hover());
+        let _ =
+            field(ui, &mut self.ed, F_TUNE_IREAL, &mut self.tunes_ireal, rect, "iReal Pro link or playlist: irealb://...", false);
+        if retro_btn(ui, "IMPORT IREAL", false)
+            .tip("Paste an iReal Pro link or a whole playlist above - every song becomes a tune with its chart")
+            .clicked()
+        {
+            self.ireal_in = std::mem::take(&mut self.tunes_ireal);
+            acts.push(Action::ImportIreal(None));
+        }
         ui.add_space(4.0);
         if self.store.tunes.is_empty() {
             para(ui, "Your repertoire lives here, with the recordings you study for each tune. Add a recording from any list (right-click a song, then Add to a tune), or play one and press ADD CURRENT inside a tune.", pal().ink2);
+        }
+        if !self.store.tunes.is_empty() {
+            table_header(ui, "TUNE", "RECORDINGS", "PRACTICED", false);
         }
         for (i, t) in self.store.tunes.iter().enumerate() {
             let mins = self.store.tune_secs(&t.name) / 60;
@@ -779,7 +772,7 @@ impl App {
                         t.name
                     )
                 },
-                || format!("{} rec  {}m", t.versions.len(), mins),
+                || format!("{}\t{}", t.versions.len(), mins_text(mins * 60)),
                 RowState::Normal,
                 false,
                 false,
@@ -915,6 +908,9 @@ impl App {
         }
         let vtracks: Vec<Track> = self.store.tunes[i].versions.iter().map(|v| v.to_track()).collect();
         let playing = self.cur_track().map(|t| t.id);
+        if nvers > 0 {
+            table_header(ui, "TRACK", "LENGTH", "RATING", true);
+        }
         for vi in 0..nvers {
             let (artist, title, kind, stars, note, id) = {
                 let v = &self.store.tunes[i].versions[vi];
@@ -932,7 +928,7 @@ impl App {
                 vi,
                 Some(vi + 1),
                 || format!("{}{} - {}", tag, artist, title),
-                || stars_text(stars),
+                || format!("{}\t{}", fmt_time(vtracks[vi].duration), stars_text(stars)),
                 state,
                 false,
                 cache::has(id),
@@ -1004,6 +1000,7 @@ impl App {
             );
             let pops: Vec<u32> = self.look_tracks.iter().map(|x| x.1).collect();
             let found: Vec<Track> = self.look_tracks.iter().map(|x| x.0.clone()).collect();
+            table_header(ui, "TRACK", "POPULARITY", "LENGTH", true);
             for (k, t) in found.iter().enumerate() {
                 let state = if playing == Some(t.id) { RowState::Playing } else { RowState::Normal };
                 let r = list_row(
@@ -1011,7 +1008,7 @@ impl App {
                     k,
                     Some(k + 1),
                     || format!("{} - {}", t.artist, t.title),
-                    || format!("{}  {}", pops[k], fmt_time(t.duration)),
+                    || format!("{}\t{}", pops[k], fmt_time(t.duration)),
                     state,
                     false,
                     cache::has(t.id),

@@ -509,10 +509,16 @@ impl App {
         let chart = self.chart_for(&text);
         let has = !chart.bars.is_empty();
         ui.horizontal(|ui| {
-            let keys = [("CONCERT (C)", 0), ("Bb HORNS", 2), ("Eb HORNS", 9), ("F HORN", 7)];
-            let names: Vec<&str> = keys.iter().map(|k| k.0).collect();
+            let mut keys: Vec<(String, i32)> =
+                vec![("CONCERT (C)".into(), 0), ("Bb HORNS".into(), 2), ("Eb HORNS".into(), 9), ("F HORN".into(), 7)];
+            // every other key: the chart moved so it sits in that key
+            let tonic = chart::tonic(&key, &chart).unwrap_or(0);
+            for (n, name) in ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"].iter().enumerate() {
+                keys.push((format!("IN KEY OF {}", name), (n as i32 - tonic).rem_euclid(12)));
+            }
+            let names: Vec<&str> = keys.iter().map(|k| k.0.as_str()).collect();
             let cur = keys.iter().position(|k| k.1 == self.chart_tr).unwrap_or(0);
-            if let Some(i) = dropdown(ui, "chart_tr", "TRANSPOSE", &names, cur, 150.0) {
+            if let Some(i) = dropdown(ui, "chart_tr", "TRANSPOSE", &names, cur, 190.0) {
                 self.chart_tr = keys[i].1;
             }
             if retro_btn(ui, "I-IV-V", self.chart_rn).tip("Roman numerals under the chords, relative to the key").clicked() {
