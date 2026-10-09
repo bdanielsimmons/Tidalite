@@ -1,7 +1,7 @@
 //! Preferences: how updates behave and which keys do what. Opened with the PREFS button (or from Help).
 //! Key bindings live in `App::binds` (one slot per entry of CMDS, None = unbound) and are saved with the settings.
 
-use crate::{check_box, pal, para, retro_btn, section_header, title_line, Action, App, PRACTICE};
+use crate::{check_box, pal, para, retro_btn, section_header, title_line, Action, App, Tip, PRACTICE};
 use eframe::egui::{self, Key};
 
 #[derive(Clone, Copy, PartialEq)]

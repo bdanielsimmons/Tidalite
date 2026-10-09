@@ -148,7 +148,9 @@ impl App {
                 p.rect_filled(Rect::from_min_max(Pos2::new(t.max.x, t.min.y), Pos2::new(screen.max.x, t.max.y)), 0.0, dim);
                 p.rect_stroke(t, 4.0, egui::Stroke::new(3.0, pal().bar_txt));
             }
-            None => p.rect_filled(screen, 0.0, dim),
+            None => {
+                p.rect_filled(screen, 0.0, dim);
+            }
         }
         // card at the bottom, or at the top when the highlighted window is down there
         let low = target.map_or(false, |t| t.center().y > screen.center().y);
