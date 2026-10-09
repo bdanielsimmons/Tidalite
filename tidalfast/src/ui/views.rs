@@ -9,9 +9,9 @@ use crate::stems;
 use crate::store::{self, Ext};
 use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
-    cache, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal,
-    para, play_buttons, retro_btn, retro_btn_w, section_header, tab_row, table_header, title_line, track_cells, window_deco,
-    Action, App, Ed, RowState, Sec, Tip, BTN_H, PRACTICE,
+    cache, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal, para,
+    play_buttons, retro_btn, retro_btn_w, section_header, tab_row, table_header, title_line, track_cells, window_deco, Action,
+    App, Ed, RowState, Sec, Tip, BTN_H, PRACTICE,
 };
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::sync::atomic::Ordering;
@@ -361,9 +361,7 @@ fn sub_tabs(ui: &mut egui::Ui, items: &[(Sec, &str)], cur: usize) -> Option<usiz
     for (i, (_, name)) in items.iter().enumerate() {
         let w = (text_w(name, 2.0) + pad) * shrink;
         let r = Rect::from_min_max(Pos2::new(x, row.min.y), Pos2::new(x + w, row.max.y));
-        let resp = ui
-            .interact(r, ui.id().with(("subtab", i)), Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let resp = ui.interact(r, ui.id().with(("subtab", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         let on = i == cur;
         let col = if on || resp.hovered() { pal().ink } else { pal().ink2 };
         ptext_fit(ui.painter(), r.center() - Vec2::new(0.0, 1.0), Align::Center, name, 2.0, w - 4.0, col);

@@ -1,0 +1,3 @@
+# LLVM's linker ships with Rust and links several times faster than Microsoft's link.exe
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
