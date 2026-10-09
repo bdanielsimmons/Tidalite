@@ -18,6 +18,7 @@ pub struct Measure {
 pub struct Song {
     pub title: String,
     pub composer: String,
+    #[allow(dead_code)]
     pub style: String,
     pub key: String,
     pub bpm: u32,

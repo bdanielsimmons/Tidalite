@@ -210,16 +210,6 @@ impl Store {
         n
     }
 
-    /// Practiced? for the last 7 days, oldest first.
-    pub fn week(&self, today: i64) -> [bool; 7] {
-        let mut out = [false; 7];
-        for (i, o) in out.iter_mut().enumerate() {
-            let day = today - 6 + i as i64;
-            *o = self.days.iter().any(|d| parse_date(&d.date) == Some(day) && d.secs.values().sum::<u32>() >= 60);
-        }
-        out
-    }
-
     pub fn tune_of(&self, id: i64) -> Option<usize> {
         self.tunes.iter().position(|t| t.versions.iter().any(|v| v.id == id))
     }

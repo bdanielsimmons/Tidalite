@@ -104,6 +104,7 @@ pub struct Page {
     pub image: String,
     pub tracks: Vec<Track>,
     pub rows: Vec<(String, Vec<Card>)>,
+    #[allow(dead_code)]
     pub rows_first: bool,
     /// The "Your Library" page (shown with MY TRACKS / LISTS / ALBUMS / ARTISTS tabs).
     pub library: bool,

@@ -113,7 +113,7 @@ impl App {
     }
 
     fn timer_box(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, blink: bool) {
-        let frame = egui::Frame::none().fill(pal().app_bg).stroke(egui::Stroke::new(2.0, pal().edge)).inner_margin(6.0);
+        let frame = egui::Frame::none().fill(pal().app_bg).stroke(egui::Stroke::new(2.0_f32, pal().edge)).inner_margin(6.0);
         frame.show(ui, |ui| {
             let left = self.pomo_end.map_or(0, |e| e.saturating_duration_since(Instant::now()).as_secs());
             let clock = format!("{}:{:02}", left / 60, left % 60);
@@ -180,7 +180,7 @@ impl App {
 
     // ------------------------------------------------------------ METRONOME
     fn metro_box(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        let frame = egui::Frame::none().fill(pal().app_bg).stroke(egui::Stroke::new(2.0, pal().edge)).inner_margin(12.0);
+        let frame = egui::Frame::none().fill(pal().app_bg).stroke(egui::Stroke::new(2.0_f32, pal().edge)).inner_margin(12.0);
         frame.show(ui, |ui| {
             let full_w = (ui.ctx().screen_rect().width() - 40.0).clamp(300.0, 700.0);
             ui.set_width(full_w);

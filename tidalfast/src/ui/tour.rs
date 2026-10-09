@@ -146,7 +146,7 @@ impl App {
                 p.rect_filled(Rect::from_min_max(Pos2::new(screen.min.x, t.max.y), screen.max), 0.0, dim);
                 p.rect_filled(Rect::from_min_max(Pos2::new(screen.min.x, t.min.y), Pos2::new(t.min.x, t.max.y)), 0.0, dim);
                 p.rect_filled(Rect::from_min_max(Pos2::new(t.max.x, t.min.y), Pos2::new(screen.max.x, t.max.y)), 0.0, dim);
-                p.rect_stroke(t, 4.0, egui::Stroke::new(3.0, pal().bar_txt));
+                p.rect_stroke(t, 4.0, egui::Stroke::new(3.0_f32, pal().bar_txt));
             }
             None => {
                 p.rect_filled(screen, 0.0, dim);
@@ -160,7 +160,7 @@ impl App {
         egui::Area::new(egui::Id::new("tour_card")).order(egui::Order::Tooltip).anchor(align, off).show(ctx, |ui| {
             let frame = egui::Frame::none()
                 .fill(pal().beige)
-                .stroke(egui::Stroke::new(2.0, pal().edge))
+                .stroke(egui::Stroke::new(2.0_f32, pal().edge))
                 .rounding(if crate::style() != 0 { 8.0 } else { 0.0 })
                 .inner_margin(14.0);
             frame.show(ui, |ui| {

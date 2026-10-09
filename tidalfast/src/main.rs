@@ -84,7 +84,6 @@ const VERSION: &str = if PRACTICE { "v9 STUDIO" } else { "v9" };
 /// Built with `--no-default-features` the practice tools (files, tunes, diary, loops, timer) are left out.
 const PRACTICE: bool = cfg!(feature = "practice");
 
-const LIB_W: f32 = 430.0;
 #[allow(dead_code)]
 const NB: usize = 19;
 /// Points in the waveform visualizer.
@@ -118,6 +117,7 @@ enum Msg {
     ScSets(Result<Vec<(String, String)>, String>),
     UpdateFound(Result<Option<update::Info>, String>),
     /// a click in the macOS menu bar
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Menu(String),
     Tuning(i64, Option<(i32, f32)>),
     UpdateStaged(Result<(), String>),
@@ -131,7 +131,7 @@ enum Msg {
     Live(String, Result<(String, String, String), (String, Vec<String>)>),
     Beats(i64, Option<(f32, f32)>),
     /// stem separation finished for this track id
-    Stems(i64, Result<(), String>),
+    Stems(#[allow(dead_code)] i64, Result<(), String>),
     /// the stem tool (runtime + model) finished downloading
     StemTool(Result<(), String>),
 }
@@ -207,8 +207,6 @@ enum Action {
     TogglePractice,
     SetAAt(f32),
     SetBAt(f32),
-    NudgeA(f32),
-    NudgeB(f32),
     LoopToggle,
     LoopClear,
     Speed(u32),
@@ -1690,6 +1688,8 @@ struct App {
     viz_wave: Vec<f32>,
     show_lyrics: bool,
     fullscreen: bool,
+    /// fullscreen was turned on inside the album view, so leaving the view also leaves fullscreen
+    fs_by_art: bool,
     art_tilt: Vec2,
     lyrics: Option<Lyrics>,
     lyric_scroll: f32,
@@ -1727,6 +1727,9 @@ struct App {
     store_saved: Instant,
     srcmap: HashMap<i64, Src>,
     sec: Sec,
+    /// the list last open in each group (MUSIC / PRACTICE), to come back to it
+    last_music: Sec,
+    last_practice: Sec,
     ed: Ed,
     files_busy: bool,
     yt_busy: bool,
@@ -1750,6 +1753,7 @@ struct App {
     palette_q: String,
     palette_sel: usize,
     palette_frame: u32,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     menu_keep: Option<Box<dyn std::any::Any>>,
     fs_cmd_at: Option<Instant>,
     art_op: f32,
@@ -1985,6 +1989,7 @@ impl App {
             viz_wave: vec![0.0; WAVE_N],
             show_lyrics: true,
             fullscreen: false,
+            fs_by_art: false,
             art_tilt: Vec2::ZERO,
             lyrics: None,
             lyric_scroll: 0.0,
@@ -2018,6 +2023,8 @@ impl App {
             store_saved: Instant::now(),
             srcmap: HashMap::new(),
             sec: Sec::Tidal,
+            last_music: Sec::Tidal,
+            last_practice: Sec::Tunes,
             ed: Ed::default(),
             files_busy: false,
             yt_busy: false,
@@ -3272,24 +3279,6 @@ impl App {
                 }
                 self.set_note(&format!("LOOP B = {}", fmt_t(t)));
             }
-            Action::NudgeA(d) => {
-                if let Some(a) = self.loop_a {
-                    let hi = self.loop_b.map(|b| b - 0.1).unwrap_or_else(|| self.track_len()).max(0.0);
-                    let n = (a + d).clamp(0.0, hi);
-                    self.loop_a = Some(n);
-                    self.sync_loop();
-                    self.player.send(Cmd::Seek(n));
-                }
-            }
-            Action::NudgeB(d) => {
-                if let Some(b) = self.loop_b {
-                    let lo = self.loop_a.map(|a| a + 0.1).unwrap_or(0.0);
-                    let n = (b + d).clamp(lo, self.track_len().max(lo));
-                    self.loop_b = Some(n);
-                    self.sync_loop();
-                    self.player.send(Cmd::Seek((n - 1.5).max(self.loop_a.unwrap_or(0.0))));
-                }
-            }
             Action::LoopToggle => {
                 if self.loop_a.is_none() || self.loop_b.is_none() {
                     self.set_note("SET LOOP A AND B FIRST");
@@ -3335,6 +3324,7 @@ impl App {
             }
             Action::ToggleFullscreen => {
                 self.fullscreen = !self.fullscreen;
+                self.fs_by_art = self.fullscreen && self.art_view;
                 self.fs_cmd_at = Some(Instant::now());
                 self.ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
             }
@@ -3801,7 +3791,7 @@ impl App {
         let (show_log, show_eq, show_cache) = (self.show_log, self.show_eq, self.show_cache);
         let sec = self.sec;
         let sec_i = sec as u8;
-        ui.allocate_ui_at_rect(area, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(area), |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
             if show_log {
                 self.log_view(ui, acts);
@@ -4234,7 +4224,6 @@ impl App {
     fn art_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         let full = ui.max_rect();
         let p = ui.painter().clone();
-        let t = ui.input(|i| i.time) as f32;
         let dt = ui.input(|i| i.stable_dt).min(0.05);
         let hover = ui.input(|i| i.pointer.hover_pos());
         let track = self.cur_track();
@@ -4332,7 +4321,7 @@ impl App {
         p.add(egui::Shape::convex_polygon(
             corners(h + 9.0).to_vec(),
             if see { Color32::TRANSPARENT } else { Color32::BLACK },
-            Stroke::new(2.0, pal().trim),
+            Stroke::new(2.0_f32, pal().trim),
         ));
         let cs = corners(h);
         match tex {
@@ -4369,7 +4358,7 @@ impl App {
         if lyrics_on {
             let ly = Rect::from_min_max(Pos2::new(area.min.x + area.width() * 0.5 + 10.0, area.min.y), area.max);
             p.rect_filled(ly, Rounding::same(0.0), Color32::from_black_alpha(150));
-            p.rect_stroke(ly, Rounding::same(0.0), Stroke::new(2.0, pal().trim));
+            p.rect_stroke(ly, Rounding::same(0.0), Stroke::new(2.0_f32, pal().trim));
             let cp = p.with_clip_rect(ly.shrink(4.0));
             let lh = 38.0;
             let cyl = ly.center().y;
@@ -4513,7 +4502,7 @@ impl App {
         let cur_t = self.cur_track();
         let liked_now = cur_t.as_ref().map(|t| self.liked.contains(&t.id)).unwrap_or(false);
         let playing = active && !self.paused;
-        ui.allocate_ui_at_rect(row, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(row), |ui| {
             ui.horizontal(|ui| {
                 let ink = pal().ink;
                 if icon_btn(ui, &IC_PREV, false, ink).tip("Previous").clicked() {
@@ -4556,7 +4545,7 @@ impl App {
                     acts.push(Action::ToggleSpec);
                 }
                 sp.context_menu(|ui| {
-                    let mut step = |ui: &mut egui::Ui, name: &str, v: &mut f32, d: f32, lo: f32, hi: f32| {
+                    let step = |ui: &mut egui::Ui, name: &str, v: &mut f32, d: f32, lo: f32, hi: f32| {
                         if menu_item(ui, &format!("{}  {}%   (+)", name, (*v * 100.0).round() as i32)) {
                             *v = (*v + d).min(hi);
                         }
@@ -4681,7 +4670,7 @@ impl App {
             }
         }
 
-        ui.allocate_ui_at_rect(area, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(area), |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
             if queue.is_empty() {
                 ui.add_space(10.0);
@@ -4800,7 +4789,7 @@ impl App {
         let before: f32 = queue.iter().take(cur.unwrap_or(0)).map(|t| t.duration).sum();
         let elapsed = if self.cur.is_some() && !self.stopped { before + self.pos() } else { before };
         let foot = Rect::from_min_max(Pos2::new(full.min.x, full.max.y - foot_h + 8.0), full.max);
-        ui.allocate_ui_at_rect(foot, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(foot), |ui| {
             ui.horizontal(|ui| {
                 if retro_btn(ui, "CLEAR", false).clicked() {
                     acts.push(Action::ClearQueue);
@@ -5059,7 +5048,12 @@ impl eframe::App for App {
         if self.fs_cmd_at.map_or(true, |t| t.elapsed() > Duration::from_millis(1500)) {
             if let Some(f) = ctx.input(|i| i.viewport().fullscreen) {
                 self.fullscreen = f;
+                self.fs_by_art &= f;
             }
+        }
+        // left the album view (Esc, A, a mode button...) after going fullscreen in it: back to the window
+        if self.fs_by_art && !self.art_view {
+            self.apply(Action::ToggleFullscreen);
         }
         #[cfg(target_os = "macos")]
         if self.frames == 3 {
@@ -5148,7 +5142,7 @@ fn setup_style(ctx: &egui::Context) {
     let mut v = egui::Visuals::light();
     v.panel_fill = pal().app_bg;
     v.window_fill = pal().beige;
-    v.window_stroke = Stroke::new(1.0, pal().edge);
+    v.window_stroke = Stroke::new(1.0_f32, pal().edge);
     let rad = if style() != 0 { 7.0 } else { 0.0 };
     v.window_rounding = Rounding::same(rad);
     v.menu_rounding = Rounding::same(rad);
@@ -5156,19 +5150,19 @@ fn setup_style(ctx: &egui::Context) {
     v.faint_bg_color = pal().beige_dk;
     v.hyperlink_color = pal().ink;
     v.selection.bg_fill = pal().sel;
-    v.selection.stroke = Stroke::new(1.0, pal().edge);
+    v.selection.stroke = Stroke::new(1.0_f32, pal().edge);
     v.widgets.noninteractive.bg_stroke = Stroke::NONE;
     v.widgets.noninteractive.bg_fill = pal().beige;
     v.widgets.noninteractive.weak_bg_fill = pal().beige;
     v.widgets.inactive.bg_fill = pal().beige_dk;
     v.widgets.inactive.weak_bg_fill = pal().beige_dk;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, pal().edge);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, pal().edge);
     v.widgets.hovered.bg_fill = pal().groove;
     v.widgets.hovered.weak_bg_fill = pal().groove;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, pal().edge);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, pal().edge);
     v.widgets.active.bg_fill = pal().ink2;
     v.widgets.active.weak_bg_fill = pal().ink2;
-    v.widgets.active.bg_stroke = Stroke::new(1.0, pal().edge);
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, pal().edge);
     for w in [
         &mut v.widgets.noninteractive,
         &mut v.widgets.inactive,
@@ -5176,7 +5170,7 @@ fn setup_style(ctx: &egui::Context) {
         &mut v.widgets.active,
         &mut v.widgets.open,
     ] {
-        w.fg_stroke = Stroke::new(1.0, pal().ink);
+        w.fg_stroke = Stroke::new(1.0_f32, pal().ink);
         w.rounding = Rounding::same(rad * 0.7);
     }
     ctx.set_visuals(v);

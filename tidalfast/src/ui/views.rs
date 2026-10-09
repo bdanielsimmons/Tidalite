@@ -9,7 +9,7 @@ use crate::stems;
 use crate::store::{self, Ext};
 use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
-    cache, check_box, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal,
+    cache, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal,
     para, play_buttons, retro_btn, retro_btn_w, section_header, tab_row, table_header, title_line, track_cells, window_deco,
     Action, App, Ed, RowState, Sec, Tip, BTN_H, PRACTICE,
 };
@@ -351,34 +351,58 @@ fn stars_text(n: u8) -> String {
     format!("{}{}", "*".repeat(n), ".".repeat(5 - n))
 }
 
+/// The lighter second row under a tab row: plain words, the open one underlined. Squeezes to fit a narrow window.
+fn sub_tabs(ui: &mut egui::Ui, items: &[(Sec, &str)], cur: usize) -> Option<usize> {
+    let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());
+    let pad = 18.0;
+    let total: f32 = items.iter().map(|s| text_w(s.1, 2.0) + pad).sum();
+    let shrink = ((row.width() - 8.0) / total).min(1.0);
+    let (mut x, mut hit) = (row.min.x + 4.0, None);
+    for (i, (_, name)) in items.iter().enumerate() {
+        let w = (text_w(name, 2.0) + pad) * shrink;
+        let r = Rect::from_min_max(Pos2::new(x, row.min.y), Pos2::new(x + w, row.max.y));
+        let resp = ui
+            .interact(r, ui.id().with(("subtab", i)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let on = i == cur;
+        let col = if on || resp.hovered() { pal().ink } else { pal().ink2 };
+        ptext_fit(ui.painter(), r.center() - Vec2::new(0.0, 1.0), Align::Center, name, 2.0, w - 4.0, col);
+        if on {
+            let u = Rect::from_min_max(Pos2::new(r.min.x + 4.0, r.max.y - 3.0), Pos2::new(r.max.x - 4.0, r.max.y - 1.0));
+            fill_rect(ui.painter(), u, pal().ink);
+        }
+        if resp.clicked() {
+            hit = Some(i);
+        }
+        x += w;
+    }
+    hit
+}
+
 impl App {
     // ------------------------------------------------------------ switchers
+    /// Two levels: MUSIC (the sources and your lists) and PRACTICE (tunes, diary) on top, that group's lists under it.
+    /// Each group comes back to the list you last had open in it. The plain build has only MUSIC, so only its row shows.
     pub(crate) fn section_bar(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        const ALL: [(Sec, &str); 7] = [
-            (Sec::Tidal, "TIDAL"),
-            (Sec::Sc, "SOUNDCLOUD"),
-            (Sec::Files, "FILES"),
-            (Sec::Yt, "YT"),
-            (Sec::Tunes, "TUNES"),
-            (Sec::Diary, "DIARY"),
-            (Sec::Lists, "LISTS"),
-        ];
-        let secs: Vec<(Sec, &str)> = ALL
-            .iter()
-            .copied()
-            .filter(|s| match s.0 {
-                Sec::Tidal => !self.offline,
-                Sec::Sc | Sec::Lists | Sec::Files | Sec::Yt => true,
-                _ => PRACTICE,
-            })
-            .collect();
-        if secs.len() < 2 {
-            return;
+        const MUSIC: [(Sec, &str); 5] =
+            [(Sec::Tidal, "TIDAL"), (Sec::Sc, "SOUNDCLOUD"), (Sec::Files, "FILES"), (Sec::Yt, "YT"), (Sec::Lists, "LISTS")];
+        const PRACTICE_SECS: [(Sec, &str); 2] = [(Sec::Tunes, "TUNES"), (Sec::Diary, "DIARY")];
+        let in_practice = PRACTICE_SECS.iter().any(|s| s.0 == self.sec);
+        let music: Vec<(Sec, &str)> = MUSIC.iter().copied().filter(|s| s.0 != Sec::Tidal || !self.offline).collect();
+        if PRACTICE {
+            if let Some(i) = tab_row(ui, &["MUSIC", "PRACTICE"], in_practice as usize) {
+                if (i == 1) != in_practice {
+                    let back = if i == 1 { self.last_practice } else { self.last_music };
+                    let pool: &[(Sec, &str)] = if i == 1 { &PRACTICE_SECS } else { &music };
+                    let to = if pool.iter().any(|s| s.0 == back) { back } else { pool[0].0 };
+                    acts.push(Action::Section(to));
+                }
+            }
         }
-        let names: Vec<&str> = secs.iter().map(|s| s.1).collect();
-        let cur = secs.iter().position(|s| s.0 == self.sec).unwrap_or(0);
-        if let Some(i) = tab_row(ui, &names, cur) {
-            acts.push(Action::Section(secs[i].0));
+        let group: &[(Sec, &str)] = if in_practice { &PRACTICE_SECS } else { &music };
+        let cur = group.iter().position(|s| s.0 == self.sec).unwrap_or(0);
+        if let Some(i) = sub_tabs(ui, group, cur) {
+            acts.push(Action::Section(group[i].0));
         }
     }
 
@@ -1470,7 +1494,6 @@ impl App {
         let active = self.cur.is_some() && !self.stopped && dur > 0.0;
         let shown = self.seek_drag.unwrap_or(pos);
         let both = self.loop_a.is_some() && self.loop_b.is_some();
-        let step = if ui.input(|i| i.modifiers.shift) { 1.0 } else { 0.1 };
         let shift = ui.input(|i| i.modifiers.shift);
 
         // ---- waveform timeline

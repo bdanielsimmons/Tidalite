@@ -28,7 +28,7 @@ impl App {
             .show(ctx, |ui| {
                 let frame = egui::Frame::none()
                     .fill(pal().beige)
-                    .stroke(egui::Stroke::new(2.0, pal().edge))
+                    .stroke(egui::Stroke::new(2.0_f32, pal().edge))
                     .rounding(if crate::style() != 0 { 8.0 } else { 0.0 })
                     .inner_margin(12.0);
                 frame.show(ui, |ui| {

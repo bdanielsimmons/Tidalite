@@ -99,26 +99,34 @@ impl App {
             ("ALBUM", 68.0, Cmd::ModeAlbum, "Big cover, lyrics and the visualizer"),
             ("MINI", 56.0, Cmd::ModeMini, "A small always-handy player window"),
         ];
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (i, (name, w, cmd, tip)) in tips.iter().enumerate() {
                 let key = self.key_text(*cmd);
                 if retro_btn_w(ui, name, *w, cur == i as u8).tip(format!("{}  ({})", tip, key)).clicked() {
                     acts.push(Action::SetMode(i as u8));
                 }
             }
+            let fs = self.fullscreen;
+            let tip = if fs { "Leave fullscreen" } else { "Fullscreen" };
+            if crate::icon_btn(ui, if fs { &crate::IC_WIN } else { &crate::IC_FULL }, false, pal().ink)
+                .tip(format!("{}  ({} / F11)", tip, self.key_text(Cmd::Fullscreen)))
+                .clicked()
+            {
+                acts.push(Action::ToggleFullscreen);
+            }
         });
     }
 
-    /// Mode buttons floating where the library's own row is not on screen: top of the album view, bottom-left in player mode.
+    /// Mode buttons floating bottom-left in player mode, where the library's own row is not on screen.
+    /// The album view stays clean (keys 1-4 / Ctrl+K still switch).
     pub(crate) fn floating_modes(&mut self, ctx: &egui::Context, acts: &mut Vec<Action>) {
-        let (anchor, off) = match self.mode() {
-            2 => (egui::Align2::CENTER_TOP, [0.0, 8.0]),
-            1 => (egui::Align2::LEFT_BOTTOM, [10.0, -10.0]),
-            _ => return,
-        };
-        egui::Area::new(egui::Id::new("floating_modes")).order(egui::Order::Foreground).anchor(anchor, off).show(ctx, |ui| {
+        if self.mode() != 1 {
+            return;
+        }
+        let area = egui::Area::new(egui::Id::new("floating_modes")).order(egui::Order::Foreground);
+        area.anchor(egui::Align2::LEFT_BOTTOM, [10.0, -10.0]).show(ctx, |ui| {
             egui::Frame::none()
-                .fill(if self.mode() == 2 { Color32::from_black_alpha(120) } else { pal().app_bg })
+                .fill(pal().app_bg)
                 .rounding(if style() != 0 { 8.0 } else { 0.0 })
                 .inner_margin(4.0)
                 .show(ui, |ui| self.mode_strip(ui, acts));
@@ -231,7 +239,7 @@ impl App {
             .show(ctx, |ui| {
                 let frame = egui::Frame::none()
                     .fill(pal().beige)
-                    .stroke(egui::Stroke::new(2.0, pal().edge))
+                    .stroke(egui::Stroke::new(2.0_f32, pal().edge))
                     .rounding(if style() != 0 { 8.0 } else { 0.0 })
                     .inner_margin(10.0);
                 frame.show(ui, |ui| {

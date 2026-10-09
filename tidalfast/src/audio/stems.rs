@@ -72,10 +72,6 @@ pub fn have_stems(id: i64) -> bool {
     stems_dir(id).join("ok").exists()
 }
 
-pub fn delete_stems(id: i64) {
-    let _ = std::fs::remove_dir_all(stems_dir(id));
-}
-
 /// Total size of all saved stems, in bytes.
 pub fn stems_size() -> u64 {
     fn walk(p: &Path) -> u64 {

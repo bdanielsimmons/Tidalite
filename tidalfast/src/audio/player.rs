@@ -109,10 +109,6 @@ impl Ctl {
         self.wraps.load(Ordering::Relaxed)
     }
 
-    pub fn speed_pct(&self) -> u32 {
-        self.speed.load(Ordering::Relaxed)
-    }
-
     pub fn set_loop(&self, on: bool, a: f32, b: f32) {
         self.a_ms.store((a.max(0.0) * 1000.0) as u32, Ordering::Relaxed);
         self.b_ms.store((b.max(0.0) * 1000.0) as u32, Ordering::Relaxed);
