@@ -234,7 +234,7 @@ impl App {
             return;
         }
 
-        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("prefs_dim")));
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("prefs_dim")));
         p.rect_filled(ctx.screen_rect(), 0.0, egui::Color32::from_black_alpha(150));
         let size = egui::vec2(640.0_f32.min(ctx.screen_rect().width() - 40.0), 540.0_f32.min(ctx.screen_rect().height() - 40.0));
         egui::Area::new(egui::Id::new("prefs_area"))
@@ -262,6 +262,9 @@ impl App {
                             _ => format!("You are up to date (build {}).", crate::update::build()),
                         };
                         para(ui, &status, pal().ink2);
+                        if !self.upd_note.is_empty() {
+                            para(ui, &self.upd_note.clone(), pal().ink2);
+                        }
                         if check_box(ui, "RESTART BY ITSELF WHEN I'M AWAY", self.auto_restart)
                             .tip("Off by default. When on, a downloaded update restarts Tidalite after about 5 quiet minutes with nothing playing. When off, nothing ever restarts unless you click.")
                             .clicked()

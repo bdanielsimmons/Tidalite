@@ -137,7 +137,7 @@ impl App {
         let screen = ctx.screen_rect();
         let target = if step.key.is_empty() { None } else { find(step.key) };
         // dim everything except the highlighted window
-        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("tour_dim")));
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tour_dim")));
         let dim = Color32::from_black_alpha(165);
         match target {
             Some(t) => {

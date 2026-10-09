@@ -782,8 +782,18 @@ impl App {
                         });
                     }
                 }
-                Ok(None) => {}
-                Err(e) => api::log(&format!("update check: {}", e)),
+                Ok(None) => {
+                    self.upd_note = if crate::update::build() == 0 {
+                        "This copy has no build number (not made by the release workflow), so updates are off.".to_string()
+                    } else {
+                        "Checked just now: you have the newest build.".to_string()
+                    };
+                }
+                Err(e) => {
+                    api::log(&format!("update check: {}", e));
+                    self.upd_note = format!("Last check failed: {}", e);
+                    self.upd_state = 3;
+                }
             },
             Msg::Tuning(id, r) => {
                 self.tuning_busy = false;
