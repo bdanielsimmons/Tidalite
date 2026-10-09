@@ -212,3 +212,18 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - Track lists: right-click the header row to choose ARTIST / ALBUM / LENGTH columns.
 - Hearts on files, YouTube and SoundCloud are saved on this PC (a LIKED block in each section).
 - Redrawn shuffle/repeat icons, left-aligned window title tabs, milder cover tilt (only near the cover).
+
+## v9.20
+- Three new skins (right-click the skin icon to pick): AERO GLASS (glossy blue/green glass, title bars like XP/Vista), SLEEK DARK and SLEEK LIGHT. They use a smooth font and rounded widgets; the original pixel skins are unchanged.
+- Visualizer: BARS, WAVEFORM or BOTH, in the player's LCD (click it to cycle) and behind the album art. Right-click for bar width and sensitivity (art view also has opacity and height).
+
+## v9.21
+- Visualizer: set the number of bars (8-96, default 32) and pick colours: SKIN, FROM COVER ART (a main colour from the cover with a gentle complementary tip) or CLASSIC GREEN + RED. Right-click the visualizer.
+- Lyrics: scroll with the mouse wheel (the view follows the song again after a few seconds) and click a line of synced lyrics to jump to it.
+
+## v9.22
+- Contrast pass on every skin: main, secondary and hint text, errors and header text all meet readable contrast (SLATE got lighter panels to make room). Phosphor skins keep their colour.
+- Metronome pendulum: finer rod, faint afterimages, scale marks, a tip that flashes on the beat and fades.
+
+## v9.23
+- Metronome LOCK TO TRACK: finds the beat by itself as soon as the track's audio is stored, shows its status (listening / locked / waiting / no beat found), and falls back to your own tempo when no steady beat exists instead of going silent.

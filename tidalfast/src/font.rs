@@ -2,8 +2,32 @@
 //! packed into a small texture so every character is a single crisp textured quad.
 
 use eframe::egui::{self, Align, Color32, Pos2, Rect, Vec2};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
+
+// ------------------------------------------------------------ modern (smooth) text
+static MODERN: AtomicBool = AtomicBool::new(false);
+static CTX: OnceLock<egui::Context> = OnceLock::new();
+
+/// Modern skins draw text with a smooth proportional font instead of the pixel font.
+pub fn set_modern(on: bool) {
+    MODERN.store(on, Ordering::Relaxed);
+}
+
+fn modern() -> bool {
+    MODERN.load(Ordering::Relaxed) && CTX.get().is_some()
+}
+
+fn mfont(px: f32) -> egui::FontId {
+    egui::FontId::proportional((px * 7.4).max(9.0))
+}
+
+fn mw(text: &str, px: f32) -> f32 {
+    match CTX.get() {
+        Some(c) => c.fonts(|f| f.layout_no_wrap(text.to_string(), mfont(px), Color32::WHITE).size().x),
+        None => text.chars().count() as f32 * px * 4.0,
+    }
+}
 
 // ------------------------------------------------------------ screen scale
 static PPP_BITS: AtomicU32 = AtomicU32::new(0x3F80_0000); // 1.0f32
@@ -216,6 +240,9 @@ fn adv(c: char) -> f32 {
 }
 
 pub fn text_w(text: &str, px: f32) -> f32 {
+    if modern() {
+        return mw(text, px);
+    }
     let px = spx(px);
     let n: f32 = text.chars().map(adv).sum();
     if n == 0.0 {
@@ -252,6 +279,7 @@ pub fn init(ctx: &egui::Context) -> egui::TextureHandle {
     }
     let h = ctx.load_texture("tidalite-font", img, egui::TextureOptions::NEAREST);
     let _ = TEX.set(h.id());
+    let _ = CTX.set(ctx.clone());
     h
 }
 
@@ -275,6 +303,16 @@ fn draw_char(p: &egui::Painter, tex: egui::TextureId, c: char, x: f32, y: f32, p
 /// Draw bitmap text. `anchor` is the left/center/right edge at the vertical center of the capitals.
 /// Returns the text width.
 pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, color: Color32) -> f32 {
+    if modern() {
+        let w = mw(text, px);
+        let al = match h {
+            Align::Min => egui::Align2::LEFT_CENTER,
+            Align::Center => egui::Align2::CENTER_CENTER,
+            Align::Max => egui::Align2::RIGHT_CENTER,
+        };
+        p.text(Pos2::new(anchor.x, anchor.y + 0.5), al, text, mfont(px), color);
+        return w;
+    }
     let px = spx(px);
     let w = text_w(text, px);
     let Some(tex) = TEX.get().copied() else { return w };
@@ -298,6 +336,14 @@ pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, col
 
 /// Like `ptext`, but shrinks the dot size until the text fits `max_w`.
 pub fn ptext_fit(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, max_w: f32, color: Color32) {
+    if modern() {
+        let mut k = px;
+        while k > px * 0.55 && mw(text, k) > max_w {
+            k -= 0.05;
+        }
+        ptext(p, anchor, h, text, k, color);
+        return;
+    }
     let mut k = spx(px);
     let step = thick(1.0);
     while k > thick(1.0) && text_w(text, k) > max_w {
@@ -310,6 +356,21 @@ pub fn ptext_fit(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32,
 pub fn fit(text: &str, px: f32, max_w: f32) -> String {
     if text_w(text, px) <= max_w {
         return text.to_string();
+    }
+    if modern() {
+        let chars: Vec<char> = text.chars().collect();
+        let (mut lo, mut hi) = (0usize, chars.len());
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2;
+            let t: String = chars[..mid].iter().collect::<String>().trim_end().to_string() + "...";
+            if mw(&t, px) <= max_w {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        let t: String = chars[..lo].iter().collect();
+        return format!("{}...", t.trim_end());
     }
     let px = spx(px);
     let limit = max_w - text_w("...", px) - px;
@@ -328,6 +389,23 @@ pub fn fit(text: &str, px: f32, max_w: f32) -> String {
 
 /// Greedy word wrap.
 pub fn wrap(text: &str, px: f32, max_w: f32) -> Vec<String> {
+    if modern() {
+        let mut out: Vec<String> = Vec::new();
+        for raw in text.split('\n') {
+            let mut line = String::new();
+            for word in raw.split(' ') {
+                let t = if line.is_empty() { word.to_string() } else { format!("{} {}", line, word) };
+                if mw(&t, px) > max_w && !line.is_empty() {
+                    out.push(std::mem::take(&mut line));
+                    line = word.to_string();
+                } else {
+                    line = t;
+                }
+            }
+            out.push(line);
+        }
+        return out;
+    }
     let px = spx(px);
     let mut out: Vec<String> = Vec::new();
     for raw in text.split('\n') {

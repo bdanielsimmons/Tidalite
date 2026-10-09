@@ -291,6 +291,19 @@ impl App {
                         acts.push(Action::Opt(Opt::FindBeats));
                     }
                 });
+                if self.mt.sync {
+                    let tid = self.cur_track().map(|x| x.id);
+                    let (msg, red) = if self.beat_busy {
+                        ("LISTENING FOR THE BEAT...", false)
+                    } else if tid.map_or(false, |i| self.beat_failed.contains(&i)) {
+                        ("NO STEADY BEAT FOUND - USING YOUR OWN TEMPO", true)
+                    } else if self.beat.map(|b| b.0) == tid && self.beat.is_some() {
+                        ("LOCKED TO THE TRACK", false)
+                    } else {
+                        ("WAITING: PLAY THE TRACK ONCE SO IT IS STORED, THEN IT FINDS THE BEAT", false)
+                    };
+                    dim_line(ui, msg, 1.0, if red { pal().red } else { pal().ink2 });
+                }
                 if self.beat.is_some() {
                     ui.horizontal(|ui| {
                         label(ui, "TRACK BEAT", 100.0);
@@ -354,19 +367,45 @@ impl App {
             }
             _ => 0.0,
         };
-        let ang = swing * 0.62;
         let len = 82.0;
-        let tip = pivot + Vec2::new(ang.sin() * len, -ang.cos() * len);
-        let step = 3.0;
-        let n = (len / step) as i32;
-        for k in 0..=n {
-            let q = pivot + (tip - pivot) * (k as f32 / n as f32);
-            fill_rect(p, Rect::from_center_size(q, Vec2::splat(3.0)), pal().ink2);
+        // scale marks: both ends of the swing and the middle
+        for a in [-0.62f32, 0.0, 0.62] {
+            let q = pivot + Vec2::new(a.sin() * (len + 8.0), -a.cos() * (len + 8.0));
+            fill_rect(p, Rect::from_center_size(q, Vec2::new(2.0, 6.0)), pal().groove);
         }
+        let rod = |ang: f32, col: egui::Color32, size: f32| {
+            let tip = pivot + Vec2::new(ang.sin() * len, -ang.cos() * len);
+            let n = (len / 2.0) as i32;
+            for k in 0..=n {
+                let q = pivot + (tip - pivot) * (k as f32 / n as f32);
+                fill_rect(p, Rect::from_center_size(q, Vec2::splat(size)), col);
+            }
+            tip
+        };
+        // two faint afterimages so the motion reads as smooth
+        if self.mt.on {
+            if let (true, Some((t0, spb, _))) =
+                (Instant::now() >= self.mt_vis.map(|v| v.0).unwrap_or_else(Instant::now), self.mt_vis)
+            {
+                let e = (Instant::now() - t0).as_secs_f32() / spb.max(0.05);
+                for (back, col) in [(0.16f32, pal().lcd_ghost), (0.08, pal().groove)] {
+                    let _ = rod(0.62 * (std::f32::consts::PI * (e - back)).cos(), col, 2.0);
+                }
+            }
+        }
+        let ang = swing * 0.62;
+        let tip = rod(ang, pal().ink2, 2.0);
         let weight = pivot + (tip - pivot) * 0.7;
         fill_rect(p, Rect::from_center_size(weight, Vec2::new(14.0, 10.0)), pal().ink);
-        let hit = self.mt.on && frac < 0.18 && !muted;
-        fill_rect(p, Rect::from_center_size(tip, Vec2::splat(10.0)), if hit { pal().red } else { pal().ink });
+        fill_rect(p, Rect::from_center_size(weight, Vec2::new(8.0, 4.0)), pal().lcd);
+        // the tip flashes on the beat and fades back
+        let hit = if self.mt.on && !muted { (1.0 - frac / 0.35).clamp(0.0, 1.0) } else { 0.0 };
+        let mixc = |a: egui::Color32, b: egui::Color32, k: f32| {
+            let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k) as u8;
+            egui::Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
+        };
+        fill_rect(p, Rect::from_center_size(tip, Vec2::splat(12.0)), pal().ink);
+        fill_rect(p, Rect::from_center_size(tip, Vec2::splat(8.0)), mixc(pal().lcd, pal().red, hit));
         fill_rect(p, Rect::from_center_size(pivot, Vec2::new(30.0, 8.0)), pal().ink);
         ptext(
             p,

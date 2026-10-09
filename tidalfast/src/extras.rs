@@ -307,8 +307,18 @@ impl App {
             return;
         }
         let tid = self.cur_track().map(|t| t.id);
-        let locked = self.mt.sync && playing && self.beat.map_or(false, |b| Some(b.0) == tid);
-        if self.mt.sync && !locked {
+        // locking needs the track's beat: look for it by itself once the audio is stored
+        let sync_wanted = self.mt.sync && !tid.map_or(false, |t| self.beat_failed.contains(&t));
+        if sync_wanted && playing && !self.beat_busy && self.beat.map(|b| b.0) != tid {
+            if let Some(id) = tid {
+                let stored = cache::has(id) || matches!(self.srcmap.get(&id), Some(Src::File(_)));
+                if stored {
+                    self.opt(Opt::FindBeats);
+                }
+            }
+        }
+        let locked = sync_wanted && playing && self.beat.map_or(false, |b| Some(b.0) == tid);
+        if sync_wanted && !locked {
             // locking was asked for but there is nothing to lock to yet
             if self.mt_sig != 0 {
                 self.player.send(Cmd::Pcm(0, Vec::new(), Vec::new(), 0.0));
@@ -759,11 +769,16 @@ impl App {
                 self.beat_busy = false;
                 match r {
                     Some((period, phase)) => {
+                        self.beat_failed.remove(&id);
                         self.beat = Some((id, period, phase));
                         self.mt_gen += 1;
                         self.set_note(&format!("FOUND THE BEAT: {:.0} BPM - NOW TURN ON LOCK", 60.0 / period));
                     }
-                    None => self.set_note("COULDN'T FIND A STEADY BEAT IN THIS TRACK"),
+                    None => {
+                        self.beat_failed.insert(id);
+                        self.mt_gen += 1;
+                        self.set_note("NO STEADY BEAT FOUND - THE METRONOME KEEPS YOUR OWN TEMPO");
+                    }
                 }
             }
             _ => {}
@@ -1635,6 +1650,7 @@ impl App {
                 if self.beat_busy {
                     return;
                 }
+                self.beat_failed.remove(&t.id);
                 let bytes = match self.srcmap.get(&t.id) {
                     Some(Src::File(p)) => std::fs::read(p).ok(),
                     _ => cache::get(t.id),

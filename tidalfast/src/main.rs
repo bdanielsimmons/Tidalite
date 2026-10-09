@@ -56,9 +56,10 @@ const fn c(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-const SKIN_NAMES: [&str; 8] = ["OLIVE", "AQUA", "DARK", "AMBER", "PAPER", "PLUM", "SLATE", "CLAY"];
+const SKIN_NAMES: [&str; 11] =
+    ["OLIVE", "AQUA", "DARK", "AMBER", "PAPER", "PLUM", "SLATE", "CLAY", "AERO GLASS", "SLEEK DARK", "SLEEK LIGHT"];
 
-static PALS: [Pal; 8] = [
+static PALS: [Pal; 11] = [
     // OLIVE: the classic beige/olive player
     Pal {
         app_bg: c(8, 8, 10),
@@ -72,8 +73,8 @@ static PALS: [Pal; 8] = [
         groove: c(120, 118, 84),
         sel: c(184, 181, 142),
         ink: c(12, 12, 8),
-        ink2: c(70, 70, 50),
-        dim: c(120, 118, 88),
+        ink2: c(64, 64, 46),
+        dim: c(96, 94, 70),
         red: c(150, 30, 20),
         btn_face: c(150, 146, 92),
         btn_hi: c(190, 186, 128),
@@ -96,8 +97,8 @@ static PALS: [Pal; 8] = [
         sel: c(150, 200, 222),
         ink: c(6, 24, 34),
         ink2: c(28, 70, 92),
-        dim: c(86, 130, 150),
-        red: c(170, 40, 40),
+        dim: c(67, 101, 117),
+        red: c(163, 38, 38),
         btn_face: c(70, 150, 190),
         btn_hi: c(110, 190, 225),
         row_alt: c(188, 224, 230),
@@ -108,7 +109,7 @@ static PALS: [Pal; 8] = [
     // DARK: graphite with green phosphor
     Pal {
         app_bg: c(6, 7, 8),
-        trim: c(110, 116, 122),
+        trim: c(122, 127, 133),
         beige: c(62, 65, 70),
         beige_lt: c(96, 100, 106),
         beige_dk: c(38, 40, 44),
@@ -118,20 +119,20 @@ static PALS: [Pal; 8] = [
         groove: c(30, 32, 35),
         sel: c(50, 66, 54),
         ink: c(126, 255, 150),
-        ink2: c(64, 150, 84),
-        dim: c(60, 96, 70),
-        red: c(255, 96, 80),
+        ink2: c(144, 194, 156),
+        dim: c(142, 163, 148),
+        red: c(255, 141, 129),
         btn_face: c(88, 92, 98),
         btn_hi: c(118, 122, 130),
         row_alt: c(20, 30, 22),
         row_sel: c(36, 100, 56),
-        bar_txt: c(214, 240, 220),
+        bar_txt: c(252, 254, 252),
         edge: c(0, 0, 0),
     },
     // AMBER: bronze with amber phosphor
     Pal {
         app_bg: c(8, 6, 4),
-        trim: c(150, 112, 60),
+        trim: c(154, 118, 68),
         beige: c(74, 62, 46),
         beige_lt: c(112, 94, 68),
         beige_dk: c(44, 36, 26),
@@ -141,20 +142,20 @@ static PALS: [Pal; 8] = [
         groove: c(36, 28, 18),
         sel: c(70, 52, 28),
         ink: c(255, 184, 64),
-        ink2: c(176, 120, 40),
-        dim: c(110, 76, 30),
-        red: c(255, 96, 70),
+        ink2: c(209, 177, 130),
+        dim: c(174, 155, 129),
+        red: c(255, 137, 118),
         btn_face: c(110, 92, 60),
         btn_hi: c(140, 118, 80),
         row_alt: c(32, 22, 10),
         row_sel: c(120, 76, 16),
-        bar_txt: c(255, 226, 170),
+        bar_txt: c(255, 249, 236),
         edge: c(0, 0, 0),
     },
     // PAPER: warm white with ink-blue type
     Pal {
         app_bg: c(40, 38, 34),
-        trim: c(120, 112, 98),
+        trim: c(142, 135, 123),
         beige: c(236, 230, 214),
         beige_lt: c(252, 249, 240),
         beige_dk: c(196, 188, 168),
@@ -164,8 +165,8 @@ static PALS: [Pal; 8] = [
         groove: c(150, 142, 124),
         sel: c(214, 206, 186),
         ink: c(24, 34, 72),
-        ink2: c(70, 84, 128),
-        dim: c(140, 140, 150),
+        ink2: c(66, 79, 120),
+        dim: c(112, 112, 120),
         red: c(176, 36, 36),
         btn_face: c(120, 134, 176),
         btn_hi: c(150, 164, 204),
@@ -186,36 +187,36 @@ static PALS: [Pal; 8] = [
         lcd_ghost: c(40, 26, 48),
         groove: c(44, 30, 54),
         sel: c(84, 54, 100),
-        ink: c(255, 150, 214),
-        ink2: c(184, 104, 160),
-        dim: c(110, 70, 100),
-        red: c(255, 110, 100),
+        ink: c(255, 221, 242),
+        ink2: c(220, 180, 208),
+        dim: c(180, 159, 174),
+        red: c(255, 151, 143),
         btn_face: c(132, 96, 150),
         btn_hi: c(160, 124, 180),
         row_alt: c(36, 22, 44),
         row_sel: c(130, 50, 100),
-        bar_txt: c(255, 220, 240),
+        bar_txt: c(255, 233, 245),
         edge: c(2, 0, 4),
     },
     // SLATE: cool grey-blue steel
     Pal {
         app_bg: c(8, 10, 14),
         trim: c(140, 156, 176),
-        beige: c(150, 164, 182),
+        beige: c(168, 182, 200),
         beige_lt: c(196, 208, 222),
-        beige_dk: c(104, 118, 138),
-        beige_h: c(166, 180, 198),
-        lcd: c(186, 198, 210),
+        beige_dk: c(120, 134, 154),
+        beige_h: c(182, 196, 212),
+        lcd: c(204, 214, 225),
         lcd_ghost: c(168, 182, 196),
         groove: c(86, 100, 120),
-        sel: c(130, 146, 168),
+        sel: c(146, 162, 184),
         ink: c(10, 18, 30),
-        ink2: c(46, 64, 90),
-        dim: c(98, 112, 132),
-        red: c(176, 40, 40),
+        ink2: c(40, 56, 82),
+        dim: c(70, 84, 106),
+        red: c(135, 25, 25),
         btn_face: c(96, 112, 136),
         btn_hi: c(130, 148, 172),
-        row_alt: c(158, 172, 188),
+        row_alt: c(178, 190, 206),
         row_sel: c(30, 52, 88),
         bar_txt: c(230, 238, 246),
         edge: c(4, 8, 14),
@@ -232,10 +233,10 @@ static PALS: [Pal; 8] = [
         lcd_ghost: c(224, 192, 158),
         groove: c(142, 98, 70),
         sel: c(204, 152, 116),
-        ink: c(40, 14, 6),
-        ink2: c(110, 48, 30),
-        dim: c(158, 110, 84),
-        red: c(160, 24, 16),
+        ink: c(13, 4, 2),
+        ink2: c(84, 36, 23),
+        dim: c(111, 77, 59),
+        red: c(147, 22, 15),
         btn_face: c(186, 98, 62),
         btn_hi: c(214, 128, 88),
         row_alt: c(228, 188, 152),
@@ -243,9 +244,260 @@ static PALS: [Pal; 8] = [
         bar_txt: c(250, 228, 204),
         edge: c(20, 8, 4),
     },
+    // AERO GLASS: sky blue, glossy glass and grass green (Windows XP / Vista era)
+    Pal {
+        app_bg: c(18, 60, 110),
+        trim: c(185, 224, 245),
+        beige: c(226, 240, 252),
+        beige_lt: c(252, 254, 255),
+        beige_dk: c(150, 186, 218),
+        beige_h: c(240, 248, 255),
+        lcd: c(238, 250, 255),
+        lcd_ghost: c(214, 236, 248),
+        groove: c(150, 184, 212),
+        sel: c(188, 222, 246),
+        ink: c(14, 40, 72),
+        ink2: c(43, 92, 133),
+        dim: c(92, 122, 147),
+        red: c(196, 55, 45),
+        btn_face: c(46, 150, 210),
+        btn_hi: c(96, 206, 120),
+        row_alt: c(232, 244, 254),
+        row_sel: c(34, 124, 196),
+        bar_txt: c(255, 255, 255),
+        edge: c(36, 92, 142),
+    },
+    // SLEEK DARK: charcoal with one blue accent
+    Pal {
+        app_bg: c(12, 13, 17),
+        trim: c(140, 148, 168),
+        beige: c(28, 30, 37),
+        beige_lt: c(52, 56, 68),
+        beige_dk: c(20, 21, 27),
+        beige_h: c(42, 45, 55),
+        lcd: c(18, 19, 25),
+        lcd_ghost: c(26, 28, 36),
+        groove: c(44, 47, 58),
+        sel: c(40, 52, 84),
+        ink: c(236, 238, 245),
+        ink2: c(160, 166, 181),
+        dim: c(120, 125, 138),
+        red: c(255, 92, 102),
+        btn_face: c(70, 122, 255),
+        btn_hi: c(120, 160, 255),
+        row_alt: c(32, 34, 42),
+        row_sel: c(50, 94, 220),
+        bar_txt: c(255, 255, 255),
+        edge: c(10, 10, 14),
+    },
+    // SLEEK LIGHT: soft white with the same blue accent
+    Pal {
+        app_bg: c(226, 229, 237),
+        trim: c(206, 212, 228),
+        beige: c(248, 249, 252),
+        beige_lt: c(255, 255, 255),
+        beige_dk: c(212, 216, 228),
+        beige_h: c(238, 241, 249),
+        lcd: c(238, 241, 247),
+        lcd_ghost: c(226, 230, 240),
+        groove: c(206, 211, 224),
+        sel: c(216, 227, 252),
+        ink: c(22, 25, 34),
+        ink2: c(86, 93, 110),
+        dim: c(114, 119, 131),
+        red: c(201, 53, 64),
+        btn_face: c(48, 100, 240),
+        btn_hi: c(92, 142, 255),
+        row_alt: c(242, 244, 250),
+        row_sel: c(48, 100, 240),
+        bar_txt: c(255, 255, 255),
+        edge: c(44, 50, 70),
+    },
 ];
 
 static SKIN: AtomicUsize = AtomicUsize::new(0);
+
+/// Look of the skin: 0 retro pixel, 1 aero glass, 2 sleek.
+fn style() -> u8 {
+    match SKIN.load(Ordering::Relaxed) % PALS.len() {
+        8 => 1,
+        9 | 10 => 2,
+        _ => 0,
+    }
+}
+
+/// Rounded fill (modern skins).
+fn rfill(p: &egui::Painter, r: Rect, rad: f32, c: Color32) {
+    p.rect_filled(r, Rounding::same(rad), c);
+}
+
+fn rline(p: &egui::Painter, r: Rect, rad: f32, w: f32, c: Color32) {
+    p.rect_stroke(r, Rounding::same(rad), Stroke::new(w, c));
+}
+
+/// Vertical gradient inside a rounded rectangle, drawn as thin horizontal slices clipped by the corner radius.
+fn rgrad(p: &egui::Painter, r: Rect, rad: f32, top: Color32, bot: Color32) {
+    let n = (r.height() / 2.0).ceil().max(1.0) as usize;
+    let lerp = |a: u8, b: u8, t: f32| (a as f32 + (b as f32 - a as f32) * t) as u8;
+    for i in 0..n {
+        let t = i as f32 / (n.max(2) - 1) as f32;
+        let y0 = r.min.y + r.height() * i as f32 / n as f32;
+        let y1 = r.min.y + r.height() * (i + 1) as f32 / n as f32;
+        let col = Color32::from_rgb(lerp(top.r(), bot.r(), t), lerp(top.g(), bot.g(), t), lerp(top.b(), bot.b(), t));
+        // inset each slice near the corners so the gradient keeps the rounded outline
+        let dy = (y0 + y1) * 0.5 - r.min.y;
+        let from_edge = dy.min(r.height() - dy);
+        let k = if from_edge < rad { rad - (rad * rad - (rad - from_edge) * (rad - from_edge)).max(0.0).sqrt() } else { 0.0 };
+        p.rect_filled(Rect::from_min_max(Pos2::new(r.min.x + k, y0), Pos2::new(r.max.x - k, y1 + 0.5)), Rounding::ZERO, col);
+    }
+}
+
+fn rgb_to_hsv(c: Color32) -> (f32, f32, f32) {
+    let (r, g, b) = (c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0);
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let d = mx - mn;
+    let h = if d == 0.0 {
+        0.0
+    } else if mx == r {
+        ((g - b) / d).rem_euclid(6.0) / 6.0
+    } else if mx == g {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    (h, if mx == 0.0 { 0.0 } else { d / mx }, mx)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
+    let i = (h * 6.0).floor();
+    let f = h * 6.0 - i;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
+    let (r, g, b) = match (i as i32).rem_euclid(6) {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+}
+
+/// Bars and/or waveform inside `r`. `art` = soft white overlay (album view); otherwise the skin's own colours.
+fn viz_draw(
+    p: &egui::Painter,
+    r: Rect,
+    bands: &[f32],
+    peaks: &[f32],
+    wave: &[f32],
+    mode: u8,
+    wfrac: f32,
+    art: bool,
+    alpha: f32,
+    tint: Option<(Color32, Color32)>,
+) {
+    let nb = bands.len().max(1);
+    let modern = style() != 0;
+    let a1 = (alpha * 255.0) as u8;
+    let a2 = ((alpha * 2.0).min(0.9) * 255.0) as u8;
+    let (body, cap, line) = if let Some((pri, sec)) = tint {
+        if art {
+            let f = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
+            (f(pri, a1), f(sec, a2), f(pri, a2.max(130)))
+        } else {
+            (pri, sec, pri)
+        }
+    } else if art {
+        (Color32::from_white_alpha(a1), Color32::from_white_alpha(a2), Color32::from_white_alpha(a2.max(110)))
+    } else if modern {
+        (pal().btn_hi, pal().ink2, pal().btn_face)
+    } else {
+        (pal().ink, pal().ink2, pal().ink)
+    };
+    if mode == 0 || mode == 2 {
+        let slot = r.width() / nb as f32;
+        let bw = (slot * wfrac).max(1.5);
+        let q = if modern {
+            0.0
+        } else if art {
+            6.0
+        } else {
+            2.0
+        };
+        for i in 0..nb.min(peaks.len()) {
+            let x = r.min.x + i as f32 * slot + (slot - bw) / 2.0;
+            let mut h = bands[i] * r.height();
+            let mut ph = peaks[i] * r.height();
+            if q > 0.0 {
+                h = (h / q).floor() * q;
+                ph = (ph / q).floor() * q;
+            }
+            let rad = if modern { (bw * 0.35).min(3.0) } else { 0.0 };
+            if h > 0.5 {
+                let br = Rect::from_min_size(Pos2::new(x, r.max.y - h), Vec2::new(bw, h));
+                if modern {
+                    rfill(p, br, rad, body);
+                } else {
+                    fill_rect(p, br, body);
+                }
+            }
+            if ph > 1.0 {
+                let pr = Rect::from_min_size(
+                    Pos2::new(x, r.max.y - ph - 2.0),
+                    Vec2::new(bw, if modern { 2.0 } else { 1.0_f32.max(q / 2.0) }),
+                );
+                if modern {
+                    rfill(p, pr, 1.0, cap);
+                } else {
+                    fill_rect(p, pr, cap);
+                }
+            }
+        }
+    }
+    if mode >= 1 && wave.len() > 1 {
+        let cy = r.center().y;
+        let amp = r.height() * if mode == 1 { 0.46 } else { 0.32 };
+        let n = wave.len();
+        if modern {
+            let pts: Vec<Pos2> =
+                (0..n).map(|k| Pos2::new(r.min.x + r.width() * k as f32 / (n - 1) as f32, cy - wave[k] * amp)).collect();
+            let w = if art { 3.0 } else { 1.5 };
+            if style() == 1 || art {
+                // soft glow under the line
+                p.add(egui::Shape::line(
+                    pts.clone(),
+                    Stroke::new(w * 3.0, Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), 36)),
+                ));
+            }
+            p.add(egui::Shape::line(pts, Stroke::new(w, line)));
+        } else {
+            // pixel scope: 2-dot columns, joined vertically
+            let step = if art { 6.0 } else { 2.0 };
+            let cols = (r.width() / step).floor().max(2.0) as usize;
+            let mut prev: Option<f32> = None;
+            for c in 0..cols {
+                let f = c as f32 / (cols - 1) as f32 * (n - 1) as f32;
+                let (i0, fr) = (f.floor() as usize, f.fract());
+                let v = wave[i0] * (1.0 - fr) + wave[(i0 + 1).min(n - 1)] * fr;
+                let y = ((cy - v * amp) / 2.0).floor() * 2.0;
+                let (lo, hi) = match prev {
+                    Some(pv) => (pv.min(y), pv.max(y)),
+                    None => (y, y),
+                };
+                let col = Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), line.a());
+                fill_rect(
+                    p,
+                    Rect::from_min_size(
+                        Pos2::new(r.min.x + c as f32 * step, lo),
+                        Vec2::new(step.min(4.0), hi - lo + step.min(3.0)),
+                    ),
+                    col,
+                );
+                prev = Some(y);
+            }
+        }
+    }
+}
 
 fn pal() -> &'static Pal {
     &PALS[SKIN.load(Ordering::Relaxed) % PALS.len()]
@@ -268,7 +520,10 @@ const CHECK: [&str; 4] = ["....#", "...#.", "#.#..", ".#..."];
 const HEART: [&str; 6] = [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."];
 
 const LIB_W: f32 = 430.0;
+#[allow(dead_code)]
 const NB: usize = 19;
+/// Points in the waveform visualizer.
+const WAVE_N: usize = 128;
 const BTN_H: f32 = 26.0;
 const ROW_H: f32 = 24.0;
 const HEAD_H: f32 = 18.0;
@@ -372,6 +627,7 @@ enum Action {
     ToggleLike(Track),
     MoveQueue(usize, usize),
     Skin,
+    SkinSet(usize),
     Sleep,
     ToggleMini,
     TogglePin,
@@ -718,6 +974,26 @@ fn outline(p: &egui::Painter, r: Rect, t: f32, c: Color32) {
 
 /// Sunken panel (LCD windows, groove).
 fn inset(p: &egui::Painter, r: Rect, fill: Color32) {
+    match style() {
+        1 => {
+            rfill(p, r, 4.0, fill);
+            rline(p, r, 4.0, 1.0, pal().beige_dk);
+            // soft shade along the top edge, like glass set into the frame
+            rfill(
+                p,
+                Rect::from_min_size(r.min + Vec2::new(2.0, 1.0), Vec2::new(r.width() - 4.0, 2.0)),
+                1.0,
+                Color32::from_black_alpha(26),
+            );
+            return;
+        }
+        2 => {
+            rfill(p, r, 6.0, fill);
+            rline(p, r, 6.0, 1.0, pal().groove);
+            return;
+        }
+        _ => {}
+    }
     let t1 = thick(1.5);
     let t2 = thick(1.0);
     fill_rect(p, r, fill);
@@ -729,6 +1005,38 @@ fn inset(p: &egui::Painter, r: Rect, fill: Color32) {
 
 /// Raised bevelled button face.
 fn raised_h(p: &egui::Painter, r: Rect, down: bool, hover: bool) {
+    match style() {
+        1 => {
+            // glossy glass button: gradient body, bright sheen on the top half, thin blue outline
+            let (top, bot) = if down {
+                (Color32::from_rgb(150, 196, 232), Color32::from_rgb(196, 226, 248))
+            } else if hover {
+                (Color32::from_rgb(255, 255, 255), Color32::from_rgb(190, 228, 250))
+            } else {
+                (Color32::from_rgb(250, 253, 255), Color32::from_rgb(196, 222, 244))
+            };
+            rgrad(p, r, 6.0, top, bot);
+            if !down {
+                let sheen = Rect::from_min_size(r.min + Vec2::new(2.0, 1.5), Vec2::new(r.width() - 4.0, r.height() * 0.44));
+                rfill(p, sheen, 4.0, Color32::from_white_alpha(if hover { 120 } else { 90 }));
+            }
+            rline(p, r, 6.0, 1.0, if hover { pal().btn_face } else { pal().edge });
+            return;
+        }
+        2 => {
+            let face = if down {
+                pal().sel
+            } else if hover {
+                pal().beige_lt
+            } else {
+                pal().beige_h
+            };
+            rfill(p, r, 6.0, face);
+            rline(p, r, 6.0, 1.0, if hover || down { pal().btn_face } else { pal().groove });
+            return;
+        }
+        _ => {}
+    }
     let (hi, lo) = if down { (pal().beige_dk, pal().beige_lt) } else { (pal().beige_lt, pal().beige_dk) };
     let face = if down {
         pal().sel
@@ -762,6 +1070,10 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     let p = ui.painter();
     let u = thick(2.0);
     let outer = Rect::from_min_max(inner.min - Vec2::new(14.0, 30.0), inner.max + Vec2::new(14.0, 14.0));
+    if style() != 0 {
+        modern_deco(p, outer, inner, title);
+        return;
+    }
     notch_fill(p, outer, u * 3.0, Color32::BLACK);
     notch_fill(p, outer.shrink(u * 1.5), u * 2.0, pal().trim);
     notch_fill(p, outer.shrink(u * 2.5), u * 2.0, Color32::BLACK);
@@ -801,6 +1113,56 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     // body
     fill_rect(p, inner.expand(2.0), pal().edge);
     fill_rect(p, inner, pal().beige);
+}
+
+/// Window frame for the aero and sleek skins.
+fn modern_deco(p: &egui::Painter, outer: Rect, inner: Rect, title: &str) {
+    let icon: Option<&[&str]> = match title.split(' ').next().unwrap_or("") {
+        "LIBRARY" => Some(&WIN_LIBRARY),
+        "QUEUE" => Some(&WIN_QUEUE),
+        "LEAD" => Some(&WIN_SHEET),
+        "PRACTICE" => Some(&WIN_PRACTICE),
+        "PLAYER" => Some(&MARK),
+        _ => None,
+    };
+    let cy = outer.min.y + 14.0;
+    let (txt_col, icon_col) = if style() == 1 { (pal().bar_txt, pal().bar_txt) } else { (pal().ink2, pal().ink2) };
+    if style() == 1 {
+        // glass title bar over a blue frame, like an XP / Vista window
+        rfill(p, outer.translate(Vec2::new(0.0, 2.0)), 9.0, Color32::from_black_alpha(60));
+        rgrad(p, outer, 9.0, Color32::from_rgb(92, 178, 236), Color32::from_rgb(28, 108, 188));
+        let bar = Rect::from_min_size(outer.min + Vec2::new(2.0, 2.0), Vec2::new(outer.width() - 4.0, 24.0));
+        rfill(p, bar, 7.0, Color32::from_white_alpha(46));
+        rline(p, outer, 9.0, 1.0, pal().edge);
+        rfill(p, inner.expand(2.0), 3.0, pal().edge);
+        rfill(p, inner, 2.0, pal().beige);
+        // a sliver of glare across the top of the body
+        rfill(
+            p,
+            Rect::from_min_size(inner.min + Vec2::new(1.0, 1.0), Vec2::new(inner.width() - 2.0, 3.0)),
+            1.0,
+            Color32::from_white_alpha(70),
+        );
+    } else {
+        rfill(p, outer, 10.0, pal().beige_dk);
+        rline(p, outer, 10.0, 1.0, pal().groove);
+        rfill(p, inner, 6.0, pal().beige);
+        rline(p, inner, 6.0, 1.0, pal().groove);
+    }
+    let mut x = outer.min.x + 14.0;
+    if let Some(rows) = icon {
+        let k = 2.0;
+        let o = Pos2::new((x).round(), (cy - rows.len() as f32 * k / 2.0).round());
+        for (y, row) in rows.iter().enumerate() {
+            for (cx, ch) in row.chars().enumerate() {
+                if ch == '#' || ch == 'o' {
+                    fill_rect(p, Rect::from_min_size(o + Vec2::new(cx as f32 * k, y as f32 * k), Vec2::splat(k)), icon_col);
+                }
+            }
+        }
+        x += 26.0;
+    }
+    ptext(p, Pos2::new(x, cy), Align::Min, title, 2.0, txt_col);
 }
 
 // little 9x9 pictures for the window title tabs
@@ -944,6 +1306,33 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
             .interact(r, ui.id().with(("tab", items.join("|"), i)), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         let p = ui.painter();
+        if style() != 0 {
+            let r = Rect::from_min_max(r.min + Vec2::new(0.0, if on { 0.0 } else { 1.0 }), Pos2::new(r.max.x, r.max.y - 2.0));
+            if style() == 1 {
+                if on || resp.hovered() {
+                    raised_h(p, r, false, on);
+                } else {
+                    rfill(p, r, 6.0, pal().beige_dk);
+                }
+            } else if on {
+                rfill(p, r, 7.0, pal().btn_face);
+            } else if resp.hovered() {
+                rfill(p, r, 7.0, pal().beige_h);
+            }
+            let col = if on && style() == 2 {
+                pal().bar_txt
+            } else if on {
+                pal().ink
+            } else {
+                pal().ink2
+            };
+            ptext(p, r.center(), Align::Center, name, 2.0, col);
+            if resp.clicked() {
+                hit = Some(i);
+            }
+            x += w + 3.0;
+            continue;
+        }
         fill_rect(
             p,
             r,
@@ -1758,8 +2147,10 @@ struct App {
     shuffle: bool,
     repeat: Repeat,
     seek_drag: Option<f32>,
-    bands: [f32; NB],
-    peaks: [f32; NB],
+    bands: Vec<f32>,
+    peaks: Vec<f32>,
+    viz_n: usize,
+    viz_color: u8,
     show_log: bool,
     audio_err_shown: bool,
 
@@ -1768,11 +2159,16 @@ struct App {
     show_spec: bool,
     spec_op: f32,
     spec_h: f32,
+    viz_mode: u8,
+    viz_w: f32,
+    viz_gain: f32,
+    wave: Vec<f32>,
     show_lyrics: bool,
     fullscreen: bool,
     art_tilt: Vec2,
     lyrics: Option<Lyrics>,
     lyric_scroll: f32,
+    lyric_free: f32,
 
     liked: HashSet<i64>,
     q_drag: Option<usize>,
@@ -1897,6 +2293,7 @@ struct App {
     last_size: Vec2,
     frames: u32,
     mt_vis: Option<(Instant, f32, usize)>,
+    beat_failed: HashSet<i64>,
     mt_gen: u32,
     mt_pos: (f32, Instant),
     mt_sync_at: Instant,
@@ -2017,8 +2414,10 @@ impl App {
             shuffle: false,
             repeat: Repeat::Off,
             seek_drag: None,
-            bands: [0.0; NB],
-            peaks: [0.0; NB],
+            bands: vec![0.0; 32],
+            peaks: vec![0.0; 32],
+            viz_n: 32,
+            viz_color: 1,
             show_log: false,
             audio_err_shown: false,
             art_view: false,
@@ -2026,11 +2425,16 @@ impl App {
             show_spec: true,
             spec_op: 0.2,
             spec_h: 0.42,
+            viz_mode: 0,
+            viz_w: 0.8,
+            viz_gain: 1.0,
+            wave: vec![0.0; WAVE_N],
             show_lyrics: true,
             fullscreen: false,
             art_tilt: Vec2::ZERO,
             lyrics: None,
             lyric_scroll: 0.0,
+            lyric_free: 0.0,
             liked: HashSet::new(),
             q_drag: None,
             sleep_at: None,
@@ -2144,6 +2548,7 @@ impl App {
             last_size: Vec2::ZERO,
             frames: 0,
             mt_vis: None,
+            beat_failed: HashSet::new(),
             mt_gen: 0,
             mt_pos: (0.0, Instant::now()),
             mt_sync_at: Instant::now(),
@@ -2184,6 +2589,21 @@ impl App {
         }
         if let Some(f) = st["spec_op"].as_f64() {
             app.spec_op = (f as f32).clamp(0.05, 0.8);
+        }
+        if let Some(n) = st["viz_n"].as_u64() {
+            app.viz_n = (n as usize).clamp(8, 96);
+        }
+        if let Some(n) = st["viz_color"].as_u64() {
+            app.viz_color = (n as u8).min(2);
+        }
+        if let Some(n) = st["viz_mode"].as_u64() {
+            app.viz_mode = (n as u8).min(2);
+        }
+        if let Some(f) = st["viz_w"].as_f64() {
+            app.viz_w = (f as f32).clamp(0.3, 1.0);
+        }
+        if let Some(f) = st["viz_gain"].as_f64() {
+            app.viz_gain = (f as f32).clamp(0.4, 3.0);
         }
         if let Some(f) = st["spec_h"].as_f64() {
             app.spec_h = (f as f32).clamp(0.15, 0.9);
@@ -2277,6 +2697,11 @@ impl App {
             "spec": self.show_spec,
             "spec_op": self.spec_op,
             "spec_h": self.spec_h,
+            "viz_mode": self.viz_mode,
+            "viz_n": self.viz_n,
+            "viz_color": self.viz_color,
+            "viz_w": self.viz_w,
+            "viz_gain": self.viz_gain,
             "lyrics": self.show_lyrics,
             "repeat": match self.repeat { Repeat::Off => 0, Repeat::All => 1, Repeat::One => 2 },
             "eq_on": self.eq_on,
@@ -2736,17 +3161,80 @@ impl App {
         self.refresh_prefetch();
     }
 
+    /// Bar colours for the visualizer: None = the skin's own, else (main, cap).
+    fn viz_tint(&self) -> Option<(Color32, Color32)> {
+        match self.viz_color {
+            2 => Some((Color32::from_rgb(70, 220, 110), Color32::from_rgb(255, 72, 60))),
+            1 => {
+                let t = self.cur_track()?;
+                let avg = self
+                    .images
+                    .avg
+                    .get(&cover_url(&t.cover, 640))
+                    .or_else(|| self.images.avg.get(&cover_url(&t.cover, 160)))
+                    .copied()?;
+                // the cover's own colour lifted to a readable level, with a gentle complementary tip
+                let (h, sat, _) = rgb_to_hsv(avg[1]);
+                let (h0, s0, _) = rgb_to_hsv(avg[0]);
+                let h = if sat < 0.12 { h0 } else { h };
+                let s = if sat < 0.12 { s0 } else { sat };
+                let pri = hsv_to_rgb(h, s.clamp(0.35, 0.85), 0.9);
+                let sec = hsv_to_rgb((h + 0.42) % 1.0, 0.5, 1.0);
+                Some((pri, sec))
+            }
+            _ => None,
+        }
+    }
+
+    /// Right-click menu shared by both visualizers.
+    fn viz_menu(&mut self, ui: &mut egui::Ui) {
+        if menu_item(
+            ui,
+            &format!("STYLE: {}  (click to change)", ["BARS", "WAVEFORM", "BARS + WAVE"][self.viz_mode as usize % 3]),
+        ) {
+            self.viz_mode = (self.viz_mode + 1) % 3;
+        }
+        let mut n = self.viz_n as f32;
+        if menu_item(ui, &format!("NUMBER OF BARS  {}   (+)", self.viz_n)) {
+            n = (n + 4.0).min(96.0);
+        }
+        if menu_item(ui, &format!("NUMBER OF BARS  {}   (-)", self.viz_n)) {
+            n = (n - 4.0).max(8.0);
+        }
+        self.viz_n = n as usize;
+        let cname = ["SKIN", "FROM COVER ART", "CLASSIC GREEN + RED"][self.viz_color as usize % 3];
+        if menu_item(ui, &format!("COLORS: {}  (click to change)", cname)) {
+            self.viz_color = (self.viz_color + 1) % 3;
+        }
+        for (name, v, d, lo, hi) in
+            [("BAR WIDTH", &mut self.viz_w, 0.1, 0.3, 1.0), ("SENSITIVITY", &mut self.viz_gain, 0.2, 0.4, 3.0)]
+        {
+            if menu_item(ui, &format!("{}  {}%   (+)", name, (*v * 100.0).round() as i32)) {
+                *v = (*v + d).min(hi);
+            }
+            if menu_item(ui, &format!("{}  {}%   (-)", name, (*v * 100.0).round() as i32)) {
+                *v = (*v - d).max(lo);
+            }
+        }
+        self.dirty = true;
+    }
+
     fn update_bands(&mut self) {
         let active = self.cur.is_some() && !self.paused && !self.stopped && !self.buffering;
         let (samples, rate) = if active {
             let v = self.player.viz.lock().unwrap();
-            let n = v.samples.len().min(1024);
+            let n = v.samples.len().min(2048);
             (v.samples[v.samples.len() - n..].to_vec(), v.rate as f32)
         } else {
             (Vec::new(), 44100.0)
         };
         let n = samples.len();
-        let mut target = [0.0f32; NB];
+        let nb = self.viz_n.clamp(8, 96);
+        if self.bands.len() != nb {
+            self.bands = vec![0.0; nb];
+            self.peaks = vec![0.0; nb];
+        }
+        let mut target = vec![0.0f32; nb];
         if n >= 512 && rate > 0.0 {
             let denom = (n - 1) as f32;
             let xs: Vec<f32> = samples
@@ -2754,17 +3242,36 @@ impl App {
                 .enumerate()
                 .map(|(i, v)| v * (0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / denom).cos()))
                 .collect();
-            for i in 0..NB {
-                let f = 60.0 * (12000.0f32 / 60.0).powf(i as f32 / (NB - 1) as f32);
+            for i in 0..nb {
+                let f = 50.0 * (12000.0f32 / 50.0).powf(i as f32 / (nb - 1) as f32);
                 if f >= rate / 2.0 {
                     continue;
                 }
                 let amp = goertzel(&xs, f, rate) * 2.0;
                 let db = 20.0 * (amp + 1e-6).log10();
-                target[i] = ((db + 64.0 + i as f32 * 1.3) / 54.0).clamp(0.0, 1.0);
+                target[i] = ((db + 64.0 + 23.0 * i as f32 / nb as f32) / 54.0 * self.viz_gain).clamp(0.0, 1.0);
             }
         }
-        for i in 0..NB {
+        // waveform: the loudest swing in each slice of the latest samples
+        if self.wave.len() != WAVE_N {
+            self.wave = vec![0.0; WAVE_N];
+        }
+        for k in 0..WAVE_N {
+            let tv = if n >= WAVE_N {
+                let (a, b) = (k * n / WAVE_N, ((k + 1) * n / WAVE_N).max(k * n / WAVE_N + 1));
+                let mut best = 0.0f32;
+                for v in &samples[a..b.min(n)] {
+                    if v.abs() > best.abs() {
+                        best = *v;
+                    }
+                }
+                (best * 1.6 * self.viz_gain).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+            self.wave[k] = self.wave[k] * 0.45 + tv * 0.55;
+        }
+        for i in 0..nb {
             let old = self.bands[i];
             self.bands[i] = if target[i] > old { target[i] } else { (old - 0.06).max(target[i]) };
             self.peaks[i] = self.bands[i].max(self.peaks[i] - 0.012);
@@ -3046,6 +3553,13 @@ impl App {
                     });
                 }
                 self.refresh_prefetch();
+            }
+            Action::SkinSet(n) => {
+                let n = n % PALS.len();
+                SKIN.store(n, Ordering::Relaxed);
+                setup_style(&self.ctx);
+                self.dirty = true;
+                self.set_note(&format!("SKIN: {}", SKIN_NAMES[n]));
             }
             Action::Skin => {
                 let n = (SKIN.load(Ordering::Relaxed) + 1) % PALS.len();
@@ -3590,12 +4104,22 @@ impl App {
         // tools row
         ui.horizontal(|ui| {
             let ink = pal().ink;
-            if icon_btn_w(ui, &IC_SKIN, false, ink, 38.0)
-                .tip(format!("Skin: {}  (click for the next)", SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]))
-                .clicked()
-            {
+            let skin_btn = icon_btn_w(ui, &IC_SKIN, false, ink, 38.0).tip(format!(
+                "Skin: {}  (click for the next, right-click to pick one)",
+                SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]
+            ));
+            if skin_btn.clicked() {
                 acts.push(Action::Skin);
             }
+            skin_btn.context_menu(|ui| {
+                for (n, name) in SKIN_NAMES.iter().enumerate() {
+                    let mark = if n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
+                    if menu_item(ui, &format!("{}{}", mark, name)) {
+                        acts.push(Action::SkinSet(n));
+                        ui.close_menu();
+                    }
+                }
+            });
             if icon_btn_w(ui, &IC_EQ, self.show_eq, ink, 38.0).tip("Equalizer").clicked() {
                 acts.push(Action::ToggleEq);
             }
@@ -3804,20 +4328,30 @@ impl App {
         fill_rect(p, rc(54.0, 20.0, 3.0, 3.0), pal().ink);
         fill_rect(p, rc(54.0, 29.0, 3.0, 3.0), pal().ink);
 
-        // ---- spectrum
+        // ---- spectrum (click: bars / wave / both, right-click: width and sensitivity)
         let sp = rc(6.0, 50.0, 100.0, 28.0);
         inset(p, sp, pal().lcd);
-        for i in 0..NB {
-            let x = 8.0 + i as f32 * 5.0;
-            let h = ((self.bands[i] * 22.0) / 2.0).floor() * 2.0;
-            if h > 0.0 {
-                fill_rect(p, rc(x, 75.0 - h, 4.0, h), pal().ink);
-            }
-            let ph = ((self.peaks[i] * 22.0) / 2.0).floor() * 2.0;
-            if ph > 0.0 {
-                fill_rect(p, rc(x, 75.0 - ph - 2.0, 4.0, 1.0), pal().ink2);
-            }
+        viz_draw(
+            p,
+            sp.shrink2(Vec2::new(3.0, 3.0)),
+            &self.bands,
+            &self.peaks,
+            &self.wave,
+            self.viz_mode,
+            self.viz_w,
+            false,
+            1.0,
+            self.viz_tint(),
+        );
+        let spr = ui
+            .interact(sp, ui.id().with("spectrum"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip("Click: bars / waveform / both.  Right-click: width and sensitivity");
+        if spr.clicked() {
+            self.viz_mode = (self.viz_mode + 1) % 3;
+            self.dirty = true;
         }
+        spr.context_menu(|ui| self.viz_menu(ui));
 
         // ---- title + status
         let tb = rc(112.0, 6.0, 182.0, 14.0);
@@ -4143,34 +4677,14 @@ impl App {
             p.add(egui::Shape::mesh(mesh));
         }
 
-        // ---- spectrum, soft and behind everything (only under the cover when lyrics split the view)
+        // ---- visualizer, soft and behind everything (only under the cover when lyrics split the view)
         if self.show_spec {
             let zone = if lyrics_on { Rect::from_min_max(full.min, Pos2::new(art_zone.max.x + 14.0, full.max.y)) } else { full };
-            let n = NB;
-            let gap = 6.0;
-            let bw = ((zone.width() - gap * (n as f32 + 1.0)) / n as f32).max(4.0);
-            let maxh = zone.height() * self.spec_h;
-            let a1 = (self.spec_op * 255.0) as u8;
-            let a2 = ((self.spec_op * 2.0).min(0.9) * 255.0) as u8;
-            for i in 0..n {
-                let x = zone.min.x + gap + i as f32 * (bw + gap);
-                let h = (self.bands[i] * maxh / 6.0).floor() * 6.0;
-                if h > 0.0 {
-                    fill_rect(
-                        &p,
-                        Rect::from_min_size(Pos2::new(x, zone.max.y - h), Vec2::new(bw, h)),
-                        Color32::from_white_alpha(a1),
-                    );
-                }
-                let ph = (self.peaks[i] * maxh / 6.0).floor() * 6.0;
-                if ph > 0.0 {
-                    fill_rect(
-                        &p,
-                        Rect::from_min_size(Pos2::new(x, zone.max.y - ph - 6.0), Vec2::new(bw, 3.0)),
-                        Color32::from_white_alpha(a2),
-                    );
-                }
-            }
+            let r = Rect::from_min_max(
+                Pos2::new(zone.min.x + 6.0, zone.max.y - zone.height() * self.spec_h),
+                Pos2::new(zone.max.x - 6.0, zone.max.y),
+            );
+            viz_draw(&p, r, &self.bands, &self.peaks, &self.wave, self.viz_mode, self.viz_w, true, self.spec_op, self.viz_tint());
             if self.cur.is_some() && !self.paused && !self.stopped {
                 ui.ctx().request_repaint();
             }
@@ -4257,11 +4771,34 @@ impl App {
                         let n = l.lines.len();
                         let idx: Option<usize> =
                             if l.synced { l.lines.iter().rposition(|(tt, _)| *tt <= pos + 0.25) } else { None };
-                        if l.synced {
+                        // scrolling takes over for a few seconds; otherwise the view follows the song
+                        self.lyric_free = (self.lyric_free - dt).max(0.0);
+                        if over && wheel.abs() > 0.0 {
+                            scroll = (scroll - wheel / lh).clamp(0.0, (n.max(1) - 1) as f32);
+                            self.lyric_free = 4.0;
+                        } else if l.synced && self.lyric_free <= 0.0 {
                             let tgt = idx.unwrap_or(0) as f32;
                             scroll += (tgt - scroll) * (1.0 - (-dt * 7.0).exp());
-                        } else if over {
-                            scroll = (scroll - wheel / lh).clamp(0.0, (n.max(1) - 1) as f32);
+                        }
+                        // the line under the mouse (synced lyrics): click it to jump there
+                        let mut hover_i: Option<usize> = None;
+                        if l.synced && over {
+                            if let Some(pp) = hover {
+                                let k = (scroll + (pp.y - cyl) / lh).round();
+                                if k >= 0.0 && (k as usize) < n && !l.lines[k as usize].1.is_empty() {
+                                    hover_i = Some(k as usize);
+                                }
+                            }
+                        }
+                        let lr = ui.interact(ly, ui.id().with("lyric_click"), Sense::click());
+                        if hover_i.is_some() {
+                            lr.clone().on_hover_cursor(egui::CursorIcon::PointingHand);
+                        }
+                        if lr.clicked() {
+                            if let Some(i) = hover_i {
+                                acts.push(Action::Seek(l.lines[i].0));
+                                self.lyric_free = 0.0;
+                            }
                         }
                         for (i, (_, txt)) in l.lines.iter().enumerate() {
                             if txt.is_empty() {
@@ -4273,8 +4810,13 @@ impl App {
                                 continue;
                             }
                             let fade = (1.0 - d.abs() / 6.0).clamp(0.15, 1.0);
-                            let (px, col) =
-                                if idx == Some(i) { (3.0, pal().bar_txt) } else { (2.0, pal().trim.gamma_multiply(fade)) };
+                            let (px, col) = if idx == Some(i) {
+                                (3.0, pal().bar_txt)
+                            } else if hover_i == Some(i) {
+                                (2.0, pal().bar_txt)
+                            } else {
+                                (2.0, pal().trim.gamma_multiply(fade))
+                            };
                             ptext_fit(&cp, Pos2::new(ly.center().x, y), Align::Center, txt, px, ly.width() - 40.0, col);
                         }
                     }
@@ -4396,6 +4938,7 @@ impl App {
                     };
                     step(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8);
                     step(ui, "HEIGHT", &mut self.spec_h, 0.08, 0.15, 0.9);
+                    self.viz_menu(ui);
                     self.dirty = true;
                 });
                 if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
@@ -4646,6 +5189,7 @@ fn panel_frame() -> egui::Frame {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         font::set_ppp(ctx.pixels_per_point());
+        font::set_modern(style() != 0);
         // the window's scale and size settle over the first frames: keep drawing until they do
         {
             let (ppp, sz) = (ctx.pixels_per_point(), ctx.screen_rect().size());
@@ -4981,8 +5525,9 @@ fn setup_style(ctx: &egui::Context) {
     v.panel_fill = pal().app_bg;
     v.window_fill = pal().beige;
     v.window_stroke = Stroke::new(1.0, pal().edge);
-    v.window_rounding = Rounding::same(0.0);
-    v.menu_rounding = Rounding::same(0.0);
+    let rad = if style() != 0 { 7.0 } else { 0.0 };
+    v.window_rounding = Rounding::same(rad);
+    v.menu_rounding = Rounding::same(rad);
     v.extreme_bg_color = pal().lcd;
     v.faint_bg_color = pal().beige_dk;
     v.hyperlink_color = pal().ink;
@@ -5008,7 +5553,7 @@ fn setup_style(ctx: &egui::Context) {
         &mut v.widgets.open,
     ] {
         w.fg_stroke = Stroke::new(1.0, pal().ink);
-        w.rounding = Rounding::same(0.0);
+        w.rounding = Rounding::same(rad * 0.7);
     }
     ctx.set_visuals(v);
 
