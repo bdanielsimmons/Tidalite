@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub const CHAN_NAMES: [&str; 6] = ["STEREO", "LEFT ONLY", "RIGHT ONLY", "MONO", "NO CENTER", "BASS ONLY"];
+pub const CHAN_NAMES: [&str; 6] = ["STEREO", "LEFT CHANNEL", "RIGHT CHANNEL", "MONO", "NO CENTER", "BASS ONLY"];
 
 /// The settable numbers (the +/- buttons and the typed boxes next to them).
 #[derive(Clone, Copy, PartialEq)]
@@ -29,6 +29,7 @@ pub enum Knob {
     LoopB,
     Bpm,
     Beats,
+    Unit,
     GapPlay,
     GapMute,
     RampBars,
@@ -49,10 +50,10 @@ pub enum Opt {
     Half,
     FindBeats,
     Band,
-    BandStyle,
+    BandStyleSet(u8),
     Part(usize),
     PomoSound,
-    Unit,
+    UnitSet(u8),
     Group,
 }
 
@@ -207,7 +208,9 @@ impl App {
         let dt = self.acc_at.elapsed().as_secs_f32().min(1.0);
         self.acc_at = Instant::now();
         let playing = self.cur.is_some() && !self.stopped && !self.paused && !self.buffering;
-        if self.practice && playing {
+        // only real loop work counts - not just having practice mode open
+        let looping = self.loop_on && self.loop_a.is_some() && self.loop_b.is_some();
+        if self.practice && playing && looping {
             self.acc += dt;
         }
         let w = self.player.ctl.wraps();
@@ -1045,6 +1048,17 @@ impl App {
                 let v = self.knob_val(k) + d as f32 * knob_step(k);
                 self.knob_set(k, v);
             }
+            Action::SetKnob(k, text) if matches!(k, Knob::Beats) && text.contains('/') => {
+                // a whole meter typed in one go, like 11/17
+                let mut it = text.split('/').map(|s| s.trim().parse::<f32>().ok());
+                match (it.next().flatten(), it.next().flatten()) {
+                    (Some(b), Some(u)) => {
+                        self.knob_set(Knob::Beats, b);
+                        self.knob_set(Knob::Unit, u);
+                    }
+                    _ => self.set_note("TYPE A METER LIKE 11/17"),
+                }
+            }
             Action::SetKnob(k, text) => {
                 let v = if matches!(k, Knob::LoopA | Knob::LoopB) {
                     parse_time(&text)
@@ -1075,6 +1089,10 @@ impl App {
                 self.look_tracks.clear();
                 let (api, tx, ctx) = (self.api.clone(), self.tx.clone(), self.ctx.clone());
                 let want_style = self.look_style;
+                // something typed beside LOOK UP is searched instead of the tune's own name
+                let typed = self.look_q.trim().to_string();
+                let tune_name = name.clone();
+                let name = if typed.is_empty() { name } else { typed };
                 std::thread::spawn(move || {
                     let info = sources::lookup_composer(&name);
                     // a tune in the jazz standards list is jazz (and that list knows who wrote it)
@@ -1088,7 +1106,7 @@ impl App {
                     let composer = listed.unwrap_or_else(|| info.as_ref().map(|s| s.to_string()).unwrap_or_default());
                     let composer = composer.split(|c| c == ',' || c == '\n').next().unwrap_or("").replace("Written by", "");
                     let tracks = api.popular(&name, &known, style, composer.trim()).unwrap_or_default();
-                    let _ = tx.send(Msg::Lookup(name, info, tracks));
+                    let _ = tx.send(Msg::Lookup(tune_name, info, tracks));
                     ctx.request_repaint();
                 });
             }
@@ -1252,11 +1270,15 @@ impl App {
 
             // ---- diary
             Action::SaveEntry => {
-                let today = store::today_str();
+                let today = if self.diary_sel == 0 { store::today_str() } else { store::date_str(self.diary_sel) };
                 let default_mins = self.store.secs_on(&today) / 60;
                 let mins = self.f_mins.trim().parse::<u32>().unwrap_or(default_mins);
                 let bpm = self.f_bpm.trim().parse::<u32>().unwrap_or(0);
                 let tune = if self.f_tune.trim().is_empty() { self.practice_label() } else { self.f_tune.trim().to_string() };
+                // a logged day with no tracked time still counts on the calendar
+                if mins > 0 && self.store.secs_on(&today) == 0 {
+                    *self.store.day_mut(&today).secs.entry(tune.clone()).or_insert(0) += mins * 60;
+                }
                 self.store.entries.push(Entry { date: today, tune, mins, bpm, note: self.f_note.trim().to_string() });
                 self.f_mins.clear();
                 self.f_bpm.clear();
@@ -1465,6 +1487,7 @@ impl App {
             Knob::LoopB => self.loop_b.unwrap_or(0.0),
             Knob::Bpm => (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32,
             Knob::Beats => self.mt.beats as f32,
+            Knob::Unit => self.mt.unit as f32,
             Knob::GapPlay => self.mt.gap_play as f32,
             Knob::GapMute => self.mt.gap_mute as f32,
             Knob::RampBars => self.mt.ramp_bars as f32,
@@ -1499,6 +1522,7 @@ impl App {
                 self.mt.preset(0);
                 self.mt_group = 0;
             }
+            Knob::Unit => self.mt.unit = u(1.0, 64.0) as u8,
             Knob::GapPlay => self.mt.gap_play = u(0.0, 32.0),
             Knob::GapMute => self.mt.gap_mute = u(1.0, 16.0),
             Knob::RampBars => self.mt.ramp_bars = u(0.0, 32.0),
@@ -1527,13 +1551,7 @@ impl App {
                 self.mt.preset(n);
                 self.mt_group = 0;
             }
-            Opt::Unit => {
-                self.mt.unit = match self.mt.unit {
-                    4 => 8,
-                    8 => 16,
-                    _ => 4,
-                };
-            }
+            Opt::UnitSet(n) => self.mt.unit = n.clamp(1, 64),
             Opt::Group => {
                 let gs = band::groupings(self.mt.beats);
                 if gs.is_empty() {
@@ -1595,7 +1613,7 @@ impl App {
                     self.band_start();
                 }
             }
-            Opt::BandStyle => self.band_style = (self.band_style + 1) % band::STYLES.len() as u8,
+            Opt::BandStyleSet(i) => self.band_style = i,
             Opt::Part(i) => self.band_parts[i.min(2)] = !self.band_parts[i.min(2)],
             Opt::PomoSound => self.pomo_sound = !self.pomo_sound,
         }

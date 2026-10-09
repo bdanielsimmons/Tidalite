@@ -139,6 +139,8 @@ pub struct Store {
     pub yt: Vec<Ext>,
     /// SoundCloud tracks you kept (same kind of entry as a YouTube clip, with a link instead of a video id)
     pub sc: Vec<Ext>,
+    /// Hearted tracks that are not on Tidal (files, YouTube, SoundCloud); kept on this computer only
+    pub hearts: Vec<Ext>,
     pub bpm: HashMap<i64, u32>,
     pub last: Option<Last>,
 }

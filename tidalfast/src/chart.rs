@@ -534,6 +534,11 @@ impl Chart {
                 i = rep_start;
                 continue;
             }
+            if b.end_rep && pass >= 2 && !jumped {
+                // repeat group finished: later groups start fresh
+                pass = 1;
+                rep_start = i + 1;
+            }
             if jumped && has(i, "FINE") {
                 break;
             }
@@ -564,6 +569,102 @@ impl Chart {
             out.extend(0..n);
         }
         out
+    }
+}
+
+fn mark_tag(text: &str) -> &'static str {
+    match text {
+        "SEGNO" => "@segno",
+        "CODA" => "@coda",
+        "FINE" => "@fine",
+        "TO CODA" => "@tocoda",
+        "D.C." => "@dc",
+        "D.S." => "@ds",
+        "D.C. AL CODA" => "@dccoda",
+        "D.S. AL CODA" => "@dscoda",
+        "D.C. AL FINE" => "@dcfine",
+        _ => "@dsfine",
+    }
+}
+
+impl Chart {
+    /// The chart as friendly text again (what `parse_friendly` reads), so bars can be edited and saved.
+    pub fn to_text(&self) -> String {
+        let mut s = String::new();
+        match self.beats {
+            2 => s.push_str("T68 "),
+            3 => s.push_str("T34 "),
+            4 => {}
+            n => s.push_str(&format!("T{}4 ", n)),
+        }
+        for b in &self.bars {
+            if !b.label.is_empty() {
+                s.push_str(&format!("*{} ", b.label));
+            }
+            if !b.ending.is_empty() {
+                s.push_str(&format!("[{} ", b.ending.trim_end_matches('.')));
+            }
+            if b.start_rep {
+                s.push_str("{ ");
+            }
+            for m in b.marks.iter().map(|m| mark_tag(m)).filter(|t| !is_end_mark(t)) {
+                s.push_str(m);
+                s.push(' ');
+            }
+            for c in &b.chords {
+                s.push_str(c);
+                s.push(' ');
+            }
+            if b.end_rep {
+                s.push_str("} ");
+            }
+            for m in b.marks.iter().map(|m| mark_tag(m)).filter(|t| is_end_mark(t)) {
+                s.push_str(m);
+                s.push(' ');
+            }
+            s.push_str("| ");
+        }
+        s.trim_end().to_string()
+    }
+
+    /// One edit on bar `i`: "ins" (copy after), "del", "{", "}", "[1", "[2", "*A".."*D", "*" (no label), or a mark tag like "@coda".
+    pub fn edit(&mut self, i: usize, op: &str) {
+        if i >= self.bars.len() {
+            return;
+        }
+        match op {
+            "ins" => {
+                let b = Bar { chords: self.bars[i].chords.clone(), ..Default::default() };
+                self.bars.insert(i + 1, b);
+            }
+            "del" => {
+                if self.bars.len() > 1 {
+                    self.bars.remove(i);
+                }
+            }
+            "{" => self.bars[i].start_rep = !self.bars[i].start_rep,
+            "}" => self.bars[i].end_rep = !self.bars[i].end_rep,
+            "[1" | "[2" => {
+                let e = format!("{}.", &op[1..]);
+                let b = &mut self.bars[i];
+                b.ending = if b.ending == e { String::new() } else { e };
+            }
+            "*" => self.bars[i].label.clear(),
+            t if t.starts_with('*') => self.bars[i].label = t[1..].to_string(),
+            t => {
+                if let Some(m) = mark_text(t) {
+                    let marks = &mut self.bars[i].marks;
+                    if let Some(k) = marks.iter().position(|x| x == m) {
+                        marks.remove(k);
+                    } else {
+                        marks.push(m.to_string());
+                    }
+                }
+            }
+        }
+        for b in &mut self.bars {
+            b.repeat = false;
+        }
     }
 }
 

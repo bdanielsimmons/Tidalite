@@ -39,7 +39,8 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 - The album-art view background is now a soft gradient from the cover's average colour (no stretched picture).
 - Album viewer controls are pixel icons: previous / play-pause / next, B&W-color, lyrics (microphone), fullscreen, like (Tidal tracks only). Hover for names.
 - The album-art view shows your saved loops and the live A-B loop on its seek bar.
-- **Odd meters**: BEATS goes to 32 and `/ 4`, `/ 8`, `/ 16` sets what a beat is (22 / 8 = twenty-two eighths; BPM stays in quarter notes).
+- **Custom meters**: METER is two boxes, beats (1-32) and what a beat is (1-64): type 11 and 17 for 11/17, or type `11/17` straight into the beats box. 4 / 8 / 16 are one-click shortcuts.
+- **Odd meters**: BEATS goes to 32 and the unit sets what a beat is (22 / 8 = twenty-two eighths; BPM stays in quarter notes).
   GROUPS accents 2s, 3s and 4s (7 = 2+2+3, 22 = 3+3+3+3+3+3+4 ...). Click any beat to set its own volume.
 - Fixed: STOP on the metronome now really stops it (the click loop used to keep playing).
 - **LOOK UP** has a style button next to it (AUTO / JAZZ / GOSPEL / ANY). AUTO treats a tune from the jazz standards list as jazz, searches wider
@@ -201,3 +202,13 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - Only Latin text can be shown in the pixel font; other scripts appear as "?".
 - No Tidal Connect. No Windows taskbar / lock-screen now-playing widget yet (media keys work).
 - Slow-down is very good down to ~50%; below ~40% it starts to sound grainy.
+
+
+## v9.13
+- Chart screen: STYLE and TRANSPOSE are dropdowns; buttons grow instead of shrinking their text.
+- PRACTICE > MORE opens as an overlay, so the panels below never move.
+- Right-click a bar of a saved tune to edit repeats, endings, sections, marks; IMPORT IREAL (links or playlists) at the top of TUNES.
+- Diary: calendar, summary tiles, log practice for any day. Only time spent on an active A-B loop counts.
+- Track lists: right-click the header row to choose ARTIST / ALBUM / LENGTH columns.
+- Hearts on files, YouTube and SoundCloud are saved on this PC (a LIKED block in each section).
+- Redrawn shuffle/repeat icons, left-aligned window title tabs, milder cover tilt (only near the cover).

@@ -22,7 +22,7 @@ use player::{Cmd, Player};
 use sources::Src;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -573,12 +573,39 @@ const IC_MIC: [&str; 9] =
 const IC_BW: [&str; 9] =
     ["...###...", ".###..##.", ".###...#.", "####....#", "####....#", "####....#", ".###...#.", ".###..##.", "...###..."];
 
-const IC_SHUF: [&str; 9] =
-    [".........", ".......#.", "###...###", "...#.#.#.", "....#....", "...#.#.#.", "###...###", ".......#.", "........."];
-const IC_REP: [&str; 9] =
-    [".........", "......#..", ".#######.", ".#....##.", ".#.....#.", ".##....#.", ".#######.", "..#......", "........."];
-const IC_REP1: [&str; 9] =
-    [".........", "......#..", ".#######.", ".#..#.##.", ".#.##..#.", ".##.#..#.", ".#######.", "..#......", "........."];
+const IC_SHUF: [&str; 9] = [
+    "...........",
+    "........#..",
+    "####...####",
+    "....#.#.#..",
+    ".....#.....",
+    "....#.#.#..",
+    "####...####",
+    "........#..",
+    "...........",
+];
+const IC_REP: [&str; 9] = [
+    "...........",
+    ".......#...",
+    ".#########.",
+    ".#.....#.#.",
+    ".#.......#.",
+    ".#.#.....#.",
+    ".#########.",
+    "...#.......",
+    "...........",
+];
+const IC_REP1: [&str; 9] = [
+    "...........",
+    ".......#...",
+    ".#########.",
+    ".#..##.#.#.",
+    ".#...#...#.",
+    ".#.#.#...#.",
+    ".#########.",
+    "...#.......",
+    "...........",
+];
 
 const IC_MOON: [&str; 9] =
     ["...###...", "..##...#.", ".###.....", "###......", "###......", "####.....", ".####....", "..#####..", "...###..."];
@@ -735,7 +762,7 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     notch_fill(p, outer.shrink(u * 3.5), u, pal().groove);
     notch_fill(p, outer.shrink(u * 4.0), u, Color32::BLACK);
     // title tab (with a little pixel icon for the section)
-    let label = format!("-[ {} ]-", title);
+    let label = title.to_string();
     let cy = outer.min.y + 12.0;
     let icon: Option<&[&str]> = match title.split(' ').next().unwrap_or("") {
         "LIBRARY" => Some(&WIN_LIBRARY),
@@ -746,11 +773,11 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
         _ => None,
     };
     let iw = if icon.is_some() { 26.0 } else { 0.0 };
-    let tw = (text_w(&label, 2.0) + 30.0 + iw).min(outer.width() - 120.0).max(60.0);
-    let tab = Rect::from_center_size(Pos2::new(outer.center().x, cy), Vec2::new(tw, 22.0));
-    notch_fill(p, tab.expand(3.0), u, Color32::BLACK);
-    fill_rect(p, Rect::from_min_max(Pos2::new(outer.min.x + 26.0, cy - 1.0), Pos2::new(tab.min.x - 6.0, cy + 1.0)), pal().trim);
-    fill_rect(p, Rect::from_min_max(Pos2::new(tab.max.x + 6.0, cy - 1.0), Pos2::new(outer.max.x - 26.0, cy + 1.0)), pal().trim);
+    let tw = (text_w(&label, 2.0) + 28.0 + iw).min(outer.width() - 80.0).max(60.0);
+    // left-aligned tab with chamfered top corners, sitting on the frame edge
+    let tab = Rect::from_min_size(Pos2::new(outer.min.x + 22.0, cy - 11.0), Vec2::new(tw, 22.0));
+    notch_fill(p, tab.expand(3.0), u * 2.0, Color32::BLACK);
+    notch_fill(p, tab, u * 1.5, pal().edge);
     ptext_fit(p, tab.center() + Vec2::new(iw / 2.0, 0.0), Align::Center, &label, 2.0, tw - 12.0 - iw, pal().trim);
     if let Some(rows) = icon {
         let o = Pos2::new((tab.min.x + 9.0).round(), (cy - rows.len() as f32).round());
@@ -965,11 +992,12 @@ fn check_box(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
 }
 
 fn retro_btn_w(ui: &mut egui::Ui, text: &str, w: f32, active: bool) -> egui::Response {
+    let w = w.max(text_w(text, 2.0) + 16.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
     let down = resp.is_pointer_button_down_on() || active;
     raised_h(ui.painter(), rect, down, resp.hovered());
     let dy = if down { 1.0 } else { 0.0 };
-    ptext_fit(ui.painter(), rect.center() + Vec2::new(0.0, dy), Align::Center, text, 2.0, w - 10.0, pal().ink);
+    ptext(ui.painter(), rect.center() + Vec2::new(0.0, dy), Align::Center, text, 2.0, pal().ink);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1054,9 +1082,25 @@ fn list_row(
         }
         tx = x0 + 44.0;
     }
-    let avail = (rect.max.x - 10.0 - rw - 16.0) - tx;
-    let ltxt = fit(&left(), 2.0, avail.max(20.0));
-    ptext(p, Pos2::new(tx, cy), Align::Min, &ltxt, 2.0, fg);
+    let lraw = left();
+    if lraw.contains('\t') {
+        // cell layout shared with the column header
+        let avail = (rect.max.x - 10.0 - 80.0 - tx).max(40.0);
+        let cw = col_widths(avail);
+        let cells: Vec<&str> = lraw.split('\t').collect();
+        let mut x = tx;
+        for (i, c) in cells.iter().enumerate().take(3) {
+            if cw[i] > 0.0 {
+                let t = fit(c, 2.0, (cw[i] - 12.0).max(20.0));
+                ptext(p, Pos2::new(x, cy), Align::Min, &t, 2.0, if i == 0 { fg } else { fg2 });
+                x += cw[i];
+            }
+        }
+    } else {
+        let avail = (rect.max.x - 10.0 - rw - 16.0) - tx;
+        let ltxt = fit(&lraw, 2.0, avail.max(20.0));
+        ptext(p, Pos2::new(tx, cy), Align::Min, &ltxt, 2.0, fg);
+    }
     Some(resp.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
 
@@ -1069,6 +1113,58 @@ fn menu_item(ui: &mut egui::Ui, text: &str) -> bool {
     }
     ptext(ui.painter(), Pos2::new(rect.min.x + 10.0, rect.center().y), Align::Min, text, 2.0, pal().ink);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// Dropdown button: shows `name: current` with a small arrow; the list opens as an overlay
+/// right under it (no layout change). Returns the index chosen this frame.
+fn dropdown(ui: &mut egui::Ui, id: &str, title: &str, items: &[&str], sel: usize, min_w: f32) -> Option<usize> {
+    let cur = items.get(sel).copied().unwrap_or("");
+    let text = if title.is_empty() { cur.to_string() } else { format!("{}: {}", title, cur) };
+    let w = (text_w(&text, 2.0) + 38.0).max(min_w);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let key = egui::Id::new(("dd", id));
+    let open = ui.ctx().data(|d| d.get_temp::<bool>(key)).unwrap_or(false);
+    let down = resp.is_pointer_button_down_on() || open;
+    raised_h(ui.painter(), rect, down, resp.hovered());
+    let dy = if down { 1.0 } else { 0.0 };
+    ptext(ui.painter(), Pos2::new(rect.min.x + 10.0, rect.center().y + dy), Align::Min, &text, 2.0, pal().ink);
+    pixmap(
+        ui.painter(),
+        Pos2::new(rect.max.x - 20.0, rect.center().y - 3.0 + dy),
+        2.0,
+        &["#######", ".#####.", "..###..", "...#..."],
+        pal().ink,
+    );
+    if resp.clicked() {
+        ui.ctx().data_mut(|d| d.insert_temp(key, !open));
+    }
+    let mut pick = None;
+    if open {
+        let area = egui::Area::new(key.with("area"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(Pos2::new(rect.min.x, rect.max.y + 1.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::none().fill(pal().beige_lt).stroke(egui::Stroke::new(2.0, pal().edge)).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    for (i, it) in items.iter().enumerate() {
+                        let iw = (w - 4.0).max(text_w(it, 2.0) + 28.0);
+                        let (r, rr) = ui.allocate_exact_size(Vec2::new(iw, 24.0), Sense::click());
+                        if i == sel || rr.hovered() {
+                            fill_rect(ui.painter(), r, pal().sel);
+                        }
+                        ptext(ui.painter(), Pos2::new(r.min.x + 10.0, r.center().y), Align::Min, it, 2.0, pal().ink);
+                        if rr.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            pick = Some(i);
+                        }
+                    }
+                });
+            });
+        let outside = ui.ctx().input(|i| i.pointer.any_click()) && !resp.hovered() && !area.response.hovered();
+        if pick.is_some() || outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            ui.ctx().data_mut(|d| d.insert_temp(key, false));
+        }
+    }
+    pick
 }
 
 /// Pixel-font hover hint (egui's own tooltip would use its default font).
@@ -1336,16 +1432,74 @@ fn paint_art_g(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, round:
     }
 }
 
+// ------------------------------------------------------------------ list columns
+/// Which extra columns the track lists show: bit0 artist, bit1 album, bit2 length (name is always shown).
+static COLS: AtomicU32 = AtomicU32::new(0b101);
+const COL_NAMES: [&str; 3] = ["ARTIST", "ALBUM", "LENGTH"];
+
+fn col_on(i: usize) -> bool {
+    COLS.load(Ordering::Relaxed) >> i & 1 == 1
+}
+
+/// Widths of the NAME, ARTIST and ALBUM cells inside `avail` (0 for hidden ones).
+fn col_widths(avail: f32) -> [f32; 3] {
+    let (a, b) = (col_on(0), col_on(1));
+    match (a, b) {
+        (false, false) => [avail, 0.0, 0.0],
+        (true, false) => [avail * 0.58, avail * 0.42, 0.0],
+        (false, true) => [avail * 0.58, 0.0, avail * 0.42],
+        (true, true) => [avail * 0.4, avail * 0.3, avail * 0.3],
+    }
+}
+
+/// Header row over a track list; right-click it to choose the columns.
+fn col_header(ui: &mut egui::Ui, numbered: bool) {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 20.0), Sense::click());
+    fill_rect(ui.painter(), rect, pal().edge);
+    let cy = rect.center().y;
+    let tx = rect.min.x + 8.0 + if numbered { 44.0 } else { 0.0 };
+    let avail = (rect.max.x - 10.0 - 80.0 - tx).max(40.0);
+    let cw = col_widths(avail);
+    let p = ui.painter();
+    ptext(p, Pos2::new(rect.min.x + 8.0, cy), Align::Min, if numbered { "#" } else { "" }, 2.0, pal().trim);
+    ptext(p, Pos2::new(tx, cy), Align::Min, "NAME", 2.0, pal().trim);
+    let mut x = tx + cw[0];
+    for (i, name) in COL_NAMES[..2].iter().enumerate() {
+        if cw[i + 1] > 0.0 {
+            ptext(p, Pos2::new(x, cy), Align::Min, name, 2.0, pal().trim);
+            x += cw[i + 1];
+        }
+    }
+    if col_on(2) {
+        ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, "LENGTH", 2.0, pal().trim);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).tip("Right-click to choose columns").context_menu(|ui| {
+        for (i, name) in COL_NAMES.iter().enumerate() {
+            let mark = if col_on(i) { "[x] " } else { "[ ] " };
+            if menu_item(ui, &format!("{}{}", mark, name)) {
+                COLS.fetch_xor(1 << i, Ordering::Relaxed);
+            }
+        }
+    });
+}
+
+/// One track row's text, split into cells with tabs for `list_row`.
+fn track_cells(title: &str, artist: &str, album: &str) -> String {
+    format!("{}\t{}\t{}", title, artist, album)
+}
+
 // ------------------------------------------------------------------ page view
 fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, liked: &HashSet<i64>, acts: &mut Vec<Action>) {
+    col_header(ui, true);
     for (i, t) in tracks.iter().enumerate() {
         let state = if playing_id == Some(t.id) { RowState::Playing } else { RowState::Normal };
         let r = list_row(
             ui,
             i,
             Some(i + 1),
-            || format!("{} - {}", t.artist, t.title),
-            || fmt_time(t.duration),
+            || track_cells(&t.title, &t.artist, &t.album),
+            || if col_on(2) { fmt_time(t.duration) } else { String::new() },
             state,
             false,
             cache::has(t.id),
@@ -1363,7 +1517,7 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
                     acts.push(Action::Enqueue(t.clone()));
                     ui.close_menu();
                 }
-                if t.id >= 0 {
+                {
                     let lk = if liked.contains(&t.id) { "Remove from My Tracks" } else { "Add to My Tracks" };
                     if menu_item(ui, lk) {
                         acts.push(Action::ToggleLike(t.clone()));
@@ -1695,6 +1849,9 @@ struct App {
     chart_live: bool,
     chart_pick: Option<usize>,
     mtab: u8,
+    /// Diary: month shown (year, month; 0 = this month) and the day picked (days since 1970; 0 = today)
+    diary_ym: (i32, u32),
+    diary_sel: i64,
     mt: band::Metro,
     mt_bpm: u32,
     mt_add: f32,
@@ -1729,6 +1886,8 @@ struct App {
     chart_tried: std::collections::HashSet<String>,
     chart_rn: bool,
     ireal_in: String,
+    tunes_ireal: String,
+    look_q: String,
     chart_cache: (String, chart::Chart),
 }
 
@@ -1934,6 +2093,8 @@ impl App {
             chart_live: false,
             chart_pick: None,
             mtab: 0,
+            diary_ym: (0, 0),
+            diary_sel: 0,
             mt: band::Metro::default(),
             mt_bpm: 100,
             mt_add: 0.0,
@@ -1968,9 +2129,12 @@ impl App {
             chart_tried: Default::default(),
             chart_rn: true,
             ireal_in: String::new(),
+            tunes_ireal: String::new(),
+            look_q: String::new(),
             chart_cache: (String::new(), chart::Chart::default()),
         };
         app.init_store();
+        app.liked.extend(app.store.hearts.iter().map(|e| e.id));
         // ---- restore saved settings
         if let Some(v) = st["volume"].as_f64() {
             app.volume = (v as f32).clamp(0.0, 1.0);
@@ -2014,6 +2178,9 @@ impl App {
         }
         if let Some(f) = st["stack_frac"].as_f64() {
             app.stack_frac = (f as f32).clamp(0.3, 1.0);
+        }
+        if let Some(c) = st["cols"].as_u64() {
+            COLS.store(c as u32, Ordering::Relaxed);
         }
         if let Some(b) = st["pomo_sound"].as_bool() {
             app.pomo_sound = b;
@@ -2072,6 +2239,7 @@ impl App {
             "sc_browser": sources::SC_BROWSER.load(Ordering::Relaxed),
             "stack_frac": self.stack_frac,
             "pomo_sound": self.pomo_sound,
+            "cols": COLS.load(Ordering::Relaxed),
             "loops": self.loops.iter().map(|(k, v)| (k.to_string(), serde_json::json!([v.0, v.1]))).collect::<serde_json::Map<String, serde_json::Value>>(),
         });
         let dir = api::config_dir();
@@ -2760,6 +2928,28 @@ impl App {
             }
             Action::ToggleLike(t) => {
                 if t.id < 0 {
+                    // not on Tidal: keep it in the LIKED list on this computer
+                    if let Some(i) = self.store.hearts.iter().position(|e| e.id == t.id) {
+                        self.store.hearts.remove(i);
+                        self.liked.remove(&t.id);
+                        self.set_note("REMOVED FROM LIKED");
+                    } else {
+                        let found = self
+                            .store
+                            .files
+                            .iter()
+                            .chain(self.store.yt.iter())
+                            .chain(self.store.sc.iter())
+                            .chain(self.sc_results.iter())
+                            .find(|e| e.id == t.id)
+                            .cloned();
+                        if let Some(e) = found {
+                            self.store.hearts.push(e);
+                            self.liked.insert(t.id);
+                            self.set_note("ADDED TO LIKED (ON THIS PC)");
+                        }
+                    }
+                    self.store_dirty = true;
                     return;
                 }
                 let like = !self.liked.contains(&t.id);
@@ -3648,7 +3838,7 @@ impl App {
         let hb = rc(258.0, 72.0, 36.0, 10.0);
         let is_liked = track.as_ref().map(|t| self.liked.contains(&t.id)).unwrap_or(false);
         // files and YouTube clips are not on Tidal, so they have nothing to like
-        let can_like = track.as_ref().map(|t| t.id >= 0).unwrap_or(true);
+        let can_like = true;
         if can_like {
             let hr = ui.interact(hb, ui.id().with("heart"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
             raised_h(p, hb, hr.is_pointer_button_down_on(), hr.hovered());
@@ -3900,13 +4090,13 @@ impl App {
             p.add(egui::Shape::mesh(mesh));
         }
 
-        // ---- tilt follows the mouse (gentle idle sway when it is elsewhere)
+        // ---- mild tilt, only while the mouse is on or right next to the cover
+        let reach = a / 2.0 * 1.35;
         let target = match hover {
-            Some(pp) if full.contains(pp) => Vec2::new(
-                ((pp.x - center.x) / (full.width() * 0.5)).clamp(-1.0, 1.0),
-                ((pp.y - center.y) / (full.height() * 0.5)).clamp(-1.0, 1.0),
-            ),
-            _ => Vec2::new((t * 0.6).sin() * 0.3, (t * 0.45).cos() * 0.25),
+            Some(pp) if (pp.x - center.x).abs() < reach && (pp.y - center.y).abs() < reach => {
+                Vec2::new(((pp.x - center.x) / reach).clamp(-1.0, 1.0), ((pp.y - center.y) / reach).clamp(-1.0, 1.0)) * 0.45
+            }
+            _ => Vec2::ZERO,
         };
         let k = 1.0 - (-dt * 9.0).exp();
         self.art_tilt += (target - self.art_tilt) * k;
@@ -4114,10 +4304,9 @@ impl App {
                     acts.push(Action::ToggleFullscreen);
                 }
                 // files and YouTube clips are not on Tidal, so there is nothing to like
-                if cur_t.as_ref().map_or(false, |t| t.id >= 0)
-                    && icon_btn(ui, &IC_HEART, liked_now, if liked_now { pal().red } else { ink })
-                        .tip(if liked_now { "Remove from My Tracks  (H)" } else { "Add to My Tracks  (H)" })
-                        .clicked()
+                if icon_btn(ui, &IC_HEART, liked_now, if liked_now { pal().red } else { ink })
+                    .tip(if liked_now { "Remove from My Tracks  (H)" } else { "Add to My Tracks  (H)" })
+                    .clicked()
                 {
                     if let Some(t) = &cur_t {
                         acts.push(Action::ToggleLike(t.clone()));
@@ -4264,7 +4453,7 @@ impl App {
                                 }
                                 let lk = if self.liked.contains(&t.id) { "Remove from My Tracks" } else { "Add to My Tracks" };
                                 r.context_menu(|ui| {
-                                    if t.id >= 0 && menu_item(ui, lk) {
+                                    if menu_item(ui, lk) {
                                         acts.push(Action::ToggleLike(t.clone()));
                                         ui.close_menu();
                                     }
@@ -4485,7 +4674,7 @@ impl eframe::App for App {
                     acts.push(Action::ToggleArt);
                 }
                 if kp(egui::Key::H) {
-                    if let Some(t) = self.cur_track().filter(|t| t.id >= 0) {
+                    if let Some(t) = self.cur_track() {
                         acts.push(Action::ToggleLike(t));
                     }
                 }
@@ -4562,13 +4751,7 @@ impl eframe::App for App {
                 };
                 let right_w = screen.width() - lib_w;
                 let inner_w = right_w - 28.0;
-                let practice_h = if !self.practice {
-                    0.0
-                } else if self.more {
-                    348.0
-                } else {
-                    262.0
-                };
+                let practice_h = if !self.practice { 0.0 } else { 262.0 };
                 let stack_max = self.stack_frac * screen.height();
                 let max_inner_h = ((screen.height() - practice_h) * 0.5 - 44.0).max(120.0);
                 let drag_inner_h = (stack_max - practice_h - 44.0).max(110.0);

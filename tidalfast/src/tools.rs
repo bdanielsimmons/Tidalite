@@ -6,7 +6,8 @@ use crate::extras::{Knob, Opt};
 use crate::font::{ptext, ptext_fit, text_w};
 use crate::views::{dim_line, field, label, F_CHART, F_IREAL};
 use crate::{
-    check_box, fill_rect, inset, lcd_box, outline, pal, para, retro_btn, retro_btn_w, title_line, Action, App, Tip, BTN_H,
+    check_box, dropdown, fill_rect, inset, lcd_box, outline, pal, para, retro_btn, retro_btn_w, title_line, Action, App, Tip,
+    BTN_H,
 };
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::time::Instant;
@@ -29,6 +30,9 @@ pub const F_TR_LOOPS: u32 = 43;
 pub const F_TR_STEP: u32 = 44;
 pub const F_CHART_Q: u32 = 45;
 pub const F_BAND_BPM: u32 = 46;
+pub const F_UNIT: u32 = 47;
+pub const F_TUNE_IREAL: u32 = 48;
+pub const F_LOOK: u32 = 49;
 
 impl App {
     /// A box you can type into. Shows `shown`; returns the typed text when you press Enter or click away.
@@ -202,29 +206,48 @@ impl App {
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                label(ui, "BEATS", 60.0);
+                label(ui, "METER", 60.0);
                 let s = self.mt.beats.to_string();
-                self.num_step(ui, acts, F_BEATS, 36.0, Knob::Beats, s, "Beats per bar (1 to 32)");
-                if retro_btn_w(ui, &format!("/ {}", self.mt.unit), 60.0, self.mt.unit != 4)
-                    .tip("What one beat is: quarter, eighth or sixteenth. 22 / 8 = twenty-two eighths. BPM stays in quarter notes.")
-                    .clicked()
-                {
-                    acts.push(Action::Opt(Opt::Unit));
+                self.num_step(
+                    ui,
+                    acts,
+                    F_BEATS,
+                    36.0,
+                    Knob::Beats,
+                    s,
+                    "Beats per bar, 1 to 32. You can also type a whole meter here, like 11/17.",
+                );
+                label(ui, "/", 16.0);
+                let shown = self.mt.unit.to_string();
+                if let Some(txt) = self.entry(ui, F_UNIT, 44.0, &shown) {
+                    acts.push(Action::SetKnob(Knob::Unit, txt));
                 }
-                let gs = band::groupings(self.mt.beats);
-                if gs.len() > 1 {
+                ui.add_space(6.0);
+                for n in [4u8, 8, 16] {
+                    if retro_btn_w(ui, &n.to_string(), 34.0, self.mt.unit == n)
+                        .tip("What one beat is. 4 = quarter notes, 8 = eighths. Or type any number (11 / 17 works).")
+                        .clicked()
+                    {
+                        acts.push(Action::Opt(Opt::UnitSet(n)));
+                    }
+                }
+            });
+            let gs = band::groupings(self.mt.beats);
+            if gs.len() > 1 {
+                ui.horizontal(|ui| {
+                    label(ui, "ACCENT", 60.0);
                     let txt = match self.mt_group {
                         0 => "GROUPS".to_string(),
                         k => gs[k - 1].iter().map(|n| n.to_string()).collect::<Vec<_>>().join("+"),
                     };
-                    if retro_btn_w(ui, &txt, 170.0, self.mt_group > 0)
+                    if retro_btn_w(ui, &txt, 200.0, self.mt_group > 0)
                         .tip("Accent a grouping for odd meters (7 = 2+2+3, 22 = 3+3+3+3+3+3+4 ...). Click to try the next one.")
                         .clicked()
                     {
                         acts.push(Action::Opt(Opt::Group));
                     }
-                }
-            });
+                });
+            }
             ui.horizontal(|ui| {
                 label(ui, "SOUND", 60.0);
                 let sub = ["NO SUBDIV", "EIGHTHS", "TRIPLETS", "SIXTEENTHS"][(self.mt.sub as usize).min(3)];
@@ -486,15 +509,11 @@ impl App {
         let chart = self.chart_for(&text);
         let has = !chart.bars.is_empty();
         ui.horizontal(|ui| {
-            for (lab, semis, tip) in [
-                ("CONCERT", 0, "As written (C instruments)"),
-                ("Bb", 2, "For Bb horns: trumpet, tenor sax"),
-                ("Eb", 9, "For Eb horns: alto and bari sax"),
-                ("F", 7, "For F horn"),
-            ] {
-                if retro_btn(ui, lab, self.chart_tr == semis).tip(tip).clicked() {
-                    self.chart_tr = semis;
-                }
+            let keys = [("CONCERT (C)", 0), ("Bb HORNS", 2), ("Eb HORNS", 9), ("F HORN", 7)];
+            let names: Vec<&str> = keys.iter().map(|k| k.0).collect();
+            let cur = keys.iter().position(|k| k.1 == self.chart_tr).unwrap_or(0);
+            if let Some(i) = dropdown(ui, "chart_tr", "TRANSPOSE", &names, cur, 150.0) {
+                self.chart_tr = keys[i].1;
             }
             if retro_btn(ui, "I-IV-V", self.chart_rn).tip("Roman numerals under the chords, relative to the key").clicked() {
                 acts.push(Action::ToggleNumerals);
@@ -529,11 +548,10 @@ impl App {
                 {
                     acts.push(Action::Opt(Opt::Band));
                 }
-                if retro_btn_w(ui, band::STYLES[self.band_style as usize % band::STYLES.len()], 96.0, false)
-                    .tip("Feel: swing, ballad, bossa, shuffle (gospel), straight")
-                    .clicked()
+                if let Some(i) =
+                    dropdown(ui, "band_style", "STYLE", &band::STYLES, self.band_style as usize % band::STYLES.len(), 120.0)
                 {
-                    acts.push(Action::Opt(Opt::BandStyle));
+                    acts.push(Action::Opt(Opt::BandStyleSet(i as u8)));
                 }
                 label(ui, "BPM", 36.0);
                 let s = self.knob_bpm().to_string();
@@ -582,7 +600,7 @@ impl App {
             ui.horizontal(|ui| {
                 let w = (ui.available_width() - 90.0).max(80.0);
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
-                let o = field(ui, &mut self.ed, F_CHART_Q, &mut self.chart_q, rect, "Other title or words of the lyric", false);
+                let o = field(ui, &mut self.ed, F_CHART_Q, &mut self.chart_q, rect, "Other title or lyrics of the song", false);
                 if (o.enter || retro_btn_w(ui, "FIND", 80.0, false).clicked()) && !self.chart_q.trim().is_empty() {
                     let q = self.chart_q.trim().to_string();
                     acts.push(match ti {
@@ -608,11 +626,12 @@ impl App {
             }
             return;
         }
-        self.chart_grid(ui, &chart, &key);
+        self.chart_grid(ui, &chart, &key, ti);
     }
 
     /// The bars of the chart: repeat signs, endings, coda marks, numerals and the band's position.
-    fn chart_grid(&mut self, ui: &mut egui::Ui, chart: &chart::Chart, key: &str) {
+    fn chart_grid(&mut self, ui: &mut egui::Ui, chart: &chart::Chart, key: &str, ti: Option<usize>) {
+        let mut req: Option<(usize, String)> = None;
         let tr = self.chart_tr;
         let tonic = if self.chart_rn { chart::tonic(key, chart) } else { None };
         // which bar the band is on, and which beat
@@ -659,6 +678,39 @@ impl App {
                     let p = ui.painter();
                     let now = now_bar == Some(idx);
                     inset(p, cell, if now { pal().sel } else { pal().lcd });
+                    if ti.is_some() {
+                        let rsp = ui.interact(cell, ui.id().with(("bar", idx)), Sense::click());
+                        rsp.context_menu(|ui| {
+                            for (lab, op) in [
+                                ("Insert a bar after (copy)", "ins"),
+                                ("Delete this bar", "del"),
+                                ("Repeat starts here  { ", "{"),
+                                ("Repeat ends here  } ", "}"),
+                                ("1st ending", "[1"),
+                                ("2nd ending", "[2"),
+                                ("Section A", "*A"),
+                                ("Section B", "*B"),
+                                ("Section C", "*C"),
+                                ("No section label", "*"),
+                                ("Segno", "@segno"),
+                                ("Coda", "@coda"),
+                                ("To Coda", "@tocoda"),
+                                ("Fine", "@fine"),
+                                ("D.C. al Coda", "@dccoda"),
+                                ("D.S. al Coda", "@dscoda"),
+                                ("D.C. al Fine", "@dcfine"),
+                            ] {
+                                if crate::menu_item(ui, lab) {
+                                    req = Some((idx, op.to_string()));
+                                    ui.close_menu();
+                                }
+                            }
+                            if crate::menu_item(ui, "Edit the chords...") {
+                                req = Some((idx, "text".to_string()));
+                                ui.close_menu();
+                            }
+                        });
+                    }
                     // ending bracket
                     if in_end[idx] {
                         fill_rect(
@@ -760,5 +812,16 @@ impl App {
             }
             ui.add_space(14.0);
         });
+        if let (Some((i, op)), Some(tune)) = (req, ti) {
+            if op == "text" {
+                self.chart_edit = true;
+                self.ed.id = 0;
+            } else {
+                let mut c = chart.clone();
+                c.edit(i, &op);
+                self.store.tunes[tune].chart = c.to_text();
+                self.store_dirty = true;
+            }
+        }
     }
 }

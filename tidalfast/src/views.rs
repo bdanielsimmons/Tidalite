@@ -7,16 +7,27 @@ use crate::font::{ptext, ptext_fit, spx, text_w};
 use crate::sources;
 use crate::stems;
 use crate::store::{self, Ext};
-use crate::tools::{F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP};
+use crate::tools::{F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
-    cache, check_box, chip, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal, para, play_buttons,
-    retro_btn, retro_btn_w, section_header, tab_row, title_line, window_deco, Action, App, Ed, RowState, Sec, Tip, BTN_H,
-    PRACTICE,
+    cache, check_box, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal,
+    para, play_buttons, retro_btn, retro_btn_w, section_header, tab_row, title_line, track_cells, window_deco, Action, App, Ed,
+    RowState, Sec, Tip, BTN_H, PRACTICE,
 };
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::sync::atomic::Ordering;
 
 /// "45 SEC", "12 MIN", "1 H 05 MIN"
+/// 0 = a file, 2 = SoundCloud, 1 = YouTube.
+fn heart_group(e: &Ext) -> u8 {
+    if e.kind == "file" {
+        0
+    } else if e.src.contains("soundcloud.com") {
+        2
+    } else {
+        1
+    }
+}
+
 fn mins_text(secs: u32) -> String {
     match secs {
         0..=59 => format!("{} SEC", secs),
@@ -427,19 +438,41 @@ impl App {
     // ---------------------------------------------------------------- FILES
     /// `which`: 0 files, 1 YouTube clips, 2 kept SoundCloud tracks, 3 SoundCloud search results
     fn ext_list(&self, ui: &mut egui::Ui, acts: &mut Vec<Action>, which: u8) {
-        let yt = which != 0;
+        let yt = which != 0 && which != 4;
+        let hearts: Vec<Ext>;
         let list = match which {
             0 => &self.store.files,
             1 => &self.store.yt,
             2 => &self.store.sc,
+            4..=6 => {
+                hearts = self.store.hearts.iter().filter(|e| heart_group(e) == which - 4).cloned().collect();
+                &hearts
+            }
             _ => &self.sc_results,
         };
         let playing = self.cur_track().map(|t| t.id);
+        col_header(ui, true);
         for (i, e) in list.iter().enumerate() {
             let state = if playing == Some(e.id) { RowState::Playing } else { RowState::Normal };
             let stored = if yt { cache::has(e.id) } else { true };
-            let r =
-                list_row(ui, i, Some(i + 1), || format!("{} - {}", e.artist, e.title), || fmt_time(e.dur), state, false, stored);
+            let r = list_row(
+                ui,
+                i,
+                Some(i + 1),
+                || track_cells(&e.title, &e.artist, ""),
+                || {
+                    if e.dur == 0 && e.cover.is_empty() && (which == 2 || which == 3 || which == 6) {
+                        "(loading info)".to_string()
+                    } else if col_on(2) {
+                        fmt_time(e.dur)
+                    } else {
+                        String::new()
+                    }
+                },
+                state,
+                false,
+                stored,
+            );
             if let Some(r) = r {
                 if r.clicked() {
                     let tracks: Vec<Track> = list.iter().map(|x: &Ext| x.to_track()).collect();
@@ -458,7 +491,12 @@ impl App {
                         acts.push(Action::PickTune(e.to_track()));
                         ui.close_menu();
                     }
-                    if which == 3 {
+                    if which >= 4 {
+                        if menu_item(ui, "Remove from LIKED") {
+                            acts.push(Action::ToggleLike(e.to_track()));
+                            ui.close_menu();
+                        }
+                    } else if which == 3 {
                         if menu_item(ui, "Keep in my SoundCloud list") {
                             acts.push(Action::ScKeep(e.id));
                             ui.close_menu();
@@ -470,6 +508,20 @@ impl App {
                 });
             }
         }
+    }
+
+    /// The hearts you gave to this kind of source (0 files, 1 YouTube, 2 SoundCloud); stored on this PC only.
+    fn liked_block(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, group: u8) {
+        let n = self.store.hearts.iter().filter(|e| heart_group(e) == group).count();
+        if n == 0 {
+            return;
+        }
+        section_header(ui, "LIKED (ON THIS PC)");
+        let tracks: Vec<Track> = self.store.hearts.iter().filter(|e| heart_group(e) == group).map(|e| e.to_track()).collect();
+        ui.add_space(4.0);
+        play_buttons(ui, &tracks, acts);
+        ui.add_space(4.0);
+        self.ext_list(ui, acts, 4 + group);
     }
 
     pub(crate) fn files_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
@@ -513,6 +565,7 @@ impl App {
             ui.add_space(4.0);
             self.ext_list(ui, acts, 0);
         }
+        self.liked_block(ui, acts, 0);
         ui.add_space(20.0);
     }
 
@@ -567,6 +620,7 @@ impl App {
             ui.add_space(4.0);
             self.ext_list(ui, acts, 1);
         }
+        self.liked_block(ui, acts, 1);
         ui.add_space(20.0);
     }
 
@@ -631,6 +685,7 @@ impl App {
             ui.add_space(4.0);
             self.ext_list(ui, acts, 2);
         }
+        self.liked_block(ui, acts, 2);
         ui.add_space(20.0);
     }
 
@@ -665,6 +720,26 @@ impl App {
             let o = field(ui, &mut self.ed, F_NEW_TUNE, &mut self.new_tune, rect, "New tune name...", false);
             if o.enter || retro_btn_w(ui, "ADD", 70.0, false).clicked() {
                 acts.push(Action::NewTune);
+            }
+        });
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 138.0).max(80.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let _ = field(
+                ui,
+                &mut self.ed,
+                F_TUNE_IREAL,
+                &mut self.tunes_ireal,
+                rect,
+                "iReal Pro link or playlist: irealb://...",
+                false,
+            );
+            if retro_btn_w(ui, "IMPORT IREAL", 130.0, false)
+                .tip("Paste an iReal Pro link or a whole playlist - every song becomes a tune with its chart")
+                .clicked()
+            {
+                self.ireal_in = std::mem::take(&mut self.tunes_ireal);
+                acts.push(Action::ImportIreal(None));
             }
         });
         ui.add_space(4.0);
@@ -775,6 +850,24 @@ impl App {
             {
                 acts.push(Action::LookStyle);
             }
+        });
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 4.0).max(120.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let o = field(
+                ui,
+                &mut self.ed,
+                F_LOOK,
+                &mut self.look_q,
+                rect,
+                "LOOK UP something else: a title, or title + artist (empty = this tune)",
+                false,
+            );
+            if o.enter {
+                acts.push(Action::LookUp(i));
+            }
+        });
+        ui.horizontal(|ui| {
             if retro_btn(ui, "PLAY-ALONG", false)
                 .tip("Search YouTube for backing tracks of this tune (opens your browser)")
                 .clicked()
@@ -929,92 +1022,169 @@ impl App {
         ui.add_space(6.0);
         title_line(ui, "PRACTICE DIARY", 3.0, pal().ink);
         let today = store::today_days();
-        let date = store::date_str(today);
-        let secs = self.store.secs_on(&date) + self.acc as u32;
+        if self.diary_sel == 0 {
+            self.diary_sel = today;
+        }
+        if self.diary_ym.0 == 0 {
+            let (y, m, _) = store::civil_from_days(self.diary_sel);
+            self.diary_ym = (y, m);
+        }
+        let live = self.acc as u32;
+        let day_secs = |app: &App, d: i64| app.store.secs_on(&store::date_str(d)) + if d == today { live } else { 0 };
+
+        // ---- summary
+        let week: u32 = (0..7).map(|k| day_secs(self, today - k)).sum();
+        let (cy, cm, _) = store::civil_from_days(today);
+        let month_prefix = format!("{:04}-{:02}", cy, cm);
+        let month: u32 = self
+            .store
+            .days
+            .iter()
+            .filter(|d| d.date.starts_with(&month_prefix))
+            .map(|d| d.secs.values().sum::<u32>())
+            .sum::<u32>()
+            + live;
+        let total: u32 = self.store.days.iter().map(|d| d.secs.values().sum::<u32>()).sum::<u32>() + live;
         let streak = self.store.streak(today);
-        title_line(ui, &date, 2.0, pal().ink2);
+        let tiles = [
+            ("TODAY", mins_text(day_secs(self, today))),
+            ("7 DAYS", mins_text(week)),
+            ("THIS MONTH", mins_text(month)),
+            ("STREAK", format!("{} DAY{}", streak, if streak == 1 { "" } else { "S" })),
+            ("ALL TIME", mins_text(total)),
+        ];
+        let w = ui.available_width();
+        let tw = ((w - 4.0 * 6.0) / 5.0).floor().max(60.0);
+        let (sr, _) = ui.allocate_exact_size(Vec2::new(w, 46.0), Sense::hover());
+        for (k, (name, val)) in tiles.iter().enumerate() {
+            let r = Rect::from_min_size(Pos2::new(sr.min.x + k as f32 * (tw + 6.0), sr.min.y), Vec2::new(tw, 46.0));
+            inset(ui.painter(), r, pal().lcd);
+            ptext(ui.painter(), Pos2::new(r.center().x, r.min.y + 13.0), Align::Center, name, 1.0, pal().dim);
+            ptext_fit(ui.painter(), Pos2::new(r.center().x, r.min.y + 31.0), Align::Center, val, 2.0, tw - 8.0, pal().ink);
+        }
+
+        // ---- calendar
+        ui.add_space(8.0);
+        let (y, m) = self.diary_ym;
+        const MONTHS: [&str; 12] = [
+            "JANUARY",
+            "FEBRUARY",
+            "MARCH",
+            "APRIL",
+            "MAY",
+            "JUNE",
+            "JULY",
+            "AUGUST",
+            "SEPTEMBER",
+            "OCTOBER",
+            "NOVEMBER",
+            "DECEMBER",
+        ];
+        ui.horizontal(|ui| {
+            if retro_btn_w(ui, "<", 34.0, false).tip("Previous month").clicked() {
+                self.diary_ym = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
+            }
+            let (r, _) = ui.allocate_exact_size(Vec2::new(190.0, BTN_H), Sense::hover());
+            ptext(ui.painter(), r.center(), Align::Center, &format!("{} {}", MONTHS[(m as usize - 1) % 12], y), 2.0, pal().ink);
+            if retro_btn_w(ui, ">", 34.0, false).tip("Next month").clicked() {
+                self.diary_ym = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            }
+            if retro_btn(ui, "TODAY", false).tip("Jump to today").clicked() {
+                self.diary_sel = today;
+                self.diary_ym = (cy, cm);
+            }
+        });
         ui.add_space(4.0);
-
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::hover());
-        inset(ui.painter(), rect, pal().lcd);
-        ptext(ui.painter(), rect.center(), Align::Center, &format!("TODAY  {}", mins_text(secs)), 2.0, pal().ink);
-
-        // the week
-        ui.add_space(6.0);
-        let week = self.store.week(today);
-        let (wr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::hover());
-        for (k, did) in week.iter().enumerate() {
-            let x = wr.min.x + 8.0 + k as f32 * 38.0;
-            let cell = Rect::from_min_size(Pos2::new(x, wr.min.y), Vec2::new(30.0, 22.0));
-            inset(ui.painter(), cell, if *did { pal().ink2 } else { pal().lcd });
-            ptext(
-                ui.painter(),
-                Pos2::new(cell.center().x, cell.max.y + 9.0),
-                Align::Center,
-                store::weekday(today - 6 + k as i64),
-                1.0,
-                if k == 6 { pal().ink } else { pal().dim },
+        let first = store::days_from_civil(y, m, 1);
+        let next = if m == 12 { store::days_from_civil(y + 1, 1, 1) } else { store::days_from_civil(y, m + 1, 1) };
+        let ndays = next - first;
+        let lead = (first + 4).rem_euclid(7);
+        let gw = ui.available_width().min(7.0 * 64.0);
+        let cw = (gw / 7.0).floor();
+        let rows = (lead + ndays + 6) / 7;
+        let (gr, _) = ui.allocate_exact_size(Vec2::new(cw * 7.0, 16.0 + rows as f32 * 32.0), Sense::hover());
+        for (k, n) in ["S", "M", "T", "W", "T", "F", "S"].iter().enumerate() {
+            ptext(ui.painter(), Pos2::new(gr.min.x + k as f32 * cw + cw / 2.0, gr.min.y + 7.0), Align::Center, n, 1.0, pal().dim);
+        }
+        let busiest = (0..ndays).map(|k| day_secs(self, first + k)).max().unwrap_or(0).max(1);
+        for k in 0..ndays {
+            let d = first + k;
+            let pos = lead + k;
+            let r = Rect::from_min_size(
+                Pos2::new(gr.min.x + (pos % 7) as f32 * cw + 2.0, gr.min.y + 16.0 + (pos / 7) as f32 * 32.0 + 2.0),
+                Vec2::new(cw - 4.0, 28.0),
             );
-        }
-        let streak_txt = if streak == 0 {
-            "A NEW STREAK STARTS WITH TODAY".to_string()
-        } else {
-            format!("{} DAY{} IN A ROW", streak, if streak == 1 { "" } else { "S" })
-        };
-        ptext(
-            ui.painter(),
-            Pos2::new(wr.min.x + 8.0 + 7.0 * 38.0 + 6.0, wr.min.y + 11.0),
-            Align::Min,
-            &streak_txt,
-            1.0,
-            pal().ink2,
-        );
-
-        // where the time went: today, then the last 30 days
-        let since = store::date_str(today - 29);
-        let (mut loops, mut pomos) = (0, 0);
-        let (mut day, mut month): (Vec<(String, u32)>, std::collections::BTreeMap<&str, u32>) = (Vec::new(), Default::default());
-        for d in self.store.days.iter().filter(|d| d.date >= since) {
-            for (k, v) in &d.secs {
-                *month.entry(k.as_str()).or_default() += v;
+            let secs = day_secs(self, d);
+            let resp =
+                ui.interact(r, ui.id().with(("diaryday", d)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let level = if secs == 0 { 0 } else { 1 + (secs * 3 / busiest).min(2) };
+            let face = match level {
+                0 => pal().lcd,
+                1 => pal().row_alt,
+                2 => pal().ink2,
+                _ => pal().ink,
+            };
+            inset(ui.painter(), r, face);
+            if d == self.diary_sel {
+                outline(ui.painter(), r, 2.0, pal().red);
+            } else if d == today {
+                outline(ui.painter(), r, 1.0, pal().ink);
             }
-            if d.date == date {
-                (loops, pomos) = (d.loops, d.pomos);
-                day = d.secs.iter().map(|(k, v)| (k.clone(), *v)).collect();
-            }
-        }
-        let mut month: Vec<(String, u32)> = month.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-        for (title, rows) in [("TODAY", &mut day), ("LAST 30 DAYS", &mut month)] {
-            if rows.is_empty() {
-                continue;
-            }
-            rows.sort_by(|a, b| b.1.cmp(&a.1));
-            let total: u32 = rows.iter().map(|r| r.1).sum();
-            section_header(ui, &format!("{}  -  {}", title, mins_text(total)));
-            for (k, (name, s)) in rows.iter().take(12).enumerate() {
-                let _ = list_row(
-                    ui,
-                    k,
-                    None,
-                    || name.clone(),
-                    || format!("{}  {}%", mins_text(*s), s * 100 / total.max(1)),
-                    RowState::Normal,
-                    false,
-                    false,
+            let txt_col = if level >= 2 { pal().lcd } else { pal().ink };
+            ptext(ui.painter(), Pos2::new(r.min.x + 5.0, r.min.y + 8.0), Align::Min, &format!("{}", k + 1), 1.0, txt_col);
+            if secs >= 60 {
+                ptext(
+                    ui.painter(),
+                    Pos2::new(r.max.x - 4.0, r.max.y - 7.0),
+                    Align::Max,
+                    &format!("{}m", secs / 60),
+                    1.0,
+                    txt_col,
                 );
             }
-        }
-        if loops + pomos > 0 {
-            dim_line(ui, &format!("LOOPS TODAY {}   FOCUS BLOCKS {}", loops, pomos), 2.0, pal().ink2);
+            if resp.clicked() {
+                self.diary_sel = d;
+            }
         }
 
-        // log form
-        section_header(ui, "JOURNAL");
+        // ---- the picked day
+        let sel = self.diary_sel;
+        let date = store::date_str(sel);
+        ui.add_space(6.0);
+        section_header(ui, &format!("{} {}  -  {}", store::weekday(sel), date, mins_text(day_secs(self, sel))));
+        let (mut rows_d, mut loops, mut pomos) = (Vec::new(), 0, 0);
+        if let Some(d) = self.store.days.iter().find(|d| d.date == date) {
+            rows_d = d.secs.iter().map(|(k, v)| (k.clone(), *v)).collect::<Vec<_>>();
+            (loops, pomos) = (d.loops, d.pomos);
+        }
+        rows_d.sort_by(|a, b| b.1.cmp(&a.1));
+        let tot: u32 = rows_d.iter().map(|r| r.1).sum();
+        if rows_d.is_empty() {
+            dim_line(ui, "NO PRACTICE TIME TRACKED THIS DAY", 2.0, pal().ink2);
+        }
+        for (k, (name, s)) in rows_d.iter().take(12).enumerate() {
+            let _ = list_row(
+                ui,
+                k,
+                None,
+                || name.clone(),
+                || format!("{}  {}%", mins_text(*s), s * 100 / tot.max(1)),
+                RowState::Normal,
+                false,
+                false,
+            );
+        }
+        if loops + pomos > 0 {
+            dim_line(ui, &format!("LOOPS {}   FOCUS BLOCKS {}", loops, pomos), 2.0, pal().ink2);
+        }
+
+        // ---- journal for that day
+        ui.add_space(4.0);
         if self.show_form {
             let hint_t = self.practice_label();
-            let o = field_row(ui, &mut self.ed, F_TUNE, "TUNE", &mut self.f_tune, &hint_t, None);
-            let _ = o;
-            let _ = field_row(ui, &mut self.ed, F_MINS, "MINUTES", &mut self.f_mins, &format!("{}", secs / 60), None);
+            let _ = field_row(ui, &mut self.ed, F_TUNE, "TUNE", &mut self.f_tune, &hint_t, None);
+            let _ =
+                field_row(ui, &mut self.ed, F_MINS, "MINUTES", &mut self.f_mins, &format!("{}", day_secs(self, sel) / 60), None);
             let _ = field_row(ui, &mut self.ed, F_BPM, "BPM", &mut self.f_bpm, "tempo you reached", None);
             let _ = field_row(ui, &mut self.ed, F_NOTE, "NOTE", &mut self.f_note, "What went well? What next?", Some(70.0));
             ui.horizontal(|ui| {
@@ -1026,17 +1196,18 @@ impl App {
                     self.ed.id = 0;
                 }
             });
-        } else if retro_btn(ui, "LOG PRACTICE", false).tip("Write a note about this session").clicked() {
+        } else if retro_btn(ui, &format!("LOG PRACTICE FOR {}", date), false)
+            .tip("Write down what you worked on - works for past days too")
+            .clicked()
+        {
             self.show_form = true;
         }
         ui.add_space(6.0);
-        if self.store.entries.is_empty() {
-            para(ui, "Your practice time adds up by itself while you play in PRACTICE mode. Use LOG PRACTICE to write down what you worked on and the tempo you reached.", pal().ink2);
-        }
-        for e in self.store.entries.iter().rev().take(40) {
+        let mut any = false;
+        for e in self.store.entries.iter().rev().filter(|e| e.date == date) {
+            any = true;
             let head = format!(
-                "{}  {}{}{}",
-                e.date,
+                "{}{}{}",
                 e.tune,
                 if e.mins > 0 { format!("  {}m", e.mins) } else { String::new() },
                 if e.bpm > 0 { format!("  {} bpm", e.bpm) } else { String::new() }
@@ -1045,6 +1216,9 @@ impl App {
             if !e.note.is_empty() {
                 para(ui, &e.note, pal().ink2);
             }
+        }
+        if !any && self.store.entries.is_empty() {
+            para(ui, "Practice time adds up by itself while you work on a loop in PRACTICE mode. Pick any day above and use LOG PRACTICE to write down what you worked on and the tempo you reached.", pal().ink2);
         }
         ui.add_space(20.0);
     }
@@ -1339,92 +1513,116 @@ impl App {
 
         // ---- MORE: grouped in tabs
         if self.more {
-            if let Some(t) = tab_row(ui, &["TRAINER", "PITCH & EAR", "STEMS"], self.mtab as usize) {
-                self.mtab = t as u8;
-            }
-            ui.add_space(2.0);
-            match self.mtab {
-                0 => {
-                    ui.horizontal(|ui| {
-                        label(ui, "TRAIN", 56.0);
-                        if retro_btn_w(ui, if self.trainer { "ON" } else { "OFF" }, 56.0, self.trainer)
-                            .tip("Practice the loop a set number of times, then speed up by a set percent")
-                            .clicked()
-                        {
-                            acts.push(Action::Trainer);
-                        }
-                        if self.trainer {
-                            lcd_box(ui, &format!("PASS {}/{}", self.passes, self.trainer_n), 100.0, pal().ink);
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        label(ui, "EVERY", 60.0);
-                        self.num_step(
-                            ui,
-                            acts,
-                            F_TR_LOOPS,
-                            44.0,
-                            Knob::Loops,
-                            self.trainer_n.to_string(),
-                            "Loops to play before each speed-up - or type it",
-                        );
-                        label(ui, "LOOPS", 56.0);
-                        self.num_step(
-                            ui,
-                            acts,
-                            F_TR_STEP,
-                            52.0,
-                            Knob::Step,
-                            format!("+{}%", self.trainer_step),
-                            "How much faster each step - or type it",
-                        );
-                    });
-                    dim_line(ui, "STARTS AT THE SPEED SET ABOVE AND STOPS AT 100%", 1.0, pal().dim);
-                    ui.horizontal(|ui| {
-                        let ci = if self.count_in == 0 { "COUNT OFF".to_string() } else { format!("COUNT {}", self.count_in) };
-                        if retro_btn_w(ui, &ci, 100.0, self.count_in > 0).tip("Clicks before every loop pass").clicked() {
-                            acts.push(Action::CountIn);
-                        }
-                        if retro_btn_w(ui, "FOCUS", 76.0, self.focus_mode)
-                            .tip("Hide the lists - just the player and these tools")
-                            .clicked()
-                        {
-                            acts.push(Action::ToggleFocus);
-                        }
-                        if retro_btn_w(ui, "METRONOME", 116.0, self.metro_open).tip("Open the metronome").clicked() {
-                            acts.push(Action::MetroPanel);
-                        }
-                    });
-                }
-                1 => {
-                    ui.horizontal(|ui| {
-                        label(ui, "PITCH", 56.0);
-                        if retro_btn_w(ui, "-", 28.0, false).tip("Lower the pitch a semitone (speed stays)").clicked() {
-                            acts.push(Action::Transpose(-1));
-                        }
-                        lcd_box(ui, &format!("{:+}", self.semis), 52.0, pal().ink);
-                        if retro_btn_w(ui, "+", 28.0, false).clicked() {
-                            acts.push(Action::Transpose(1));
-                        }
-                        ui.add_space(8.0);
-                        if retro_btn_w(ui, CHAN_NAMES[self.chan as usize % 6], 100.0, self.chan != 0)
-                            .tip("Ear mode: left / right only, mono, take out the middle, or just the bass")
-                            .clicked()
-                        {
-                            acts.push(Action::Chan);
-                        }
-                        if retro_btn_w(ui, if self.exporting { "SAVING..." } else { "EXPORT WAV" }, 100.0, false)
-                            .tip("Save the A-B loop as a WAV file in Music/Tidalite loops")
-                            .clicked()
-                        {
-                            acts.push(Action::Export);
-                        }
-                    });
-                }
-                _ => {
-                    ui.horizontal(|ui| {
-                        label(ui, "STEMS", 56.0);
-                        if self.stem_busy == 1 {
+            let more_pos = ui.cursor().min;
+            let more_w = ui.available_width();
+            egui::Area::new(egui::Id::new("more_overlay")).order(egui::Order::Foreground).fixed_pos(more_pos).show(
+                ui.ctx(),
+                |ui| {
+                    egui::Frame::none()
+                        .fill(pal().beige)
+                        .stroke(egui::Stroke::new(2.0, pal().edge))
+                        .inner_margin(egui::Margin::same(6.0))
+                        .show(ui, |ui| {
+                            ui.set_width((more_w - 16.0).max(200.0));
+                            if let Some(t) = tab_row(ui, &["TRAINER", "PITCH & EAR", "STEMS"], self.mtab as usize) {
+                                self.mtab = t as u8;
+                            }
+                            ui.add_space(2.0);
+                            match self.mtab {
+                                0 => {
+                                    ui.horizontal(|ui| {
+                                        label(ui, "TRAIN", 56.0);
+                                        if retro_btn_w(ui, if self.trainer { "ON" } else { "OFF" }, 56.0, self.trainer)
+                                            .tip("Practice the loop a set number of times, then speed up by a set percent")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::Trainer);
+                                        }
+                                        if self.trainer {
+                                            lcd_box(ui, &format!("PASS {}/{}", self.passes, self.trainer_n), 100.0, pal().ink);
+                                        }
+                                    });
+                                    ui.horizontal(|ui| {
+                                        label(ui, "EVERY", 60.0);
+                                        self.num_step(
+                                            ui,
+                                            acts,
+                                            F_TR_LOOPS,
+                                            44.0,
+                                            Knob::Loops,
+                                            self.trainer_n.to_string(),
+                                            "Loops to play before each speed-up - or type it",
+                                        );
+                                        label(ui, "LOOPS", 56.0);
+                                        self.num_step(
+                                            ui,
+                                            acts,
+                                            F_TR_STEP,
+                                            52.0,
+                                            Knob::Step,
+                                            format!("+{}%", self.trainer_step),
+                                            "How much faster each step - or type it",
+                                        );
+                                    });
+                                    dim_line(ui, "STARTS AT THE SPEED SET ABOVE AND STOPS AT 100%", 1.0, pal().dim);
+                                    ui.horizontal(|ui| {
+                                        let ci = if self.count_in == 0 {
+                                            "COUNT OFF".to_string()
+                                        } else {
+                                            format!("COUNT {}", self.count_in)
+                                        };
+                                        if retro_btn_w(ui, &ci, 100.0, self.count_in > 0)
+                                            .tip("Clicks before every loop pass")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::CountIn);
+                                        }
+                                        if retro_btn_w(ui, "FOCUS", 76.0, self.focus_mode)
+                                            .tip("Hide the lists - just the player and these tools")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::ToggleFocus);
+                                        }
+                                        if retro_btn_w(ui, "METRONOME", 116.0, self.metro_open)
+                                            .tip("Open the metronome")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::MetroPanel);
+                                        }
+                                    });
+                                }
+                                1 => {
+                                    ui.horizontal(|ui| {
+                                        label(ui, "PITCH", 56.0);
+                                        if retro_btn_w(ui, "-", 28.0, false)
+                                            .tip("Lower the pitch a semitone (speed stays)")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::Transpose(-1));
+                                        }
+                                        lcd_box(ui, &format!("{:+}", self.semis), 52.0, pal().ink);
+                                        if retro_btn_w(ui, "+", 28.0, false).clicked() {
+                                            acts.push(Action::Transpose(1));
+                                        }
+                                        ui.add_space(8.0);
+                                        if retro_btn_w(ui, CHAN_NAMES[self.chan as usize % 6], 100.0, self.chan != 0)
+                                            .tip("Ear mode. LEFT / RIGHT CHANNEL plays just that side in both ears (old jazz records often hide the bass or piano on one side; modern mixes barely differ). NO CENTER removes vocals; BASS ONLY keeps the low end.")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::Chan);
+                                        }
+                                        if retro_btn_w(ui, if self.exporting { "SAVING..." } else { "EXPORT WAV" }, 100.0, false)
+                                            .tip("Save the A-B loop as a WAV file in Music/Tidalite loops")
+                                            .clicked()
+                                        {
+                                            acts.push(Action::Export);
+                                        }
+                                    });
+                                }
+                                _ => {
+                                    ui.horizontal(|ui| {
+                                        label(ui, "STEMS", 56.0);
+                                        if self.stem_busy == 1 {
                     lcd_box(ui, &stems::stage_text(), 300.0, pal().ink2);
                 } else if self.stem_busy == 2 {
                     let (d, t) = (stems::DONE.load(Ordering::Relaxed), stems::TOTAL.load(Ordering::Relaxed));
@@ -1462,9 +1660,12 @@ impl App {
                 {
                     acts.push(Action::StemSplit);
                 }
-                    });
-                }
-            }
+                                    });
+                                }
+                            }
+                        });
+                },
+            );
         }
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 14.0), Sense::hover());
         ptext_fit(
