@@ -551,6 +551,39 @@ fn pixmap(p: &egui::Painter, origin: Pos2, px: f32, rows: &[&str], color: Color3
     }
 }
 
+// ---- pixel icons (9 wide) for the album viewer
+const IC_PREV: [&str; 9] =
+    [".#.....#.", ".#....##.", ".#...###.", ".#..####.", ".#.#####.", ".#..####.", ".#...###.", ".#....##.", ".#.....#."];
+const IC_NEXT: [&str; 9] =
+    [".#.....#.", ".##....#.", ".###...#.", ".####..#.", ".#####.#.", ".####..#.", ".###...#.", ".##....#.", ".#.....#."];
+const IC_PLAY: [&str; 9] =
+    [".#.......", ".###.....", ".#####...", ".######..", ".########", ".######..", ".#####...", ".###.....", ".#......."];
+const IC_PAUSE: [&str; 9] =
+    [".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###.", ".###.###."];
+const IC_HEART: [&str; 8] =
+    [".##...##.", "#########", "#########", "#########", ".#######.", "..#####..", "...###...", "....#...."];
+const IC_FULL: [&str; 9] =
+    ["###...###", "#.......#", "#.......#", ".........", ".........", ".........", "#.......#", "#.......#", "###...###"];
+const IC_WIN: [&str; 9] =
+    [".........", ".##...##.", ".#.....#.", ".........", ".........", ".........", ".#.....#.", ".##...##.", "........."];
+const IC_MIC: [&str; 9] =
+    ["...###...", "...###...", "...###...", "#..###..#", "#..###..#", ".#.###.#.", "..#####..", "....#....", "...###..."];
+const IC_BW: [&str; 9] =
+    ["...###...", ".###..##.", ".###...#.", "####....#", "####....#", "####....#", ".###...#.", ".###..##.", "...###..."];
+
+/// A button showing a pixel icon. `col` tints it; `on` draws it pressed.
+fn icon_btn(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(44.0, BTN_H), Sense::click());
+    let down = resp.is_pointer_button_down_on() || on;
+    raised_h(ui.painter(), rect, down, resp.hovered());
+    let px = 2.0;
+    let (w, h) = (icon[0].len() as f32 * px, icon.len() as f32 * px);
+    let dy = if down { 1.0 } else { 0.0 };
+    let o = Pos2::new((rect.center().x - w / 2.0).round(), (rect.center().y - h / 2.0 + dy).round());
+    pixmap(ui.painter(), o, px, icon, col);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 // ------------------------------------------------------------ skin drawing
 /// Filled rectangle, snapped to whole physical pixels (crisp edges, never thinner than 1 px).
 fn fill_rect(p: &egui::Painter, r: Rect, c: Color32) {
@@ -1123,6 +1156,8 @@ struct Images {
     map: HashMap<String, Option<egui::TextureHandle>>,
     requested: HashSet<String>,
     req: Sender<String>,
+    /// average colour of the top and bottom half of each cover, for the art-view gradient
+    avg: HashMap<String, [Color32; 2]>,
 }
 
 impl Images {
@@ -1642,7 +1677,7 @@ impl App {
             tx,
             rx,
             ctx,
-            images: Images { map: HashMap::new(), requested: HashSet::new(), req },
+            images: Images { map: HashMap::new(), requested: HashSet::new(), req, avg: HashMap::new() },
             _font_tex: font_tex,
             auth: Auth::LoggedOut,
             login_code: None,
@@ -2202,6 +2237,17 @@ impl App {
                     }
                 }
                 Msg::Img(url, img) => {
+                    if let Some(ci) = &img {
+                        let half = ci.pixels.len() / 2;
+                        let mean = |px: &[Color32]| -> Color32 {
+                            let n = px.len().max(1) as u32;
+                            let s =
+                                px.iter().fold([0u32; 3], |a, c| [a[0] + c.r() as u32, a[1] + c.g() as u32, a[2] + c.b() as u32]);
+                            Color32::from_rgb((s[0] / n) as u8, (s[1] / n) as u8, (s[2] / n) as u8)
+                        };
+                        let (top, bot) = ci.pixels.split_at(half);
+                        self.images.avg.insert(url.clone(), [mean(top), mean(bot)]);
+                    }
                     let tex = img.map(|ci| ctx.load_texture(&url, ci, egui::TextureOptions::LINEAR));
                     self.images.map.insert(url, tex);
                 }
@@ -3676,18 +3722,30 @@ impl App {
         let a = (art_zone.width().min(art_zone.height() - caption_h) * 0.82).max(120.0);
         let center = Pos2::new(art_zone.center().x, art_zone.min.y + (art_zone.height() - caption_h) / 2.0);
 
-        // ---- ambient glow: the cover, huge and faint, behind everything
+        // ---- background: the cover's average colour as a soft gradient (never a stretched picture)
         let url = track.as_ref().map(|t| cover_url(&t.cover, 640)).unwrap_or_default();
         let tex = art_tex(&mut self.images, &url, self.art_gray);
-        if let Some(id) = tex {
-            let side = full.width().max(full.height()) * 1.15;
-            let g = Rect::from_center_size(full.center(), Vec2::splat(side));
-            p.with_clip_rect(full).image(
-                id,
-                g,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::from_white_alpha(34),
-            );
+        let avg = self
+            .images
+            .avg
+            .get(&format!("gray:{}", url))
+            .filter(|_| self.art_gray)
+            .or_else(|| self.images.avg.get(&url))
+            .copied();
+        if let Some([top, bot]) = avg {
+            let shade = |c: Color32, k: f32| {
+                Color32::from_rgb((c.r() as f32 * k) as u8, (c.g() as f32 * k) as u8, (c.b() as f32 * k) as u8)
+            };
+            let (ct, cb) = (shade(top, 0.62), shade(bot, 0.2));
+            let mut mesh = egui::Mesh::default();
+            let uv = egui::epaint::WHITE_UV;
+            for (pos, color) in
+                [(full.left_top(), ct), (full.right_top(), ct), (full.right_bottom(), cb), (full.left_bottom(), cb)]
+            {
+                mesh.vertices.push(egui::epaint::Vertex { pos, uv, color });
+            }
+            mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+            p.add(egui::Shape::mesh(mesh));
         }
 
         // ---- tilt follows the mouse (gentle idle sway when it is elsewhere)
@@ -3859,28 +3917,40 @@ impl App {
         let playing = active && !self.paused;
         ui.allocate_ui_at_rect(row, |ui| {
             ui.horizontal(|ui| {
-                if retro_btn(ui, "PREV", false).clicked() {
+                let ink = pal().ink;
+                if icon_btn(ui, &IC_PREV, false, ink).tip("Previous").clicked() {
                     acts.push(Action::Prev);
                 }
-                if retro_btn(ui, if playing { "PAUSE" } else { "PLAY" }, false).clicked() {
+                if icon_btn(ui, if playing { &IC_PAUSE } else { &IC_PLAY }, false, ink)
+                    .tip(if playing { "Pause  (Space)" } else { "Play  (Space)" })
+                    .clicked()
+                {
                     acts.push(Action::Toggle);
                 }
-                if retro_btn(ui, "NEXT", false).clicked() {
+                if icon_btn(ui, &IC_NEXT, false, ink).tip("Next").clicked() {
                     acts.push(Action::Next);
                 }
                 ui.add_space(14.0);
-                if retro_btn(ui, if gray { "B&W" } else { "COLOR" }, gray).clicked() {
+                if icon_btn(ui, &IC_BW, gray, ink)
+                    .tip(if gray { "Back to color art  (G)" } else { "Black and white art  (G)" })
+                    .clicked()
+                {
                     acts.push(Action::ToggleGray);
                 }
-                if retro_btn(ui, "LYRICS", lyr).clicked() {
+                if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
                     acts.push(Action::ToggleLyrics);
                 }
-                if retro_btn(ui, if fs { "WINDOWED" } else { "FULLSCREEN" }, false).clicked() {
+                if icon_btn(ui, if fs { &IC_WIN } else { &IC_FULL }, false, ink)
+                    .tip(if fs { "Leave fullscreen  (F)" } else { "Fullscreen  (F)" })
+                    .clicked()
+                {
                     acts.push(Action::ToggleFullscreen);
                 }
                 // files and YouTube clips are not on Tidal, so there is nothing to like
                 if cur_t.as_ref().map_or(false, |t| t.id >= 0)
-                    && retro_btn(ui, if liked_now { "LIKED" } else { "LIKE" }, liked_now).clicked()
+                    && icon_btn(ui, &IC_HEART, liked_now, if liked_now { pal().red } else { ink })
+                        .tip(if liked_now { "Remove from My Tracks  (H)" } else { "Add to My Tracks  (H)" })
+                        .clicked()
                 {
                     if let Some(t) = &cur_t {
                         acts.push(Action::ToggleLike(t.clone()));

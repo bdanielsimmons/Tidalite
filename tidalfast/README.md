@@ -36,6 +36,8 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
   sometimes block this while they are open; Firefox is the reliable one.
 - **Tidal login is optional**: USE WITHOUT TIDAL on the first screen (USE SOUNDCLOUD ONLY in the simple build); LOG IN TO TIDAL appears
   in the library whenever you want it.
+- The album-art view background is now a soft gradient from the cover's average colour (no stretched picture).
+- Album viewer controls are pixel icons: previous / play-pause / next, B&W-color, lyrics (microphone), fullscreen, like (Tidal tracks only). Hover for names.
 - The album-art view shows your saved loops and the live A-B loop on its seek bar.
 - Like button is hidden for files and YouTube clips.
 
