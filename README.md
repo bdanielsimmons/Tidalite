@@ -4,6 +4,17 @@ A retro, Winamp-flavoured desktop player for Tidal. Native Rust (egui), no brows
 you log in with the normal "approve in your browser" flow. Needs an active Tidal subscription.
 Unofficial: it talks to the same endpoints the Tidal apps and the open-source `tidalapi` library use.
 
+## What's new
+
+<!-- whats-new -->
+- Library grouped into **MUSIC** (Tidal, SoundCloud, Files, YouTube, Lists) and **PRACTICE** (Tunes, Diary) tabs
+- **Fullscreen button** next to shuffle and repeat; leaving the album view leaves fullscreen too
+- Album view: song title and artist sit on a soft dark plate, readable over the visualizer
+- Smaller, leaner app: fewer dependencies, and cover art no longer piles up in memory
+<!-- /whats-new -->
+
+Every release lists its full changes on the [Releases page](../../releases).
+
 ## Get the .exe (no Rust needed on your machine)
 
 1. Upload everything in this folder to your GitHub repo (keep `.github/workflows/build.yml`;
