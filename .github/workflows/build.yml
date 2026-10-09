@@ -2,6 +2,8 @@ name: build
 on:
   push:
     branches: ['**']
+    # docs-only pushes (README etc.) don't build or release
+    paths-ignore: ['**.md']
   workflow_dispatch:
 jobs:
   build:
@@ -59,7 +61,8 @@ jobs:
   # After every successful build of all four, publish them as a public Release (no tagging needed).
   release:
     needs: build
-    if: github.event_name != 'pull_request'
+    # releases come only from main; put [no release] in a commit message to build without publishing
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[no release]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
