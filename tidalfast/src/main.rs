@@ -2114,7 +2114,7 @@ impl App {
         }
         if st["offline"].as_bool() == Some(true) && !app.api.has_token() {
             app.offline = true;
-            app.sec = if PRACTICE { Sec::Files } else { Sec::Sc };
+            app.sec = Sec::Files;
         }
         if let Some(f) = st["lib_frac"].as_f64() {
             app.lib_frac = (f as f32).clamp(0.2, 0.7);
@@ -3281,7 +3281,7 @@ impl App {
                 let b2 = Rect::from_center_size(c + Vec2::new(0.0, 80.0), Vec2::new(320.0, 30.0));
                 let r2 = ui.interact(b2, ui.id().with("skip"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
                 raised_h(ui.painter(), b2, r2.is_pointer_button_down_on(), r2.hovered());
-                let skip = if PRACTICE { "USE WITHOUT TIDAL" } else { "USE SOUNDCLOUD ONLY" };
+                let skip = "USE WITHOUT TIDAL";
                 ptext(ui.painter(), b2.center(), Align::Center, skip, 2.0, pal().ink2);
                 if r2.clicked() {
                     acts.push(Action::Offline(true));
@@ -4715,7 +4715,7 @@ impl eframe::App for App {
 
         // files / folders dropped onto the window
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
-        if PRACTICE && !dropped.is_empty() {
+        if !dropped.is_empty() {
             self.handle_paths(dropped);
         }
         let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());

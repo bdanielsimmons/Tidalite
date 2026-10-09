@@ -46,3 +46,27 @@ jobs:
         with:
           name: tidalite-${{ matrix.os_name }}-${{ matrix.flavor }}
           path: out/*
+
+  # After every successful build of all four, publish them as a public Release (no tagging needed).
+  release:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag="${{ github.ref_name }}"
+          else
+            tag="build-${{ github.run_number }}"
+          fi
+          gh release create "$tag" dist/* --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "Tidalite $tag" --notes "Automatic build of commit ${GITHUB_SHA::7}. Windows: tidalite-practice.exe (everything) or tidalite-simple.exe (no practice tools). Mac: the .tar.gz files." --latest

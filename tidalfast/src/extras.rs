@@ -1076,7 +1076,7 @@ impl App {
                 self.offline = on;
                 self.dirty = true;
                 if on {
-                    self.sec = if crate::PRACTICE { Sec::Files } else { Sec::Sc };
+                    self.sec = Sec::Files;
                 } else {
                     self.sec = Sec::Tidal;
                 }

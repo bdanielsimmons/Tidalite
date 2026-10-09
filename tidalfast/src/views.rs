@@ -368,7 +368,7 @@ impl App {
             .copied()
             .filter(|s| match s.0 {
                 Sec::Tidal => !self.offline,
-                Sec::Sc | Sec::Lists => true,
+                Sec::Sc | Sec::Lists | Sec::Files | Sec::Yt => true,
                 _ => PRACTICE,
             })
             .collect();
@@ -490,7 +490,7 @@ impl App {
                         acts.push(Action::Enqueue(e.to_track()));
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Add to a tune...") {
+                    if PRACTICE && menu_item(ui, "Add to a tune...") {
                         acts.push(Action::PickTune(e.to_track()));
                         ui.close_menu();
                     }
@@ -588,7 +588,8 @@ impl App {
         }
         if self.store.files.is_empty() && !self.files_busy {
             ui.add_space(6.0);
-            para(ui, "Drag audio files or whole folders onto this window, or use the buttons. Nothing is copied - files stay where they are, and loops, speed and sections all work on them.", pal().ink2);
+            let tail = if PRACTICE { " Loops, speed and sections all work on them." } else { "" };
+            para(ui, &format!("Drag audio files or whole folders onto this window, or use the buttons. Nothing is copied - files stay where they are.{}", tail), pal().ink2);
         }
         if !self.store.folders.is_empty() {
             section_header(ui, "WATCHED FOLDERS (CLICK TO STOP)");
@@ -672,8 +673,15 @@ impl App {
             self.ext_list(ui, acts, 7);
         }
         if self.store.yt.is_empty() {
-            para(ui, "One-time setup: press GET YT-DLP. Then paste a link and press ADD. The first play downloads just the audio (a few MB); after that it is stored and starts instantly, like everything in this player. Play-along videos, lessons, live takes - anything you want to loop and slow down.", pal().ink2);
-            para(ui, "Note: downloading from YouTube may go against YouTube's terms. Use it for personal practice, at your own discretion.", pal().dim);
+            para(ui, "One-time setup: press GET YT-DLP. Then paste a link and press ADD. The first play downloads just the audio (a few MB); after that it is stored and starts instantly, like everything in this player.", pal().ink2);
+            if PRACTICE {
+                para(ui, "Play-along videos, lessons, live takes - anything you want to loop and slow down.", pal().ink2);
+            }
+            para(
+                ui,
+                "Note: downloading from YouTube may go against YouTube's terms. Personal use only, at your own discretion.",
+                pal().dim,
+            );
         } else {
             section_header(ui, "SAVED CLIPS");
             let tracks: Vec<Track> = self.store.yt.iter().map(|e| e.to_track()).collect();
