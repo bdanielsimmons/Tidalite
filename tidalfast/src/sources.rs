@@ -339,7 +339,7 @@ pub fn yt_fetch(src: &str) -> Result<Vec<u8>, String> {
     let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
     let tmp = crate::api::config_dir().join("tmp");
     let _ = std::fs::create_dir_all(&tmp);
-    let stem = file_stem(vid);
+    let stem = file_stem(src);
     let vid = stem.as_str();
     if let Ok(rd) = std::fs::read_dir(&tmp) {
         for e in rd.flatten() {

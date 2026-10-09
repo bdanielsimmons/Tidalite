@@ -2,7 +2,6 @@
 //! practice panel, the lead sheet and the little text-field widget they share.
 
 use crate::api::Track;
-use crate::chart;
 use crate::extras::{Knob, CHAN_NAMES};
 use crate::font::{ptext, ptext_fit, spx, text_w};
 use crate::sources;
