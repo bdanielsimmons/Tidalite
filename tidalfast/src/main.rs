@@ -1,27 +1,55 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
-mod api;
-mod band;
-mod cache;
-mod chart;
-mod decode;
+// Folders: audio/ = playback and sound analysis, data/ = Tidal, files, library and updates, ui/ = everything drawn.
+// The modules keep flat names (crate::player, crate::views...) so the folders are purely for reading.
+
 mod extras;
-mod font;
-mod help;
-mod icons;
+
+#[path = "audio/band.rs"]
+mod band;
+#[path = "audio/decode.rs"]
+mod decode;
+#[path = "audio/media.rs"]
 mod media;
+#[path = "audio/player.rs"]
 mod player;
-mod prefs;
-mod skin;
-mod sources;
+#[path = "audio/stems.rs"]
 mod stems;
-mod store;
-mod tools;
-mod tour;
+#[path = "audio/tuning.rs"]
 mod tuning;
+
+#[path = "data/api.rs"]
+mod api;
+#[path = "data/cache.rs"]
+mod cache;
+#[path = "data/chart.rs"]
+mod chart;
+#[path = "data/sources.rs"]
+mod sources;
+#[path = "data/store.rs"]
+mod store;
+#[path = "data/update.rs"]
 mod update;
+
+#[path = "ui/font.rs"]
+mod font;
+#[path = "ui/help.rs"]
+mod help;
+#[path = "ui/icons.rs"]
+mod icons;
+#[path = "ui/prefs.rs"]
+mod prefs;
+#[path = "ui/skin.rs"]
+mod skin;
+#[path = "ui/tools.rs"]
+mod tools;
+#[path = "ui/tour.rs"]
+mod tour;
+#[path = "ui/vicon.rs"]
 mod vicon;
+#[path = "ui/views.rs"]
 mod views;
+#[path = "ui/viz.rs"]
 mod viz;
 
 use api::{cover_url, Api, Card, Kind, Page, Track};

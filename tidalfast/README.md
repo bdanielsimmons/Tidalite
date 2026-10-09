@@ -263,3 +263,11 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 
 ## Build speed
 CI caches compiled dependencies (Swatinem/rust-cache), and the release profile uses thin LTO with 8 codegen units. The first build after this change is as slow as before (it fills the cache); later ones only recompile Tidalite itself.
+
+## Where things are
+- `src/main.rs` - the app window, state, and the main update loop
+- `src/extras.rs` - logic for the practice extras and update/help actions
+- `src/audio/` - player, decoder, media keys, stem separation, tuning detection, metronome/band
+- `src/data/` - Tidal API, files/YouTube sources, library store, cache, lead-sheet charts, self-update
+- `src/ui/` - fonts, skins, icons, visualizer, views, tools, help, tour, preferences
+(Modules keep short names like `crate::player`; the folders just group the files.)

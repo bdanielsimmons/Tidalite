@@ -1,6 +1,7 @@
 name: build
 on:
   push:
+    branches: ['**']
   workflow_dispatch:
 jobs:
   build:
@@ -19,8 +20,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Remember compiled dependencies between builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
       - name: Build
         shell: bash
+        env:
+          # lets the app know which build it is, so it can find newer releases
+          TIDALITE_BUILD: ${{ github.run_number }}
         run: |
           manifest=$(find . -name Cargo.toml -not -path '*/target/*' | head -1)
           if [ -z "$manifest" ]; then
@@ -46,3 +55,23 @@ jobs:
         with:
           name: tidalite-${{ matrix.os_name }}-${{ matrix.flavor }}
           path: out/*
+
+  # After every successful build of all four, publish them as a public Release (no tagging needed).
+  release:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v9.${{ github.run_number }}"
+          gh release create "$tag" dist/* --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "Tidalite $tag" --notes "Automatic build of commit ${GITHUB_SHA::7}. Windows: tidalite-practice.exe (everything) or tidalite-simple.exe (no practice tools). Mac: the .tar.gz files." --latest
