@@ -7,7 +7,7 @@ use crate::font::{ptext, ptext_fit, spx, text_w};
 use crate::sources;
 use crate::stems;
 use crate::store::{self, Ext};
-use crate::tools::{F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
+use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
     cache, check_box, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal,
     para, play_buttons, retro_btn, retro_btn_w, section_header, tab_row, title_line, track_cells, window_deco, Action, App, Ed,
@@ -461,7 +461,7 @@ impl App {
                 Some(i + 1),
                 || track_cells(&e.title, &e.artist, ""),
                 || {
-                    if e.dur == 0 && e.cover.is_empty() && (which == 2 || which == 3 || which == 6) {
+                    if e.dur == 0.0 && e.cover.is_empty() && (which == 2 || which == 3 || which == 6) {
                         "(loading info)".to_string()
                     } else if col_on(2) {
                         fmt_time(e.dur)
@@ -1178,13 +1178,13 @@ impl App {
             dim_line(ui, &format!("LOOPS {}   FOCUS BLOCKS {}", loops, pomos), 2.0, pal().ink2);
         }
 
+        let mins_hint = format!("{}", day_secs(self, sel) / 60);
         // ---- journal for that day
         ui.add_space(4.0);
         if self.show_form {
             let hint_t = self.practice_label();
             let _ = field_row(ui, &mut self.ed, F_TUNE, "TUNE", &mut self.f_tune, &hint_t, None);
-            let _ =
-                field_row(ui, &mut self.ed, F_MINS, "MINUTES", &mut self.f_mins, &format!("{}", day_secs(self, sel) / 60), None);
+            let _ = field_row(ui, &mut self.ed, F_MINS, "MINUTES", &mut self.f_mins, &mins_hint, None);
             let _ = field_row(ui, &mut self.ed, F_BPM, "BPM", &mut self.f_bpm, "tempo you reached", None);
             let _ = field_row(ui, &mut self.ed, F_NOTE, "NOTE", &mut self.f_note, "What went well? What next?", Some(70.0));
             ui.horizontal(|ui| {
@@ -1520,7 +1520,7 @@ impl App {
                 |ui| {
                     egui::Frame::none()
                         .fill(pal().beige)
-                        .stroke(egui::Stroke::new(2.0, pal().edge))
+                        .stroke(egui::Stroke::new(2.0_f32, pal().edge))
                         .inner_margin(egui::Margin::same(6.0))
                         .show(ui, |ui| {
                             ui.set_width((more_w - 16.0).max(200.0));

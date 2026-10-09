@@ -1144,7 +1144,7 @@ fn dropdown(ui: &mut egui::Ui, id: &str, title: &str, items: &[&str], sel: usize
             .order(egui::Order::Foreground)
             .fixed_pos(Pos2::new(rect.min.x, rect.max.y + 1.0))
             .show(ui.ctx(), |ui| {
-                egui::Frame::none().fill(pal().beige_lt).stroke(egui::Stroke::new(2.0, pal().edge)).show(ui, |ui| {
+                egui::Frame::none().fill(pal().beige_lt).stroke(egui::Stroke::new(2.0_f32, pal().edge)).show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                     for (i, it) in items.iter().enumerate() {
                         let iw = (w - 4.0).max(text_w(it, 2.0) + 28.0);

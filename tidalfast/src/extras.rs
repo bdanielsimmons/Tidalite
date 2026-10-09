@@ -433,12 +433,19 @@ impl App {
                 self.loop_on = false;
             }
         }
-        match self.store.tune_of(t.id) {
+        // the lead sheet stays with the tune you have open; it only follows the playing song when none is open
+        match self.tune_open.filter(|i| *i < self.store.tunes.len()) {
             Some(i) => {
                 self.chart_pick = Some(i);
                 self.chart_live = false;
             }
-            None => self.chart_live = true,
+            None => match self.store.tune_of(t.id) {
+                Some(i) => {
+                    self.chart_pick = Some(i);
+                    self.chart_live = false;
+                }
+                None => self.chart_live = true,
+            },
         }
         self.semis = 0;
         self.stem_on = [true; 4];

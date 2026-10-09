@@ -204,7 +204,7 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - Slow-down is very good down to ~50%; below ~40% it starts to sound grainy.
 
 
-## v9.13
+## v9.14 (fixes four build errors) / v9.13
 - Chart screen: STYLE and TRANSPOSE are dropdowns; buttons grow instead of shrinking their text.
 - PRACTICE > MORE opens as an overlay, so the panels below never move.
 - Right-click a bar of a saved tune to edit repeats, endings, sections, marks; IMPORT IREAL (links or playlists) at the top of TUNES.
