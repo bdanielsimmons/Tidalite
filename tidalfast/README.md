@@ -251,3 +251,12 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - Self-update (update.rs): checks GitHub Releases, downloads the new build in the background, installs on next start or on click. Needs a public repo; builds from the workflow carry TIDALITE_BUILD.
 - Pitch is now in cents: -10c / +10c fine-tune buttons next to the semitone +/- (for records not tuned to A440).
 - FIND TUNING (tuning.rs): measures how many cents a track is from A440 and offers TUNE TO A440. Unit-tested on synthetic chords (+-3 cents).
+- icon.ico + build.rs embed the logo in the Windows exe (taskbar / pinned shortcuts).
+- Help overlay (? button / F1): start, keys, practice, about.
+- Visualizer settings are now separate for the player widget and the album view (VizCfg).
+- Guided tour (tour.rs): general tour for everyone + a separate short practice tour; opens from Help > TOUR, offered once on first run.
+- Update shows a restart bar; auto-restart is opt-in (see Preferences).
+
+## Preferences (PREFS button)
+- **Updates:** a downloaded update shows a bar at the top ("UPDATE vN READY - CLICK TO RESTART"). Nothing restarts by itself unless you turn on *Restart by itself when I'm away* (off by default; waits for ~5 quiet minutes with nothing playing). Otherwise the update installs the next time you open the app. Checks happen at launch and every 6 hours using a conditional request (ETag), so an unchanged check is a tiny 304 that GitHub doesn't count against its rate limit.
+- **Keyboard shortcuts:** every key is rebindable (click a key, press the new one; ESC cancels; a key taken from another action unbinds that one). ESC, F1, F11, TAB and ENTER stay reserved. Reset-to-default button included. The Help KEYS tab reflects your bindings.

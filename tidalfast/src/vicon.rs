@@ -147,6 +147,9 @@ pub fn draw(p: &egui::Painter, r: Rect, rows: &[&str], col: Color32) -> bool {
             pen.line(&[(x, 0.08), (x, 0.92)]);
             pen.dot(x, k, 0.12);
         }
+    } else if is(&IC_HELP) {
+        pen.circle(0.5, 0.5, 0.4);
+        p.text(pen.pt(0.5, 0.52), egui::Align2::CENTER_CENTER, "?", egui::FontId::proportional(s * 0.62), col);
     } else if is(&IC_SKIN) {
         pen.rect(0.1, 0.1, 0.46, 0.46, 0.1);
         pen.rect(0.54, 0.1, 0.9, 0.46, 0.1);

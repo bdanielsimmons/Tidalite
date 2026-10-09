@@ -7,14 +7,17 @@ mod chart;
 mod decode;
 mod extras;
 mod font;
+mod help;
 mod icons;
 mod media;
 mod player;
+mod prefs;
 mod skin;
 mod sources;
 mod stems;
 mod store;
 mod tools;
+mod tour;
 mod tuning;
 mod update;
 mod vicon;
@@ -193,6 +196,8 @@ enum Action {
     CopyLink(String),
     SaveList(u8, String),
     ApplyUpdate,
+    ToggleHelp,
+    TogglePrefs,
     FindTuning,
     PlaylistPick(Track),
     PlaylistAdd(usize, Track),
@@ -519,6 +524,7 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     let p = ui.painter();
     let u = thick(2.0);
     let outer = Rect::from_min_max(inner.min - Vec2::new(14.0, 30.0), inner.max + Vec2::new(14.0, 14.0));
+    tour::note(title, outer);
     if style() != 0 {
         modern_deco(p, outer, inner, title);
         return;
@@ -1623,8 +1629,6 @@ struct App {
     seek_drag: Option<f32>,
     bands: Vec<f32>,
     peaks: Vec<f32>,
-    viz_n: usize,
-    viz_color: u8,
     show_log: bool,
     audio_err_shown: bool,
 
@@ -1634,9 +1638,8 @@ struct App {
     spec_op: f32,
     spec_h: f32,
     spec_w: f32,
-    viz_mode: u8,
-    viz_w: f32,
-    viz_gain: f32,
+    /// visualizer settings: [0] the small one in the player, [1] the one in the album view
+    viz: [viz::VizCfg; 2],
     viz_wave: Vec<f32>,
     show_lyrics: bool,
     fullscreen: bool,
@@ -1693,6 +1696,17 @@ struct App {
     sc_cur: Option<String>,
     upd: Option<update::Info>,
     upd_state: u8,
+    last_active: Instant,
+    show_help: bool,
+    show_prefs: bool,
+    auto_restart: bool,
+    binds: Vec<Option<egui::Key>>,
+    rebinding: Option<usize>,
+    bind_note: String,
+    /// the running tour: (0 general / 1 practice, step)
+    tour: Option<(u8, usize)>,
+    tour_seen: bool,
+    help_tab: usize,
     /// (track id, cents from A440, confidence) from the tuning check
     tuning: Option<(i64, i32, f32)>,
     tuning_busy: bool,
@@ -1904,8 +1918,6 @@ impl App {
             seek_drag: None,
             bands: vec![0.0; 32],
             peaks: vec![0.0; 32],
-            viz_n: 32,
-            viz_color: 0,
             show_log: false,
             audio_err_shown: false,
             art_view: false,
@@ -1914,9 +1926,7 @@ impl App {
             spec_op: 0.2,
             spec_h: 0.42,
             spec_w: 0.6,
-            viz_mode: 0,
-            viz_w: 0.8,
-            viz_gain: 1.0,
+            viz: [viz::VizCfg::player(), viz::VizCfg::art()],
             viz_wave: vec![0.0; WAVE_N],
             show_lyrics: true,
             fullscreen: false,
@@ -1969,6 +1979,16 @@ impl App {
             sc_cur: None,
             upd: None,
             upd_state: 0,
+            last_active: Instant::now(),
+            show_help: false,
+            show_prefs: false,
+            auto_restart: false,
+            binds: prefs::default_binds(),
+            rebinding: None,
+            bind_note: String::new(),
+            tour: None,
+            tour_seen: false,
+            help_tab: 0,
             tuning: None,
             tuning_busy: false,
             upd_checked: None,
@@ -2090,20 +2110,21 @@ impl App {
         if let Some(f) = st["spec_op"].as_f64() {
             app.spec_op = (f as f32).clamp(0.05, 0.8);
         }
-        if let Some(n) = st["viz_n"].as_u64() {
-            app.viz_n = (n as usize).clamp(8, 96);
+        // older saves had one shared set: both visualizers start from it
+        for k in 0..2 {
+            app.viz[k].load_old(&st);
+            if let Some(v) = st["viz"].get(k) {
+                app.viz[k].load(v);
+            }
         }
-        if let Some(n) = st["viz_color2"].as_u64() {
-            app.viz_color = (n as u8).min(2);
+        if let Some(b) = st["auto_restart"].as_bool() {
+            app.auto_restart = b;
         }
-        if let Some(n) = st["viz_mode"].as_u64() {
-            app.viz_mode = (n as u8).min(2);
+        if st.get("binds").is_some() {
+            app.binds = prefs::binds_from_json(&st["binds"]);
         }
-        if let Some(f) = st["viz_w"].as_f64() {
-            app.viz_w = (f as f32).clamp(0.3, 1.0);
-        }
-        if let Some(f) = st["viz_gain"].as_f64() {
-            app.viz_gain = (f as f32).clamp(0.4, 3.0);
+        if let Some(b) = st["tour_seen"].as_bool() {
+            app.tour_seen = b;
         }
         if let Some(f) = st["spec_w"].as_f64() {
             app.spec_w = (f as f32).clamp(0.2, 1.0);
@@ -2198,14 +2219,13 @@ impl App {
             "lossless": self.prefer_lossless,
             "art_gray": self.art_gray,
             "spec": self.show_spec,
+            "tour_seen": self.tour_seen,
+            "auto_restart": self.auto_restart,
+            "binds": prefs::binds_to_json(&self.binds),
             "spec_op": self.spec_op,
             "spec_h": self.spec_h,
             "spec_w": self.spec_w,
-            "viz_mode": self.viz_mode,
-            "viz_n": self.viz_n,
-            "viz_color2": self.viz_color,
-            "viz_w": self.viz_w,
-            "viz_gain": self.viz_gain,
+            "viz": [self.viz[0].save(), self.viz[1].save()],
             "lyrics": self.show_lyrics,
             "repeat": match self.repeat { Repeat::Off => 0, Repeat::All => 1, Repeat::One => 2 },
             "eq_on": self.eq_on,
@@ -2666,8 +2686,8 @@ impl App {
     }
 
     /// Bar colours for the visualizer: None = the skin's own, else (main, cap).
-    fn viz_tint(&self) -> Option<(Color32, Color32)> {
-        match self.viz_color {
+    fn viz_tint(&self, color: u8) -> Option<(Color32, Color32)> {
+        match color {
             2 => Some((Color32::from_rgb(70, 220, 110), Color32::from_rgb(255, 72, 60))),
             1 => {
                 let t = self.cur_track()?;
@@ -2690,29 +2710,25 @@ impl App {
         }
     }
 
-    /// Right-click menu shared by both visualizers.
-    fn viz_menu(&mut self, ui: &mut egui::Ui) {
-        if menu_item(
-            ui,
-            &format!("STYLE: {}  (click to change)", ["BARS", "WAVEFORM", "BARS + WAVE"][self.viz_mode as usize % 3]),
-        ) {
-            self.viz_mode = (self.viz_mode + 1) % 3;
+    /// Right-click menu for one visualizer (0 = player, 1 = album view); each keeps its own settings.
+    fn viz_menu(&mut self, ui: &mut egui::Ui, i: usize) {
+        let c = &mut self.viz[i];
+        if menu_item(ui, &format!("STYLE: {}  (click to change)", ["BARS", "WAVEFORM", "BARS + WAVE"][c.mode as usize % 3])) {
+            c.mode = (c.mode + 1) % 3;
         }
-        let mut n = self.viz_n as f32;
-        if menu_item(ui, &format!("NUMBER OF BARS  {}   (+)", self.viz_n)) {
+        let mut n = c.n as f32;
+        if menu_item(ui, &format!("NUMBER OF BARS  {}   (+)", c.n)) {
             n = (n + 4.0).min(96.0);
         }
-        if menu_item(ui, &format!("NUMBER OF BARS  {}   (-)", self.viz_n)) {
+        if menu_item(ui, &format!("NUMBER OF BARS  {}   (-)", c.n)) {
             n = (n - 4.0).max(8.0);
         }
-        self.viz_n = n as usize;
-        let cname = ["SKIN", "FROM COVER ART", "CLASSIC GREEN + RED"][self.viz_color as usize % 3];
+        c.n = n as usize;
+        let cname = ["SKIN", "FROM COVER ART", "CLASSIC GREEN + RED"][c.color as usize % 3];
         if menu_item(ui, &format!("COLORS: {}  (click to change)", cname)) {
-            self.viz_color = (self.viz_color + 1) % 3;
+            c.color = (c.color + 1) % 3;
         }
-        for (name, v, d, lo, hi) in
-            [("BAR WIDTH", &mut self.viz_w, 0.1, 0.3, 1.0), ("SENSITIVITY", &mut self.viz_gain, 0.2, 0.4, 3.0)]
-        {
+        for (name, v, d, lo, hi) in [("BAR WIDTH", &mut c.w, 0.1, 0.3, 1.0), ("SENSITIVITY", &mut c.gain, 0.2, 0.4, 3.0)] {
             if menu_item(ui, &format!("{}  {}%   (+)", name, (*v * 100.0).round() as i32)) {
                 *v = (*v + d).min(hi);
             }
@@ -2721,6 +2737,13 @@ impl App {
             }
         }
         self.dirty = true;
+    }
+
+    /// Bands, peaks and wave shaped for one visualizer: its own bar count and sensitivity.
+    fn viz_data(&self, i: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let c = self.viz[i];
+        let k = c.gain / self.viz[0].gain.max(self.viz[1].gain);
+        (viz::resample(&self.bands, c.n, k), viz::resample(&self.peaks, c.n, k), self.viz_wave.iter().map(|v| v * k).collect())
     }
 
     fn update_bands(&mut self) {
@@ -2733,7 +2756,9 @@ impl App {
             (Vec::new(), 44100.0)
         };
         let n = samples.len();
-        let nb = self.viz_n.clamp(8, 96);
+        // analysed once at the finer of the two bar counts and the higher sensitivity; each view reshapes it
+        let nb = self.viz[0].n.max(self.viz[1].n).clamp(8, 96);
+        let gain = self.viz[0].gain.max(self.viz[1].gain);
         if self.bands.len() != nb {
             self.bands = vec![0.0; nb];
             self.peaks = vec![0.0; nb];
@@ -2753,7 +2778,7 @@ impl App {
                 }
                 let amp = goertzel(&xs, f, rate) * 2.0;
                 let db = 20.0 * (amp + 1e-6).log10();
-                target[i] = ((db + 64.0 + 23.0 * i as f32 / nb as f32) / 54.0 * self.viz_gain).clamp(0.0, 1.0);
+                target[i] = ((db + 64.0 + 23.0 * i as f32 / nb as f32) / 54.0 * gain).clamp(0.0, 1.0);
             }
         }
         // waveform: the loudest swing in each slice of the latest samples
@@ -2769,7 +2794,7 @@ impl App {
                         best = *v;
                     }
                 }
-                (best * 1.6 * self.viz_gain).clamp(-1.0, 1.0)
+                (best * 1.6 * gain).clamp(-1.0, 1.0)
             } else {
                 0.0
             };
@@ -3616,6 +3641,12 @@ impl App {
                 acts.push(Action::Skin);
             }
             skin_btn.context_menu(|ui| skin_menu(ui, acts));
+            if icon_btn_w(ui, &IC_HELP, self.show_help, ink, 38.0).tip("Help, tips and about  (F1)").clicked() {
+                acts.push(Action::ToggleHelp);
+            }
+            if retro_btn(ui, "PREFS", self.show_prefs).tip("Preferences: updates and keyboard shortcuts").clicked() {
+                acts.push(Action::TogglePrefs);
+            }
             if icon_btn_w(ui, &IC_EQ, self.show_eq, ink, 38.0).tip("Equalizer").clicked() {
                 acts.push(Action::ToggleEq);
             }
@@ -3828,27 +3859,28 @@ impl App {
         // ---- spectrum (click: bars / wave / both, right-click: width and sensitivity)
         let sp = rc(6.0, 50.0, 100.0, 28.0);
         inset(p, sp, pal().lcd);
+        let (vb, vp, vw) = self.viz_data(0);
         viz_draw(
             p,
             sp.shrink2(Vec2::new(3.0, 3.0)),
-            &self.bands,
-            &self.peaks,
-            &self.viz_wave,
-            self.viz_mode,
-            self.viz_w,
+            &vb,
+            &vp,
+            &vw,
+            self.viz[0].mode,
+            self.viz[0].w,
             false,
             1.0,
-            self.viz_tint(),
+            self.viz_tint(self.viz[0].color),
         );
         let spr = ui
             .interact(sp, ui.id().with("spectrum"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .tip("Click: bars / waveform / both.  Right-click: width and sensitivity");
         if spr.clicked() {
-            self.viz_mode = (self.viz_mode + 1) % 3;
+            self.viz[0].mode = (self.viz[0].mode + 1) % 3;
             self.dirty = true;
         }
-        spr.context_menu(|ui| self.viz_menu(ui));
+        spr.context_menu(|ui| self.viz_menu(ui, 0));
 
         // ---- title + status
         let tb = rc(112.0, 6.0, 182.0, 14.0);
@@ -4184,18 +4216,8 @@ impl App {
                 Pos2::new((mid - half).max(zone.min.x + 6.0), zone.max.y - zone.height() * self.spec_h),
                 Pos2::new((mid + half).min(zone.max.x - 6.0), zone.max.y),
             );
-            viz_draw(
-                &p,
-                r,
-                &self.bands,
-                &self.peaks,
-                &self.viz_wave,
-                self.viz_mode,
-                self.viz_w,
-                true,
-                self.spec_op,
-                self.viz_tint(),
-            );
+            let (vb, vp, vw) = self.viz_data(1);
+            viz_draw(&p, r, &vb, &vp, &vw, self.viz[1].mode, self.viz[1].w, true, self.spec_op, self.viz_tint(self.viz[1].color));
             if self.cur.is_some() && !self.paused && !self.stopped {
                 ui.ctx().request_repaint();
             }
@@ -4460,7 +4482,7 @@ impl App {
                     step(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8);
                     step(ui, "HEIGHT", &mut self.spec_h, 0.08, 0.15, 0.9);
                     step(ui, "WIDTH", &mut self.spec_w, 0.1, 0.2, 1.0);
-                    self.viz_menu(ui);
+                    self.viz_menu(ui, 1);
                     self.dirty = true;
                 });
                 let skin_b = icon_btn(ui, &IC_SKIN, false, ink).tip(format!(
@@ -4726,6 +4748,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         font::set_ppp(ctx.pixels_per_point());
         font::set_modern(style() != 0);
+        tour::begin_frame();
         // the window's scale and size settle over the first frames: keep drawing until they do
         {
             let (ppp, sz) = (ctx.pixels_per_point(), ctx.screen_rect().size());
@@ -4828,75 +4851,10 @@ impl eframe::App for App {
         } else {
             // Keyboard: Space = play/pause, arrows = seek, classic Winamp keys Z X C V B,
             // A = art viewer, G = black & white, L = lyrics, F / F11 = fullscreen, Esc = back.
-            if !self.search_focus && self.ed.id == 0 {
+            if !self.search_focus && self.ed.id == 0 && !self.show_help && !self.show_prefs && self.tour.is_none() {
                 let kp = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
-                if kp(egui::Key::Space) {
-                    acts.push(Action::Toggle);
-                }
-                if kp(egui::Key::ArrowLeft) {
-                    acts.push(Action::SeekRel(-5.0));
-                }
-                if kp(egui::Key::ArrowRight) {
-                    acts.push(Action::SeekRel(5.0));
-                }
-                if kp(egui::Key::Z) {
-                    acts.push(Action::Prev);
-                }
-                if kp(egui::Key::X) {
-                    acts.push(Action::PlayBtn);
-                }
-                if kp(egui::Key::C) {
-                    acts.push(Action::PauseBtn);
-                }
-                if kp(egui::Key::V) {
-                    acts.push(Action::StopBtn);
-                }
-                if kp(egui::Key::B) {
-                    acts.push(Action::Next);
-                }
-                if kp(egui::Key::A) {
-                    acts.push(Action::ToggleArt);
-                }
-                if kp(egui::Key::H) {
-                    if let Some(t) = self.cur_track() {
-                        acts.push(Action::ToggleLike(t));
-                    }
-                }
-                if kp(egui::Key::M) {
-                    acts.push(Action::ToggleMini);
-                }
-                if kp(egui::Key::P) {
-                    acts.push(Action::TogglePractice);
-                }
-                if kp(egui::Key::OpenBracket) {
-                    acts.push(Action::SetAAt(self.pos()));
-                }
-                if kp(egui::Key::CloseBracket) {
-                    acts.push(Action::SetBAt(self.pos()));
-                }
-                if kp(egui::Key::Backslash) {
-                    acts.push(Action::LoopToggle);
-                }
-                if kp(egui::Key::Comma) {
-                    acts.push(Action::SeekRel(-2.0));
-                }
-                if kp(egui::Key::Period) {
-                    acts.push(Action::Seek(self.loop_a.unwrap_or(0.0)));
-                }
-                if self.practice && kp(egui::Key::ArrowUp) {
-                    acts.push(Action::Speed(self.speed + 5));
-                }
-                if self.practice && kp(egui::Key::ArrowDown) {
-                    acts.push(Action::Speed(self.speed.saturating_sub(5)));
-                }
-                if kp(egui::Key::G) {
-                    acts.push(Action::ToggleGray);
-                }
-                if kp(egui::Key::L) {
-                    acts.push(Action::ToggleLyrics);
-                }
-                if kp(egui::Key::F) && self.art_view {
-                    acts.push(Action::ToggleFullscreen);
+                for cmd in self.key_commands(ctx) {
+                    self.run_cmd(cmd, &mut acts);
                 }
                 if kp(egui::Key::Escape) {
                     if self.fullscreen {
@@ -5000,6 +4958,22 @@ impl eframe::App for App {
         }
         self.floating_tools(ctx, &mut acts);
         self.update_banner(ctx, &mut acts);
+        self.help_overlay(ctx, &mut acts);
+        self.prefs_overlay(ctx, &mut acts);
+        // first time in: open the help on the tour page
+        if !self.tour_seen && (self.auth == Auth::In || self.offline) && self.frames >= 10 {
+            self.tour_seen = true;
+            self.help_tab = 0;
+            self.show_help = true;
+            self.dirty = true;
+        }
+        self.tour_overlay(ctx);
+        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            acts.push(Action::ToggleHelp);
+        }
+        if self.show_help && self.tour.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_help = false;
+        }
         for a in acts {
             self.apply(a);
         }

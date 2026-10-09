@@ -48,6 +48,10 @@ fn marker() -> PathBuf {
     api::config_dir().join("update.txt")
 }
 
+/// GitHub's ETag for the last "latest release" answer. Sending it back makes an unchanged check a 304 reply,
+/// which is tiny and does not count against GitHub's rate limit.
+static ETAG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 /// Ask GitHub for the newest release; Some when it is newer than this build.
 pub fn check() -> Result<Option<Info>, String> {
     let me = build();
@@ -55,16 +59,21 @@ pub fn check() -> Result<Option<Info>, String> {
         return Ok(None);
     }
     let url = format!("https://api.github.com/repos/{}/releases/latest", REPO);
-    let v: serde_json::Value = http()?
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .timeout(Duration::from_secs(20))
-        .send()
-        .map_err(es)?
-        .error_for_status()
-        .map_err(es)?
-        .json()
-        .map_err(es)?;
+    let mut req = http()?.get(url).header("Accept", "application/vnd.github+json").timeout(Duration::from_secs(20));
+    if let Some(t) = ETAG.lock().ok().and_then(|g| g.clone()) {
+        req = req.header("If-None-Match", t);
+    }
+    let resp = req.send().map_err(es)?;
+    if resp.status().as_u16() == 304 {
+        return Ok(None);
+    }
+    let resp = resp.error_for_status().map_err(es)?;
+    if let Some(t) = resp.headers().get("etag").and_then(|h| h.to_str().ok()) {
+        if let Ok(mut g) = ETAG.lock() {
+            *g = Some(t.to_string());
+        }
+    }
+    let v: serde_json::Value = resp.json().map_err(es)?;
     let tag = v["tag_name"].as_str().ok_or("release has no tag")?.to_string();
     let Some(n) = tag.rsplit('.').next().and_then(|s| s.parse::<u64>().ok()) else { return Ok(None) };
     if n <= me {
@@ -168,14 +177,28 @@ impl App {
         });
     }
 
-    /// Checks every few hours; once a new build is downloaded, shows one button at the top to restart into it.
+    /// Checks at start and every 6 hours. A downloaded update shows one bar at the top (click to restart); it also installs on the next launch.
+    /// It only restarts by itself if the user turned that on in Preferences (off by default).
     pub(crate) fn update_banner(&mut self, ctx: &egui::Context, acts: &mut Vec<Action>) {
-        let due = self.upd_checked.map_or(true, |t| t.elapsed() > Duration::from_secs(3 * 3600));
+        let due = self.upd_checked.map_or(true, |t| t.elapsed() > Duration::from_secs(6 * 3600));
         if due && matches!(self.upd_state, 0 | 3) {
             self.start_update_check();
         }
+        // any mouse or key activity counts as being here
+        if ctx.input(|i| i.pointer.is_moving() || !i.events.is_empty()) {
+            self.last_active = Instant::now();
+        }
         if self.upd_state != 2 {
             return;
+        }
+        // opt-in only: restart by itself once nothing is playing and you have been away a while
+        let playing = self.cur.is_some() && !self.paused && !self.stopped;
+        if self.auto_restart && !playing && self.last_active.elapsed() > Duration::from_secs(300) {
+            acts.push(Action::ApplyUpdate);
+            return;
+        }
+        if self.auto_restart {
+            ctx.request_repaint_after(Duration::from_secs(15));
         }
         let Some(info) = self.upd.clone() else { return };
         egui::Area::new(egui::Id::new("update_banner"))
@@ -183,7 +206,7 @@ impl App {
             .anchor(egui::Align2::CENTER_TOP, [0.0, 4.0])
             .show(ctx, |ui| {
                 if retro_btn(ui, &format!("UPDATE {} READY - CLICK TO RESTART", info.tag.to_uppercase()), true)
-                    .tip("Saves everything and reopens Tidalite on the new version. If you don't click, it installs the next time you open the app.")
+                    .tip("Saves everything and reopens Tidalite on the new version. If you don't click, it installs the next time you open the app. You can make it restart by itself in Preferences.")
                     .clicked()
                 {
                     acts.push(Action::ApplyUpdate);

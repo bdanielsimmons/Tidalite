@@ -2,6 +2,81 @@
 
 use super::*;
 
+/// Settings of one visualizer. The player's small one and the album view's big one each have their own.
+#[derive(Clone, Copy)]
+pub(crate) struct VizCfg {
+    /// 0 bars, 1 waveform, 2 both
+    pub(crate) mode: u8,
+    /// bar width as a share of its slot
+    pub(crate) w: f32,
+    pub(crate) gain: f32,
+    pub(crate) n: usize,
+    /// 0 skin, 1 cover art, 2 classic green + red
+    pub(crate) color: u8,
+}
+
+impl VizCfg {
+    pub(crate) fn player() -> Self {
+        VizCfg { mode: 0, w: 0.8, gain: 1.0, n: 20, color: 0 }
+    }
+
+    pub(crate) fn art() -> Self {
+        VizCfg { mode: 0, w: 0.8, gain: 1.0, n: 32, color: 0 }
+    }
+
+    pub(crate) fn save(&self) -> serde_json::Value {
+        serde_json::json!({ "mode": self.mode, "w": self.w, "gain": self.gain, "n": self.n, "color": self.color })
+    }
+
+    pub(crate) fn load(&mut self, v: &serde_json::Value) {
+        if let Some(n) = v["mode"].as_u64() {
+            self.mode = (n as u8).min(2);
+        }
+        if let Some(f) = v["w"].as_f64() {
+            self.w = (f as f32).clamp(0.3, 1.0);
+        }
+        if let Some(f) = v["gain"].as_f64() {
+            self.gain = (f as f32).clamp(0.4, 3.0);
+        }
+        if let Some(n) = v["n"].as_u64() {
+            self.n = (n as usize).clamp(8, 96);
+        }
+        if let Some(n) = v["color"].as_u64() {
+            self.color = (n as u8).min(2);
+        }
+    }
+
+    /// The single shared set that older versions saved.
+    pub(crate) fn load_old(&mut self, st: &serde_json::Value) {
+        let old = serde_json::json!({
+            "mode": st["viz_mode"], "w": st["viz_w"], "gain": st["viz_gain"], "n": st["viz_n"], "color": st["viz_color2"]
+        });
+        self.load(&old);
+    }
+}
+
+/// Reshape `src` (log-spaced bands) to `n` bars, scaled by `k`: loudest of the group when shrinking,
+/// smooth interpolation when growing.
+pub(crate) fn resample(src: &[f32], n: usize, k: f32) -> Vec<f32> {
+    let len = src.len();
+    if len == 0 || n == 0 {
+        return vec![0.0; n];
+    }
+    (0..n)
+        .map(|i| {
+            let v = if n <= len {
+                let (a, b) = (i * len / n, ((i + 1) * len / n).max(i * len / n + 1).min(len));
+                src[a..b].iter().copied().fold(0.0, f32::max)
+            } else {
+                let pos = ((i as f32 + 0.5) * len as f32 / n as f32 - 0.5).clamp(0.0, (len - 1) as f32);
+                let (i0, fr) = (pos.floor() as usize, pos.fract());
+                src[i0] * (1.0 - fr) + src[(i0 + 1).min(len - 1)] * fr
+            };
+            (v * k).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
 /// Bars and/or waveform inside `r`. `art` = soft white overlay (album view); otherwise the skin's own colours.
 pub(crate) fn viz_draw(
     p: &egui::Painter,

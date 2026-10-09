@@ -1094,6 +1094,19 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            Action::ToggleHelp => {
+                self.show_help = !self.show_help;
+                if self.show_help {
+                    self.show_prefs = false;
+                }
+            }
+            Action::TogglePrefs => {
+                self.show_prefs = !self.show_prefs;
+                self.rebinding = None;
+                if self.show_prefs {
+                    self.show_help = false;
+                }
+            }
             Action::ApplyUpdate => {
                 self.flush_practice();
                 self.save_settings();
