@@ -628,7 +628,7 @@ impl App {
     pub(crate) fn sc_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         ui.add_space(6.0);
         title_line(ui, "SOUNDCLOUD", 3.0, pal().ink);
-        title_line(ui, "search it, or paste a track / playlist / likes link", 2.0, pal().ink2);
+        title_line(ui, "search it, paste a link, or type a user and press THEIR PLAYLISTS", 2.0, pal().ink2);
         ui.add_space(4.0);
         let have = sources::ytdlp_path().is_some();
         if !have {
@@ -652,6 +652,14 @@ impl App {
             }
         });
         ui.horizontal(|ui| {
+            if retro_btn(ui, "THEIR PLAYLISTS", false)
+                .tip("Type a SoundCloud user name (or paste their profile link) above, then press this to list all their public playlists")
+                .clicked()
+            {
+                acts.push(Action::ScSets);
+            }
+        });
+        ui.horizontal(|ui| {
             let n = sources::SC_BROWSER.load(Ordering::Relaxed) as usize;
             label(ui, "SIGN-IN FROM", 130.0);
             if retro_btn_w(ui, sources::SC_BROWSERS[n], 110.0, n > 0)
@@ -668,6 +676,18 @@ impl App {
         if self.sc_results.is_empty() && self.store.sc.is_empty() {
             para(ui, "Your own account: paste your profile's likes link (soundcloud.com/YOU/likes) or a playlist link and press GO - public ones list right here. Click a track to play; the first play stores just its audio so looping and slow-down work like everywhere else.", pal().ink2);
             para(ui, "Note: no sign-in is used, so private and Go+ tracks may play as previews or not at all. Downloading may go against SoundCloud's terms; personal practice use is at your discretion.", pal().dim);
+        }
+        if !self.sc_sets.is_empty() {
+            section_header(ui, "PLAYLISTS (CLICK TO OPEN)");
+            for (i, (title, url)) in self.sc_sets.iter().enumerate() {
+                if let Some(r) =
+                    list_row(ui, i, Some(i + 1), || title.clone(), || "OPEN".to_string(), RowState::Normal, false, false)
+                {
+                    if r.clicked() {
+                        acts.push(Action::ScOpenSet(url.clone()));
+                    }
+                }
+            }
         }
         if !self.sc_results.is_empty() {
             section_header(ui, "RESULTS (RIGHT-CLICK TO KEEP)");

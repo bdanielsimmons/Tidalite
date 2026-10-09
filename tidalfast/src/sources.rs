@@ -332,6 +332,43 @@ pub fn sc_list(url: &str) -> Result<Vec<Ext>, String> {
     Ok(list)
 }
 
+/// A SoundCloud user (name or profile link): their playlists as (title, link).
+pub fn sc_sets(user: &str) -> Result<Vec<(String, String)>, String> {
+    let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
+    let u = user.trim().trim_end_matches('/');
+    let name = u.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.");
+    let name = name.trim_start_matches("soundcloud.com/").trim_start_matches('@');
+    let name = name.split('/').next().unwrap_or("");
+    if name.is_empty() {
+        return Err("type a SoundCloud user name or paste a profile link".to_string());
+    }
+    let url = format!("https://soundcloud.com/{}/sets", name);
+    let out = command(&exe)
+        .args(["--no-warnings", "--flat-playlist", "--dump-json", "--playlist-end", "60"])
+        .args(cookie_args())
+        .arg(&url)
+        .output()
+        .map_err(|e| format!("could not run yt-dlp: {}", e))?;
+    let mut list = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let link = v["url"].as_str().or_else(|| v["webpage_url"].as_str()).unwrap_or("");
+        if link.is_empty() {
+            continue;
+        }
+        let title = v["title"].as_str().unwrap_or(link).to_string();
+        list.push((title, link.to_string()));
+    }
+    if list.is_empty() {
+        return Err(if out.status.success() {
+            "no public playlists found for that user".to_string()
+        } else {
+            last_line(&out.stderr)
+        });
+    }
+    Ok(list)
+}
+
 /// Title / uploader / length / thumbnail of a clip.
 pub fn yt_info(vid: &str) -> Result<Ext, String> {
     let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;

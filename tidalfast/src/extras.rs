@@ -613,6 +613,19 @@ impl App {
                     }
                 }
             }
+            Msg::ScSets(r) => {
+                self.sc_busy = false;
+                match r {
+                    Ok(list) => {
+                        self.sc_msg = format!("{} PLAYLISTS - CLICK ONE TO OPEN IT", list.len());
+                        self.sc_sets = list;
+                    }
+                    Err(e) => {
+                        api::log(&format!("soundcloud sets: {}", e));
+                        self.sc_msg = format!("ERROR: {}", e);
+                    }
+                }
+            }
             Msg::Sc(r) => {
                 self.sc_busy = false;
                 match r {
@@ -848,6 +861,31 @@ impl App {
                     let _ = tx.send(Msg::Sc(r));
                     ctx.request_repaint();
                 });
+            }
+            Action::ScSets => {
+                if self.sc_busy {
+                    return;
+                }
+                let q = self.sc_in.trim().to_string();
+                if q.is_empty() {
+                    self.sc_msg = "TYPE A USER NAME FIRST".to_string();
+                    return;
+                }
+                if sources::ytdlp_path().is_none() {
+                    self.sc_msg = "PRESS GET YT-DLP FIRST (ONE-TIME SETUP)".to_string();
+                    return;
+                }
+                self.sc_busy = true;
+                self.sc_msg = "LOOKING FOR PLAYLISTS...".to_string();
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::ScSets(sources::sc_sets(&q)));
+                    ctx.request_repaint();
+                });
+            }
+            Action::ScOpenSet(url) => {
+                self.sc_in = url;
+                self.apply(Action::ScGo);
             }
             Action::ScBrowser => {
                 use std::sync::atomic::Ordering;
