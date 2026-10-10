@@ -205,8 +205,8 @@ pub struct Store {
     /// tempo and key found by listening to the audio (see meta.rs)
     pub meta: HashMap<i64, crate::meta::Info>,
     pub last: Option<Last>,
-    /// LINES: how many times each line has been played through, and your favorites
-    pub lines_done: HashMap<String, u32>,
+    /// LINES: the tempo each line was last played at, and your favorites
+    pub lines_tempo: HashMap<String, u32>,
     pub lines_stars: Vec<String>,
     /// practice progressions you typed in (Roman numerals)
     pub my_progs: Vec<String>,

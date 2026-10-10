@@ -47,6 +47,12 @@ enum Scene {
     PracticeMore(u8),
     /// the album view in practice mode, with its little practice strip
     AlbumPractice,
+    /// practice mode, the CHORDS tab on its chord finder
+    Chords,
+    /// practice mode, LINES on Slonimsky's Diary
+    Lines,
+    /// practice mode, the lead sheet on the right with a ii-V-I on it
+    Sheet,
 }
 
 struct Step {
@@ -59,10 +65,12 @@ struct Step {
     speed: u32,
     ab: bool,
     eq: Option<usize>,
+    /// done once when the step opens (the tour's song pauses for it): 1 strum a chord, 2 play a line, 3 the band
+    act: u8,
 }
 
 /// A step with nothing being demonstrated (fill in the rest).
-const BASE: Step = Step { key: "", scene: Scene::Normal, title: "", text: "", speed: 0, ab: false, eq: None };
+const BASE: Step = Step { key: "", scene: Scene::Normal, title: "", text: "", speed: 0, ab: false, eq: None, act: 0 };
 
 const BASIC: &[Step] = &[
     Step {
@@ -205,9 +213,33 @@ const PRACTICE_TOUR: &[Step] = &[
         ..BASE
     },
     Step {
+        key: "CHORDSVIEW",
+        scene: Scene::Chords,
+        title: "8. CHORDS",
+        text: "Find any chord: its notes, grips and the scales that fit, and hear it strummed. The other tabs name a chord you click on a neck, and teach clusters, drop voicings and passing chords.",
+        act: 1,
+        ..BASE
+    },
+    Step {
+        key: "LINESVIEW",
+        scene: Scene::Lines,
+        title: "9. LINES",
+        text: "Slonimsky's Diary and scales in 3rds, 4ths and more, written out in notation and tab, played back and looped at your tempo.",
+        act: 2,
+        ..BASE
+    },
+    Step {
+        key: "SHEET",
+        scene: Scene::Sheet,
+        title: "10. THE LEAD SHEET AND THE BAND",
+        text: "Every tune can have a chart, and a little band plays it at your tempo: bass, chords and drums. Drag across bars to loop just those. This one is a ii-V-I.",
+        act: 3,
+        ..BASE
+    },
+    Step {
         key: "TABS",
         scene: Scene::Practice,
-        title: "8. KEEP TRACK",
+        title: "11. KEEP TRACK",
         text: "The PRACTICE tab holds TUNES (your repertoire, recordings and charts the band can play) and the DIARY (what you practiced). DONE puts everything back the way you had it.",
         ..BASE
     },
@@ -227,6 +259,16 @@ pub(crate) struct TourPlay {
     last: Option<crate::store::Last>,
     /// repeat as it was (the tour plays its song on repeat one)
     repeat: crate::Repeat,
+    /// the library list, the right-hand tab, the lead sheet's practice chart and the CHORDS / LINES tabs as they were
+    sec: crate::Sec,
+    rtab: u8,
+    prac_chart: Option<(String, String)>,
+    chords_tab: u8,
+    ln_tab: u8,
+    /// the step whose action has been done, and whether the tour paused its song or started the band
+    acted: Option<usize>,
+    paused: bool,
+    band: bool,
     /// the tour's song, once it is the one playing
     song: Option<i64>,
 }
@@ -260,6 +302,14 @@ impl App {
             eq: (self.eq_gains, self.eq_on, self.show_eq),
             last: self.store.last.clone(),
             repeat: self.repeat,
+            sec: self.sec,
+            rtab: self.rtab,
+            prac_chart: self.prac_chart.clone(),
+            chords_tab: self.chords_tab,
+            ln_tab: self.ln_tab,
+            acted: None,
+            paused: false,
+            band: false,
             song: None,
         };
         self.tour_play = Some(snap);
@@ -357,6 +407,14 @@ impl App {
     /// playing), the speed, the loop and the equalizer.
     fn tour_unplay(&mut self) {
         let Some(s) = self.tour_play.take() else { return };
+        if s.band && self.band_on {
+            self.apply(Action::Opt(crate::extras::Opt::Band));
+        }
+        self.sec = s.sec;
+        self.rtab = s.rtab;
+        self.prac_chart = s.prac_chart.clone();
+        self.chords_tab = s.chords_tab;
+        self.ln_tab = s.ln_tab;
         if s.song.is_some() {
             self.apply(Action::StopBtn);
         }
@@ -396,7 +454,7 @@ impl App {
         let want_art = matches!(scene, Scene::Album | Scene::AlbumPractice);
         let want_practice = match scene {
             Scene::PracticeOff => false,
-            Scene::Practice | Scene::PracticeMore(_) | Scene::AlbumPractice => true,
+            Scene::Practice | Scene::PracticeMore(_) | Scene::AlbumPractice | Scene::Chords | Scene::Lines | Scene::Sheet => true,
             _ => practice,
         };
         let (want_more, want_tab) = match scene {
@@ -411,6 +469,85 @@ impl App {
         }
         self.more = want_more;
         self.mtab = want_tab;
+        match scene {
+            Scene::Chords => {
+                self.sec = crate::Sec::Chords;
+                self.chords_tab = 0;
+            }
+            Scene::Lines => {
+                self.sec = crate::Sec::Lines;
+                self.ln_tab = 0;
+            }
+            Scene::Sheet => {
+                self.rtab = 1;
+                if self.prac_chart.as_ref().map(|c| c.0.as_str()) != Some("II V I IN C") {
+                    self.prac_chart =
+                        Some(("II V I IN C".to_string(), crate::lines::progression_chart("II V I", 0, false, true, false)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A step's one-off: the tour's song pauses, then a chord is strummed, a line played or the band started.
+    /// Leaving those steps stops the band and lets the song go on.
+    fn tour_act(&mut self, i: usize, act: u8) {
+        let Some(s) = self.tour_play.as_ref() else { return };
+        if s.acted == Some(i) || s.song.is_none() {
+            return;
+        }
+        let (was_paused, had_band) = (s.paused, s.band);
+        if let Some(s) = self.tour_play.as_mut() {
+            s.acted = Some(i);
+        }
+        if act == 0 {
+            if had_band && self.band_on {
+                self.apply(Action::Opt(crate::extras::Opt::Band));
+            }
+            if was_paused && self.paused {
+                self.apply(Action::PlayBtn);
+            }
+            if let Some(s) = self.tour_play.as_mut() {
+                (s.paused, s.band) = (false, false);
+            }
+            return;
+        }
+        if !self.paused && !self.stopped {
+            self.apply(Action::PauseBtn);
+            if let Some(s) = self.tour_play.as_mut() {
+                s.paused = true;
+            }
+        }
+        if act != 3 && had_band && self.band_on {
+            self.apply(Action::Opt(crate::extras::Opt::Band));
+            if let Some(s) = self.tour_play.as_mut() {
+                s.band = false;
+            }
+        }
+        match act {
+            1 => {
+                self.chord_q = "Cmaj7".to_string();
+                if let Some(c) = crate::theory::chord_notes("Cmaj7") {
+                    self.apply(Action::PlayNotes(crate::chords::piano_voicing(&c)));
+                }
+            }
+            2 => {
+                // the line on show: a pattern from the book when one was added, else one from Slonimsky's system
+                let notes = crate::lines::book()
+                    .first()
+                    .map(|l| l.notes())
+                    .unwrap_or_else(|| crate::lines::slonimsky_line(48, 6, &[0, 1]));
+                self.apply(Action::PlaySequenceAt(notes.iter().map(|m| vec![*m]).collect(), 0.18, "line".to_string()));
+            }
+            _ => {
+                if !self.band_on {
+                    self.apply(Action::Opt(crate::extras::Opt::Band));
+                    if let Some(s) = self.tour_play.as_mut() {
+                        s.band = true;
+                    }
+                }
+            }
+        }
     }
 
     /// The tour is over: everything back the way it was.
@@ -434,6 +571,7 @@ impl App {
         let step = &list[i];
         self.tour_scene(step.scene);
         self.tour_demo(step.speed, step.ab, step.eq);
+        self.tour_act(i, step.act);
         let screen = ctx.screen_rect();
         let target = if step.key.is_empty() { None } else { find(step.key) };
         // dim everything except the highlighted window
@@ -753,6 +891,9 @@ mod tests {
             include_str!("player_win.rs"),
             include_str!("album_view.rs"),
             include_str!("views.rs"),
+            include_str!("chords.rs"),
+            include_str!("lines.rs"),
+            include_str!("tools.rs"),
         ]
         .concat();
         for s in BASIC.iter().chain(PRACTICE_TOUR) {

@@ -539,6 +539,7 @@ impl App {
 
     // ---------------------------------------------------------- LEAD SHEET
     pub(crate) fn chart_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        crate::tour::mark("SHEET", ui.clip_rect());
         let ti = self.chart_tune();
         let playing_title = self.cur_track().filter(|_| !self.stopped).map(|t| t.title.clone());
         // what is on show: a saved tune, or whatever is playing (looked up on its own)

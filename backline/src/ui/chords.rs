@@ -353,6 +353,7 @@ pub(crate) fn neck_alpha(
 impl App {
     /// The CHORDS tab.
     pub(crate) fn chords_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        crate::tour::mark("CHORDSVIEW", ui.clip_rect());
         // a sequence playing: keep redrawing so the chord sounding now lights up
         self.seq_tick(ui.ctx());
         ui.add_space(6.0);

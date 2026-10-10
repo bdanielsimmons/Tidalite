@@ -185,10 +185,6 @@ impl App {
         let el = t0.elapsed().as_secs_f32();
         let pass = gap * len as f32;
         if tag == "line" && el >= pass + gap {
-            if !self.ln_playing.is_empty() {
-                *self.store.lines_done.entry(self.ln_playing.clone()).or_default() += 1;
-                self.store_dirty = true;
-            }
             match (self.ln_loop, self.seq_last.clone()) {
                 (true, Some(seq)) => {
                     self.player.send(Cmd::Once(band::line_sound(&seq, gap), 0.9));
@@ -204,6 +200,7 @@ impl App {
     }
 
     pub(crate) fn lines_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        crate::tour::mark("LINESVIEW", ui.clip_rect());
         self.seq_tick(ui.ctx());
         ui.add_space(6.0);
         if let Some(t) = tab_row(ui, &["SLONIMSKY'S DIARY", "SCALES"], self.ln_tab as usize) {
@@ -219,9 +216,14 @@ impl App {
 
     /// PLAY / STOP, LOOP, the tempo and the note value, and how many times this line has been played.
     fn line_player(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, notes: &[i32], key: &str) {
-        if self.seq_now("line").is_none() {
+        // a different line: back to the tempo it was last played at
+        if self.seq_now("line").is_none() && self.ln_playing != key {
             self.ln_playing = key.to_string();
+            if let Some(b) = self.store.lines_tempo.get(key) {
+                self.ln_bpm = *b;
+            }
         }
+        let before = self.ln_bpm;
         let gap = 60.0 / self.ln_bpm.max(20) as f32 / self.ln_sub.max(1) as f32;
         ui.horizontal_wrapped(|ui| {
             self.seq_button(
@@ -251,13 +253,12 @@ impl App {
                 }
             }
         });
+        // the tempo is kept with the line
+        if self.ln_bpm != before {
+            self.store.lines_tempo.insert(key.to_string(), self.ln_bpm);
+            self.store_dirty = true;
+        }
         ui.horizontal_wrapped(|ui| {
-            let n = self.store.lines_done.get(key).copied().unwrap_or(0);
-            lcd_box(ui, &format!("PLAYED {}x", n), 110.0, if n > 0 { pal().ink } else { pal().ink2 });
-            if retro_btn_w(ui, "+1", 34.0, false).tip("Count a time through that you played on your own").clicked() {
-                *self.store.lines_done.entry(key.to_string()).or_default() += 1;
-                self.store_dirty = true;
-            }
             let starred = self.store.lines_stars.iter().any(|s| s == key);
             if retro_btn(ui, if starred { "* FAVORITE" } else { "+ FAVORITE" }, starred)
                 .tip("Keep this one in your favorites")
