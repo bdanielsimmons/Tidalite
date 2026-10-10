@@ -7,11 +7,14 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
-- **v9.57:** The tour plays "Local Forecast - Elevator" by Kevin MacLeod (Creative Commons Attribution) and shows each feature working on it: a slower speed, a loop, the equalizer
-- **v9.57:** When the tour ends, everything comes back: your queue, your song and where you were, the speed, the loop and the EQ
-- **v9.57:** Skins you wore lately are in a WORN LATELY drop-down on the Winamp skins page, each with an X
-- **v9.49:** An opening sound - Tidalite's own glassy chime with reverb, or a sound file of yours (Preferences > OPENING SOUND)
-- **v9.49:** Tunes keep their tempo, and a tempo written in a tune's notes is picked up (no more starting Cherokee at 100)
+- **v9.60:** Three tabs - MUSIC, PRACTICE and TIDALITE (skins, settings, Winamp skins, storage and the log) - with one back / forward history for the whole library
+- **v9.60:** The practice panel has tabs (LOOP & SPEED, TRAINER, PITCH & EAR, STEMS), 1% speed steps you can type, and scales with its size
+- **v9.60:** Drag handles under the player and above the practice panel; the playlist and practice panel scale smoothly
+- **v9.60:** YouTube playlists load in full and fold up into one card with their name, song count, PLAY, SHUFFLE, SAVE and X
+- **v9.60:** The equalizer's preamp works, and repeat-one shows a small 1 on Winamp skins
+- **v9.60:** The tour plays "Local Forecast - Elevator" by Kevin MacLeod (Creative Commons Attribution) and shows each feature working on it: a slower speed, a loop, the equalizer
+- **v9.60:** When the tour ends, everything comes back: your queue, your song and where you were, the speed, the loop and the EQ
+- **v9.60:** Skins you wore lately are in a WORN LATELY drop-down on the Winamp skins page, each with an X
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
