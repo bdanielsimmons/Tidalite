@@ -1963,6 +1963,11 @@ fn page_view(
                     _ => ("Artists", "ARTISTS"),
                 };
                 title_line(ui, name, 3.0, pal().ink);
+                ui.add_space(4.0);
+                // the same library load brings these, so the same REFRESH
+                if ibtn(ui, &IC_REP, "REFRESH", false).tip("Load your library from Tidal again").clicked() {
+                    acts.push(Action::RefreshLibrary);
+                }
                 ui.add_space(6.0);
                 let mut any = false;
                 for (title, cards) in &page.rows {
