@@ -276,6 +276,17 @@ impl App {
         }
     }
 
+    /// Is this the tour's own song, playing during a tour? Then it is a demo: nothing you saved shows on it (loops,
+    /// sections, stems) and nothing it does is saved (practice time, loops, EQ).
+    pub(crate) fn is_demo(&self, id: i64) -> bool {
+        self.tour_play.as_ref().and_then(|s| s.song) == Some(id)
+    }
+
+    /// The song playing is the tour's own.
+    pub(crate) fn demo_playing(&self) -> bool {
+        self.cur_track().is_some_and(|t| self.is_demo(t.id))
+    }
+
     /// Put on the tour's song (if the tour is still on and nothing has been put on yet).
     pub(crate) fn tour_put_on(&mut self, path: std::path::PathBuf) {
         if self.tour.is_none() || self.tour_play.as_ref().map_or(true, |s| s.song.is_some()) {

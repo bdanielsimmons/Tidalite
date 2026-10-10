@@ -280,7 +280,12 @@ impl App {
                 }
             });
         } else {
-            ptext(&p, art_zone.center(), Align::Center, "Nothing playing", 3.0, pal().trim);
+            // no song: the words breathe slowly in and out, in a few hard steps like an old screen
+            let t = ui.input(|i| i.time) as f32;
+            let breath = ((t * std::f32::consts::TAU / 5.0).sin() + 1.0) / 2.0;
+            let level = (breath * 4.0).round() / 4.0;
+            ptext(&p, art_zone.center(), Align::Center, "NO TRACK PLAYING", 3.0, pal().trim.gamma_multiply(0.2 + 0.8 * level));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
         }
 
         // ---- lyrics
@@ -387,6 +392,7 @@ impl App {
             let x_at = |t: f32| sb.min.x + 2.0 + (sb.width() - 4.0) * (t / dur).clamp(0.0, 1.0);
             let secs: Vec<(String, f32, f32)> = self
                 .cur_track()
+                .filter(|t| !self.is_demo(t.id))
                 .and_then(|t| self.store.sections.get(&t.id))
                 .map(|l| l.iter().map(|s| (s.name.clone(), s.a, s.b)).collect())
                 .unwrap_or_default();

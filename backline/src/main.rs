@@ -3236,7 +3236,8 @@ impl App {
         self.player.ctl.set_chan(if self.practice { self.chan } else { 0 });
         self.player.ctl.set_balance(self.balance);
         self.player.ctl.set_count_in(if self.practice { self.count_in } else { 0 }, self.bpm as f32);
-        if let Some(t) = self.cur_track() {
+        // the loop is remembered for the song (not for the tour's demo song)
+        if let Some(t) = self.cur_track().filter(|t| !self.is_demo(t.id)) {
             match both {
                 Some(ab) => {
                     self.loops.insert(t.id, ab);

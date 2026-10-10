@@ -1212,7 +1212,7 @@ impl App {
     /// AUTO on: keep the EQ for the song playing.
     pub(crate) fn eq_remember(&mut self) {
         if self.eq_auto {
-            if let Some(id) = self.cur_track().map(|t| t.id) {
+            if let Some(id) = self.cur_track().map(|t| t.id).filter(|id| !self.is_demo(*id)) {
                 self.eq_songs.insert(id, self.eq_gains);
             }
         }

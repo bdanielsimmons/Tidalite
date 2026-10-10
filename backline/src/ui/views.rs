@@ -1688,7 +1688,7 @@ impl App {
                 }
             }
             // saved sections as faint bands along the bottom
-            if let Some(list) = tid.and_then(|id| self.store.sections.get(&id)) {
+            if let Some(list) = tid.filter(|id| !self.is_demo(*id)).and_then(|id| self.store.sections.get(&id)) {
                 for s in list {
                     fill_rect(
                         &p,
@@ -1940,6 +1940,7 @@ impl App {
             }
         });
         let secs: Vec<(String, f32, f32)> = tid
+            .filter(|id| !self.is_demo(*id))
             .and_then(|id| self.store.sections.get(&id))
             .map(|l| l.iter().map(|s| (s.name.clone(), s.a, s.b)).collect())
             .unwrap_or_default();
@@ -2099,6 +2100,14 @@ impl App {
                     lcd_box(ui, &format!("{} {}/{}", stems::stage_text(), d, t), 240.0, pal().ink2);
                     if retro_btn(ui, "CANCEL", false).clicked() {
                         acts.push(Action::StemCancel);
+                    }
+                } else if tid.is_some_and(|id| self.is_demo(id)) {
+                    // the tour's song shows the button you would see on any song not split yet
+                    if retro_btn_w(ui, "SPLIT THIS TRACK", 190.0, false)
+                        .tip("Separates a track into drums, bass, other and vocals. Not during the tour.")
+                        .clicked()
+                    {
+                        self.set_note("NOT DURING THE TOUR");
                     }
                 } else if !stems::tool_ready() {
                     if retro_btn_w(ui, "GET STEMS TOOL (170 MB)", 230.0, false)

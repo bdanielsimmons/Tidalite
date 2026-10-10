@@ -285,6 +285,11 @@ impl App {
         if secs == 0 {
             return;
         }
+        // the tour's demo song is not practice
+        if self.demo_playing() {
+            self.acc = 0.0;
+            return;
+        }
         self.acc -= secs as f32;
         let label = self.practice_label();
         let date = store::today_str();
@@ -294,6 +299,9 @@ impl App {
     }
 
     fn on_loops(&mut self, n: u32) {
+        if self.demo_playing() {
+            return;
+        }
         let date = store::today_str();
         self.store.day_mut(&date).loops += n;
         self.store_dirty = true;
@@ -662,15 +670,15 @@ impl App {
     /// A new track is about to start: restore its loop and tempo, reset per-track practice state.
     pub(crate) fn on_track_change(&mut self, t: &Track) {
         self.flush_practice();
-        // equalizer AUTO: this song's own EQ, if one was kept
-        if self.eq_auto {
+        // equalizer AUTO: this song's own EQ, if one was kept (never for the tour's demo song)
+        if self.eq_auto && !self.is_demo(t.id) {
             if let Some(g) = self.eq_songs.get(&t.id).copied() {
                 self.eq_gains = g;
                 self.eq_on = true;
                 self.apply_eq();
             }
         }
-        match self.loops.get(&t.id).copied() {
+        match self.loops.get(&t.id).copied().filter(|_| !self.is_demo(t.id)) {
             Some((a, b)) => {
                 self.loop_a = Some(a);
                 self.loop_b = Some(b);
@@ -1813,6 +1821,10 @@ impl App {
                     return;
                 };
                 let Some(t) = self.cur_track() else { return };
+                if self.is_demo(t.id) {
+                    self.set_note("NOT DURING THE TOUR");
+                    return;
+                }
                 let typed = self.sec_name.trim().to_string();
                 let list = self.store.sections.entry(t.id).or_default();
                 if list.iter().any(|s| (s.a - a).abs() < 0.05 && (s.b - b).abs() < 0.05) {
@@ -2152,7 +2164,7 @@ impl App {
             self.set_note("PLAY THE TRACK FIRST");
             return;
         }
-        if !stems::have_stems(t.id) {
+        if !stems::have_stems(t.id) || self.is_demo(t.id) {
             self.set_note("SPLIT THIS TRACK FIRST");
             return;
         }
