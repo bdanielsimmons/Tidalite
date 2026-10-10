@@ -376,18 +376,39 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             title_line(ui, "WINAMP SKINS", 3.0, pal().ink);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if retro_btn(ui, "CLOSE", false).tip("Back to the library (mouse back works too; forward returns here)").clicked()
-                {
-                    acts.push(Action::Back);
-                }
-            });
+            // the ones worn lately, in a drop-down: click one to wear it again, X to take it off the list
+            if !self.wa_recent.is_empty() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let dd = retro_btn(ui, "WORN LATELY  v", false).tip("Skins you wore lately");
+                    let menu = ui.id().with("worn_lately");
+                    if dd.clicked() {
+                        ui.memory_mut(|m| m.toggle_popup(menu));
+                    }
+                    let worn_now = self.wa_worn.as_ref().map(|w| w.0.clone());
+                    egui::popup::popup_below_widget(ui, menu, &dd, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                        ui.set_min_width(260.0);
+                        for (md5, name) in self.wa_recent.clone() {
+                            ui.horizontal(|ui| {
+                                if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
+                                    acts.push(Action::WaForget(md5.clone()));
+                                }
+                                let on = worn_now.as_deref() == Some(md5.as_str());
+                                if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name.to_uppercase())) {
+                                    acts.push(Action::WaApply(crate::winamp::WaSkin {
+                                        md5,
+                                        name,
+                                        shot: String::new(),
+                                        download: String::new(),
+                                    }));
+                                    ui.memory_mut(|m| m.close_popup());
+                                }
+                            });
+                        }
+                    });
+                });
+            }
         });
-        para(
-            ui,
-            "From the Winamp Skin Museum. Click one to wear it; the ones you wore lately stay in the TIDALITE menu.",
-            pal().ink2,
-        );
+        para(ui, "From the Winamp Skin Museum. Click one to wear it. The back arrow takes you back.", pal().ink2);
         if let Some((_, name)) = &self.wa_worn {
             para(ui, &format!("WEARING: {}", name.to_uppercase()), pal().ink);
         }
@@ -412,33 +433,6 @@ impl App {
                 acts.push(Action::WaSearch);
             }
         });
-        // the ones worn lately: click to wear again, X to take one off the list
-        if !self.wa_recent.is_empty() {
-            ui.add_space(6.0);
-            let worn_now = self.wa_worn.as_ref().map(|w| w.0.clone());
-            ui.horizontal_wrapped(|ui| {
-                crate::views::label(ui, "WORN LATELY", 110.0);
-                for (md5, name) in self.wa_recent.clone() {
-                    // a name and its X stay together when the row wraps
-                    ui.horizontal(|ui| {
-                        let on = worn_now.as_deref() == Some(md5.as_str());
-                        let w = (text_w(&name, 2.0) + 20.0).min(200.0);
-                        if retro_btn_w(ui, &name, w, on).tip("Wear it again").clicked() {
-                            acts.push(Action::WaApply(crate::winamp::WaSkin {
-                                md5: md5.clone(),
-                                name: name.clone(),
-                                shot: String::new(),
-                                download: String::new(),
-                            }));
-                        }
-                        if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
-                            acts.push(Action::WaForget(md5));
-                        }
-                    });
-                    ui.add_space(6.0);
-                }
-            });
-        }
         ui.add_space(8.0);
         let list = self.wa_list.clone();
         let worn = self.wa_worn.as_ref().map(|w| w.0.clone());
@@ -579,7 +573,12 @@ impl App {
             }
             done = true;
         }
-        if menu_item(ui, if self.show_winamp { "Winamp skins  (close)" } else { "Winamp skins: browse and try on" }) {
+        // the Winamp skin worn (or the way in to them): opens the skin browser
+        let wa_label = match &self.wa_worn {
+            Some((md5, name)) if !md5.starts_with("gen:") => format!("> WINAMP: {}", name.to_uppercase()),
+            _ => "> WINAMP SKINS".to_string(),
+        };
+        if menu_item(ui, &wa_label) && !self.show_winamp {
             acts.push(Action::WaOpen);
         }
         ui.add_space(4.0);
@@ -631,7 +630,9 @@ impl App {
                     acts.push(Action::Library);
                 }
                 self.app_menu(ui, acts);
-                if !self.back.is_empty() && icon_btn_w(ui, &IC_BACK, false, pal().ink, 38.0).tip("Back").clicked() {
+                if (!self.back.is_empty() || self.show_winamp)
+                    && icon_btn_w(ui, &IC_BACK, false, pal().ink, 38.0).tip("Back").clicked()
+                {
                     acts.push(Action::Back);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

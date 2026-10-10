@@ -7,14 +7,14 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- **v9.55:** The tour shows each feature working on a song: a slower speed, a loop, the equalizer
+- **v9.55:** When the tour ends, everything comes back: your queue, your song and where you were, the speed, the loop and the EQ
+- **v9.55:** Skins you wore lately are in a WORN LATELY drop-down on the Winamp skins page, each with an X
 - **v9.49:** An opening sound - Tidalite's own glassy chime with reverb, or a sound file of yours (Preferences > OPENING SOUND)
 - **v9.49:** Tunes keep their tempo, and a tempo written in a tune's notes is picked up (no more starting Cherokee at 100)
 - **v9.49:** The Winamp skins you wore are listed in the browser and the menu, each with an X to take it off
 - **v9.48:** Skins sorted into ORIGINAL (sleek, Silkscreen), RETRO ORIGINAL (the classic pixel look) and WINAMP
 - **v9.48:** Your last 8 Winamp skins stay in the menu, back in one click
-- **v9.48:** Practice panel: roomier, A and B, a speed drop-down; timer and metronome in their own corner
-- **v9.47:** Every Tidalite skin now comes as a Winamp-style skin drawn by Tidalite itself - SLEEK (the new default) or PIXEL
-- **v9.47:** Art view song titles in soft white or soft black, with a right-click menu for size and colour
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
