@@ -12,6 +12,8 @@ struct Mix {
     buf: Vec<f32>,
     spb: f32,
     rng: u32,
+    /// how loud each part plays: bass, chords, drums (1 = as made)
+    lv: [f32; 3],
 }
 
 fn freq(midi: i32) -> f32 {
@@ -21,7 +23,7 @@ fn freq(midi: i32) -> f32 {
 impl Mix {
     fn new(beats: f32, bpm: f32) -> Mix {
         let spb = 60.0 / bpm.max(20.0) * RATE;
-        Mix { buf: vec![0.0; ((beats * spb).round() as usize).max(1)], spb, rng: 0x9E37_79B9 }
+        Mix { buf: vec![0.0; ((beats * spb).round() as usize).max(1)], spb, rng: 0x9E37_79B9, lv: [1.0; 3] }
     }
 
     fn start(&self, beat: f32) -> usize {
@@ -47,7 +49,7 @@ impl Mix {
             let x = i as f32 / RATE;
             let env = (-x * 5.0).exp() * (i as f32 / 120.0).min(1.0);
             let w = (std::f32::consts::TAU * f * x).sin() + 0.35 * (std::f32::consts::TAU * 2.0 * f * x).sin() * (-x * 9.0).exp();
-            self.add(s, i, w * env * 0.55 * vel);
+            self.add(s, i, w * env * 0.55 * vel * self.lv[0]);
         }
     }
 
@@ -64,7 +66,7 @@ impl Mix {
                 let w = (std::f32::consts::TAU * f * x).sin()
                     + 0.5 * (std::f32::consts::TAU * 2.0 * f * x).sin()
                     + 0.22 * (std::f32::consts::TAU * 3.0 * f * x).sin();
-                self.add(s + off, i, w * env * 0.1 * vel);
+                self.add(s + off, i, w * env * 0.1 * vel * self.lv[1]);
             }
         }
     }
@@ -75,7 +77,7 @@ impl Mix {
         for i in 0..(RATE * 0.25) as usize {
             let x = i as f32 / RATE;
             ph += std::f32::consts::TAU * (48.0 + 95.0 * (-x * 32.0).exp()) / RATE;
-            self.add(s, i, ph.sin() * (-x * 14.0).exp() * 0.8 * vel);
+            self.add(s, i, ph.sin() * (-x * 14.0).exp() * 0.8 * vel * self.lv[2]);
         }
     }
 
@@ -84,7 +86,7 @@ impl Mix {
         for i in 0..(RATE * 0.2) as usize {
             let x = i as f32 / RATE;
             let v = self.noise() * (-x * 22.0).exp() * 0.4 + (std::f32::consts::TAU * 190.0 * x).sin() * (-x * 30.0).exp() * 0.3;
-            self.add(s, i, v * vel);
+            self.add(s, i, v * vel * self.lv[2]);
         }
     }
 
@@ -95,7 +97,7 @@ impl Mix {
         for i in 0..(RATE * len) as usize {
             let x = i as f32 / RATE;
             let n = self.noise();
-            let v = (n - prev) * (-x * dec).exp() * 0.22 * vel;
+            let v = (n - prev) * (-x * dec).exp() * 0.22 * vel * self.lv[2];
             prev = n;
             self.add(s, i, v);
         }
@@ -109,7 +111,7 @@ impl Mix {
             let n = self.noise();
             let ping: f32 =
                 [3300.0f32, 4900.0, 6700.0].iter().map(|f| (std::f32::consts::TAU * f * x).sin()).sum::<f32>() * 0.035;
-            let v = (ping * (-x * 7.0).exp() + (n - prev) * (-x * 10.0).exp() * 0.05) * vel;
+            let v = (ping * (-x * 7.0).exp() + (n - prev) * (-x * 10.0).exp() * 0.05) * vel * self.lv[2];
             prev = n;
             self.add(s, i, v);
         }
@@ -121,7 +123,7 @@ impl Mix {
             let x = i as f32 / RATE;
             let v = (std::f32::consts::TAU * 1750.0 * x).sin() * (-x * 90.0).exp() * 0.35;
             let n = self.noise() * (-x * 120.0).exp() * 0.1;
-            self.add(s, i, (v + n) * vel);
+            self.add(s, i, (v + n) * vel * self.lv[2]);
         }
     }
 
@@ -299,16 +301,16 @@ pub fn count_in(beats: u32, bpm: f32) -> Vec<i16> {
 }
 
 // ------------------------------------------------------------------------ chords
-struct Chord {
-    root: i32,
-    third: i32,
-    fifth: i32,
-    seventh: Option<i32>,
-    ext: Option<i32>,
-    bass: i32,
+pub(crate) struct Chord {
+    pub(crate) root: i32,
+    pub(crate) third: i32,
+    pub(crate) fifth: i32,
+    pub(crate) seventh: Option<i32>,
+    pub(crate) ext: Option<i32>,
+    pub(crate) bass: i32,
 }
 
-fn parse_chord(c: &str) -> Option<Chord> {
+pub(crate) fn parse_chord(c: &str) -> Option<Chord> {
     // typed changes may use iReal's short spelling (D-7, C^7, Bh7, Co7): read them like Dm7, Cmaj7...
     let c = chart::pretty_chord(c);
     let mut it = c.split('/');
@@ -389,7 +391,10 @@ impl Chord {
     }
 }
 
-pub const STYLES: [&str; 5] = ["SWING", "BALLAD", "BOSSA", "SHUFFLE", "STRAIGHT"];
+pub const STYLES: [&str; 9] = ["SWING", "BALLAD", "BOSSA", "SHUFFLE", "STRAIGHT", "FUNK", "HIP HOP", "SAMBA", "REGGAE"];
+
+/// The jazz waltz (any chart in 3/4 plays it, whatever style is picked).
+const WALTZ: u8 = 99;
 
 fn swing(t: f32, on: bool) -> f32 {
     if on && (t.fract() - 0.5).abs() < 0.01 {
@@ -399,14 +404,45 @@ fn swing(t: f32, on: bool) -> f32 {
     }
 }
 
-/// Render the chart as an endless backing loop: bass, chords and drums in the chosen style.
-/// `parts` switches [bass, chords, drums] on or off.
-pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool; 3]) -> Vec<i16> {
+/// Render the chart as a backing track: bass, chords and drums in the chosen style. `lv` is how loud each part is
+/// [bass, chords, drums] (0 = off). With `ending` off it loops seamlessly (the last notes ring into the start);
+/// with it on, it plays once and ends on the first bar's chord, ringing out (for a file to keep).
+pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, lv: [f32; 3], ending: bool) -> Vec<i16> {
+    mix_parts(&render_parts(chart, order, bpm, style, ending), lv)
+}
+
+/// The band's three parts rendered apart (bass, chords, drums), so their levels can change later without
+/// rendering again: `mix_parts` puts them together in a moment.
+pub fn render_parts(chart: &Chart, order: &[usize], bpm: f32, style: u8, ending: bool) -> [Vec<f32>; 3] {
+    [0usize, 1, 2].map(|i| {
+        let mut lv = [0.0; 3];
+        lv[i] = 1.0;
+        render_raw(chart, order, bpm, style, lv, ending)
+    })
+}
+
+/// The parts mixed at these levels. The loudness is set by the full mix, so turning a part down really is softer.
+pub fn mix_parts(parts: &[Vec<f32>; 3], lv: [f32; 3]) -> Vec<i16> {
+    let n = parts.iter().map(|p| p.len()).max().unwrap_or(0);
+    let full = (0..n).map(|i| parts.iter().map(|p| p.get(i).copied().unwrap_or(0.0)).sum::<f32>().abs()).fold(0.0f32, f32::max);
+    let peak = full.max(0.85);
+    (0..n)
+        .map(|i| {
+            let v: f32 = (0..3).map(|k| parts[k].get(i).copied().unwrap_or(0.0) * lv[k]).sum();
+            ((v / peak * 1.15).tanh() * 26000.0) as i16
+        })
+        .collect()
+}
+
+fn render_raw(chart: &Chart, order: &[usize], bpm: f32, style: u8, lv: [f32; 3], ending: bool) -> Vec<f32> {
     let nb = chart.beats.clamp(2, 7) as usize;
-    let mut mix = Mix::new((order.len() * nb) as f32, bpm);
+    let tail = if ending { nb * 2 } else { 0 };
+    let mut mix = Mix::new((order.len() * nb + tail) as f32, bpm);
+    mix.lv = lv;
+    let parts = [lv[0] > 0.0, lv[1] > 0.0, lv[2] > 0.0];
     let chords_of = |bar: usize| -> Vec<Option<Chord>> { chart.bars[bar].chords.iter().map(|c| parse_chord(c)).collect() };
-    let style = if nb == 3 { 5 } else { style };
-    let jazz = style == 0 || style == 5;
+    let style = if nb == 3 { WALTZ } else { style };
+    let jazz = style == 0 || style == WALTZ;
     for (oi, bar_ix) in order.iter().enumerate() {
         let cs = chords_of(*bar_ix);
         let next_cs = chords_of(order[(oi + 1) % order.len()]);
@@ -436,7 +472,7 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
             // ---- bass
             if parts[0] {
                 match style {
-                    0 | 5 => {
+                    0 | WALTZ => {
                         let pc = if pos == 0 {
                             ch.bass
                         } else if b + 1 == e && len > 1 {
@@ -446,7 +482,7 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
                         } else {
                             ch.root + ch.fifth
                         };
-                        let vel = if style == 5 && b > 0 { 0.7 } else { 1.0 };
+                        let vel = if style == WALTZ && b > 0 { 0.7 } else { 1.0 };
                         mix.bass(t, 0.95, bass_midi(pc.rem_euclid(12)), vel);
                     }
                     1 => {
@@ -462,6 +498,48 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
                         }
                         if pos % 2 == 1 || len == 1 {
                             mix.bass(t + 0.5, 1.0, bass_midi((ch.root + ch.fifth) % 12), 0.85);
+                        }
+                    }
+                    5 => {
+                        // funk: a syncopated sixteenth line, root, octave, fifth and a seventh pickup
+                        match b % 4 {
+                            0 => {
+                                mix.bass(t, 0.4, bass_midi(ch.bass), 1.0);
+                                mix.bass(t + 0.75, 0.2, bass_midi(ch.bass) + 12, 0.8);
+                            }
+                            1 => mix.bass(t + 0.5, 0.3, bass_midi((ch.root + ch.fifth) % 12), 0.85),
+                            2 => {
+                                mix.bass(t, 0.25, bass_midi(ch.bass), 0.95);
+                                mix.bass(t + 0.25, 0.2, bass_midi(ch.bass), 0.7);
+                            }
+                            _ => mix.bass(t + 0.5, 0.4, bass_midi((ch.root + ch.seventh.unwrap_or(10)) % 12), 0.85),
+                        }
+                    }
+                    6 => {
+                        // hip hop: long, lazy roots, one pushed a little late
+                        if pos == 0 {
+                            mix.bass(t, (len as f32).min(1.6), bass_midi(ch.bass), 1.0);
+                        }
+                        if b % 4 == 1 {
+                            mix.bass(t + 0.75, 0.9, bass_midi(ch.bass), 0.85);
+                        }
+                    }
+                    7 => {
+                        // samba: the surdo's short-long, root then fifth
+                        if b % 2 == 0 {
+                            mix.bass(t, 0.6, bass_midi(ch.bass), 0.9);
+                        } else {
+                            mix.bass(t, 0.5, bass_midi((ch.root + ch.fifth) % 12), 1.0);
+                            mix.bass(t + 0.75, 0.25, bass_midi(ch.bass), 0.7);
+                        }
+                    }
+                    8 => {
+                        // reggae: a round, melodic line that leaves beat three open
+                        match b % 4 {
+                            0 => mix.bass(t, 0.9, bass_midi(ch.bass), 1.0),
+                            1 => mix.bass(t + 0.5, 0.5, bass_midi((ch.root + ch.third) % 12), 0.85),
+                            3 => mix.bass(t, 0.9, bass_midi((ch.root + ch.fifth) % 12), 0.9),
+                            _ => {}
                         }
                     }
                     3 => {
@@ -509,6 +587,32 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
                             mix.stab(t, 0.6, &v, 0.6, 8.0);
                         }
                     }
+                    // funk: short, choppy hits on the off-sixteenths
+                    5 => {
+                        if b % 2 == 0 {
+                            mix.stab(t + 0.5, 0.2, &v, 0.6, 16.0);
+                        } else {
+                            mix.stab(t + 0.25, 0.2, &v, 0.55, 16.0);
+                            mix.stab(t + 0.75, 0.2, &v, 0.45, 16.0);
+                        }
+                    }
+                    // hip hop: soft held chords, like a sample
+                    6 => {
+                        if pos == 0 {
+                            mix.stab(t, len as f32, &v, 0.5, 1.0);
+                        }
+                    }
+                    // samba: the partido-alto push
+                    7 => {
+                        if b % 2 == 0 {
+                            mix.stab(t + 0.5, 0.3, &v, 0.6, 10.0);
+                        } else {
+                            mix.stab(t + 0.25, 0.3, &v, 0.55, 10.0);
+                            mix.stab(t + 0.75, 0.3, &v, 0.5, 10.0);
+                        }
+                    }
+                    // reggae: the skank on every off-beat
+                    8 => mix.stab(t + 0.5, 0.2, &v, 0.6, 18.0),
                     _ => {
                         if b > 0 {
                             mix.stab(t, 0.7, &v, 0.65, 8.0);
@@ -521,7 +625,7 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
             if parts[2] {
                 let sw = jazz;
                 match style {
-                    0 | 5 => {
+                    0 | WALTZ => {
                         mix.ride(t, 0.9);
                         if b % 2 == 1 || nb == 3 && b > 0 {
                             mix.ride(t + swing(0.5, sw), 0.5);
@@ -529,7 +633,7 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
                         if b % 2 == 1 {
                             mix.hat(t, false, 0.7);
                         }
-                        mix.kick(t, if style == 5 { 0.5 } else { 0.18 });
+                        mix.kick(t, if style == WALTZ { 0.5 } else { 0.18 });
                     }
                     1 => {
                         mix.ride(t, 0.35);
@@ -559,6 +663,55 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
                         mix.hat(t, false, 0.4);
                         mix.hat(t + 0.667, false, 0.28);
                     }
+                    5 => {
+                        // funk: sixteenth hats, kick on one and the "and" of three, snare on two and four with ghosts
+                        for k in 0..4 {
+                            mix.hat(t + k as f32 * 0.25, false, if k % 2 == 0 { 0.4 } else { 0.22 });
+                        }
+                        match b % 4 {
+                            0 => mix.kick(t, 0.95),
+                            2 => mix.kick(t + 0.5, 0.85),
+                            _ => {
+                                mix.snare(t, 0.85);
+                                mix.snare(t + 0.75, 0.15);
+                            }
+                        }
+                    }
+                    6 => {
+                        // hip hop: boom bap, swung hats, a kick that lands late
+                        mix.hat(t, false, 0.35);
+                        mix.hat(t + 0.6, false, 0.22);
+                        match b % 4 {
+                            0 => mix.kick(t, 1.0),
+                            1 => {
+                                mix.snare(t, 0.9);
+                                mix.kick(t + 0.75, 0.7);
+                            }
+                            2 => mix.kick(t + 0.5, 0.85),
+                            _ => mix.snare(t, 0.9),
+                        }
+                    }
+                    7 => {
+                        // samba: a busy shaker, a soft kick on every beat, the tamborim on the syncopes
+                        for k in 0..4 {
+                            mix.hat(t + k as f32 * 0.25, false, if k == 0 { 0.32 } else { 0.18 });
+                        }
+                        mix.kick(t, if b % 2 == 1 { 0.75 } else { 0.4 });
+                        if b % 2 == 0 {
+                            mix.rim(t + 0.75, 0.55);
+                        } else {
+                            mix.rim(t + 0.5, 0.55);
+                        }
+                    }
+                    8 => {
+                        // reggae: the one drop - kick and rim together on three, nothing on one
+                        mix.hat(t, false, 0.3);
+                        mix.hat(t + 0.6, false, 0.2);
+                        if b % 4 == 2 {
+                            mix.kick(t, 0.9);
+                            mix.rim(t, 0.8);
+                        }
+                    }
                     _ => {
                         if b % 2 == 0 {
                             mix.kick(t, 0.9);
@@ -572,7 +725,72 @@ pub fn render(chart: &Chart, order: &[usize], bpm: f32, style: u8, parts: [bool;
             }
         }
     }
+    if ending {
+        let t = (order.len() * nb) as f32;
+        if let Some(Some(ch)) = order.first().map(|b| chart.bars[*b].chords.first().and_then(|c| parse_chord(c))) {
+            if parts[0] {
+                mix.bass(t, (nb * 2) as f32, bass_midi(ch.bass), 1.0);
+            }
+            if parts[1] {
+                mix.stab(t, (nb * 2) as f32, &ch.voicing(), 0.8, 1.2);
+            }
+            if parts[2] {
+                mix.kick(t, 0.9);
+                mix.ride(t, 1.0);
+            }
+        }
+    }
+    mix.buf
+}
+
+/// A chord struck once and left to ring (the CHORDS tab's PLAY): `midis` spread a little, like a strum.
+pub fn chord_sound(midis: &[i32]) -> Vec<i16> {
+    // strummed: low string to high, 40 ms apart (one note is just that note)
+    let mut notes: Vec<i32> = midis.to_vec();
+    notes.sort();
+    let mut mix = Mix::new(3.5, 60.0);
+    for (j, m) in notes.iter().enumerate() {
+        let at = 0.02 + j as f32 * 0.04;
+        mix.stab(at, 2.6 - at, &[*m], 1.0, 1.3);
+    }
     mix.finish()
+}
+
+/// Chords one after another, `gap` seconds apart, each strummed and left to ring into the next.
+pub fn sequence_sound(chords: &[Vec<i32>], gap: f32) -> Vec<i16> {
+    let mut mix = Mix::new(chords.len() as f32 * gap + 2.5, 60.0);
+    for (k, c) in chords.iter().enumerate() {
+        let mut notes = c.clone();
+        notes.sort();
+        for (j, m) in notes.iter().enumerate() {
+            let at = k as f32 * gap + 0.02 + j as f32 * 0.03;
+            mix.stab(at, gap + 0.6, &[*m], 0.9, 1.6);
+        }
+    }
+    mix.finish()
+}
+
+/// A mono 16-bit WAV of `samples` (at the band's rate), for a backing track to keep.
+pub fn wav(samples: &[i16]) -> Vec<u8> {
+    let data = (samples.len() * 2) as u32;
+    let rate = RATE as u32;
+    let mut b = Vec::with_capacity(44 + data as usize);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 2).to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data.to_le_bytes());
+    for s in samples {
+        b.extend_from_slice(&s.to_le_bytes());
+    }
+    b
 }
 
 // ----------------------------------------------------------------- beat finder
@@ -722,6 +940,22 @@ mod tests {
         let gap = Metro { gap_play: 2, gap_mute: 1, ..Metro::default() };
         assert!((click_loop(&gap, 120.0).len() as f32 - 6.0 * RATE).abs() < 2.0);
         assert!(count_in(3, 60.0).len() as f32 > 2.9 * RATE);
+    }
+
+    #[test]
+    fn every_groove_renders_and_exports() {
+        let chart = crate::chart::parse_friendly("T44 Dm7 | G7 | Cmaj7 | A7 |");
+        let order = chart.play_order();
+        for s in 0..STYLES.len() as u8 {
+            let loop_ = render(&chart, &order, 120.0, s, [1.0; 3], false);
+            // four bars of 4/4 at 120 = 8 seconds
+            assert!((loop_.len() as f32 - 8.0 * RATE).abs() < 4.0, "{} {}", STYLES[s as usize], loop_.len());
+            assert!(loop_.iter().any(|v| v.unsigned_abs() > 1000), "{} is silent", STYLES[s as usize]);
+            let once = render(&chart, &order, 120.0, s, [1.0, 0.5, 0.0], true);
+            assert!(once.len() > loop_.len(), "the ending rings on");
+        }
+        let w = wav(&[0, 1, -1]);
+        assert_eq!((&w[..4], w.len()), (&b"RIFF"[..], 44 + 6));
     }
 
     #[test]

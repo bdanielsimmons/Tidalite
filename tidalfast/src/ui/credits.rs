@@ -324,4 +324,57 @@ impl App {
             });
         ctx.request_repaint();
     }
+
+    /// Edit a song's title and artist (your files, YouTube and SoundCloud songs).
+    pub(crate) fn edit_info_panel(&mut self, ctx: &egui::Context) {
+        let Some((id, _, _)) = self.edit_info.clone() else { return };
+        let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut save = false;
+        let is_file = self.store.files.iter().any(|e| e.id == id);
+        panel(ctx, "edit_info", 520.0, |ui| {
+            title_line(ui, "EDIT INFO", 3.0, pal().ink);
+            ui.add_space(6.0);
+            let Some((_, title, artist)) = self.edit_info.as_mut() else { return };
+            for (lab, fid, val, hint) in [
+                ("TITLE", crate::tools::F_INFO_TITLE, title, "Song title"),
+                ("ARTIST", crate::tools::F_INFO_ARTIST, artist, "Artist"),
+            ] {
+                ui.horizontal(|ui| {
+                    crate::views::label(ui, lab, 80.0);
+                    let w = ui.available_width() - 6.0;
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(w, crate::bh()), Sense::hover());
+                    if crate::views::field(ui, &mut self.ed, fid, val, r, hint, false).enter {
+                        save = true;
+                    }
+                });
+                ui.add_space(4.0);
+            }
+            para(
+                ui,
+                if is_file {
+                    "Renamed everywhere in Tidalite, and written into the file itself so other players see it too."
+                } else {
+                    "Renamed everywhere in Tidalite (your lists, playlists, tunes and the queue)."
+                },
+                pal().ink2,
+            );
+            ui.horizontal(|ui| {
+                if retro_btn(ui, "SAVE", true).clicked() {
+                    save = true;
+                }
+                if retro_btn(ui, "CANCEL", false).clicked() {
+                    close = true;
+                }
+            });
+        });
+        if save {
+            if let Some((id, title, artist)) = self.edit_info.take() {
+                self.apply(Action::SaveInfo(id, title, artist));
+            }
+            self.ed.id = 0;
+        } else if close {
+            self.edit_info = None;
+            self.ed.id = 0;
+        }
+    }
 }

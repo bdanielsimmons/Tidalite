@@ -383,7 +383,7 @@ impl App {
     /// Two levels: MUSIC (the sources and your lists) and PRACTICE (tunes, diary) on top, that group's lists under it.
     /// Each group comes back to the list you last had open in it. The plain build has only MUSIC, so only its row shows.
     pub(crate) fn section_bar(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        const PRACTICE_SECS: [(Sec, &str); 2] = [(Sec::Tunes, "TUNES"), (Sec::Diary, "DIARY")];
+        const PRACTICE_SECS: [(Sec, &str); 3] = [(Sec::Tunes, "TUNES"), (Sec::Diary, "DIARY"), (Sec::Chords, "CHORDS")];
         // the TIDALITE tab covers its own page and the pages opened from it
         let side = self.show_tl || self.show_winamp || self.show_log || self.show_cache;
         let in_practice = PRACTICE_SECS.iter().any(|s| s.0 == self.sec);
@@ -572,6 +572,10 @@ impl App {
                     }
                     if menu_item(ui, "Add to queue") {
                         acts.push(Action::Enqueue(e.to_track()));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Edit info...") {
+                        acts.push(Action::EditInfo(e.id, e.title.clone(), e.artist.clone()));
                         ui.close_menu();
                     }
                     if PRACTICE && menu_item(ui, "Add to a tune...") {

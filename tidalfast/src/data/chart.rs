@@ -658,6 +658,30 @@ impl Chart {
                 b.ending = if b.ending == e { String::new() } else { e };
             }
             "*" => self.bars[i].label.clear(),
+            // the next bar's chords join this one (two chords in a bar)
+            "join" => {
+                if i + 1 < self.bars.len() {
+                    let next = self.bars.remove(i + 1);
+                    self.bars[i].chords.extend(next.chords);
+                    self.bars[i].end_rep |= next.end_rep;
+                }
+            }
+            // a bar with several chords: the second half moves to a bar of its own after it
+            "split" => {
+                let n = self.bars[i].chords.len();
+                if n >= 2 {
+                    let rest = self.bars[i].chords.split_off((n + 1) / 2);
+                    let b = Bar { chords: rest, end_rep: std::mem::take(&mut self.bars[i].end_rep), ..Default::default() };
+                    self.bars.insert(i + 1, b);
+                }
+            }
+            // new chords for the bar, as typed ("Dm7 G7")
+            t if t.starts_with("set:") => {
+                let chords: Vec<String> = t[4..].split_whitespace().map(|s| s.to_string()).collect();
+                if !chords.is_empty() {
+                    self.bars[i].chords = chords;
+                }
+            }
             t if t.starts_with('*') => self.bars[i].label = t[1..].to_string(),
             t => {
                 if let Some(m) = mark_text(t) {
@@ -710,6 +734,76 @@ pub(crate) fn split_root(s: &str) -> (&str, &str) {
 }
 
 /// Move a chord symbol by `semis` semitones (flats preferred).
+/// A chord written loosely, as on chord websites: "Gadd9(bassA)" becomes "Gadd9/A". None when the word is not
+/// a chord ("Album", "theme", "End").
+fn loose_chord(tok: &str) -> Option<String> {
+    let tok = tok.trim_matches(|c: char| matches!(c, ',' | ';' | '.' | ':' | '!' | '?' | '"'));
+    let mut s = tok.to_string();
+    // a bass note written in words: (bassA), (bass A), (A bass)
+    let low = s.to_ascii_lowercase();
+    if let Some(i) = low.find("(bass") {
+        let note: String = s[i + 5..].chars().filter(|c| c.is_ascii_alphabetic() || *c == '#').collect();
+        s = format!("{}/{}", &s[..i], note.trim_start_matches(|c: char| c == ' '));
+    }
+    let (root, rest) = split_root(s.split('/').next()?);
+    note_index(root)?;
+    // what may follow the root in a chord name
+    let ok_words = ["maj", "min", "dim", "aug", "sus", "add", "m", "M", "alt", "no", "omit", "o"];
+    let mut r = rest.to_string();
+    for w in ok_words {
+        r = r.replace(w, "");
+    }
+    if !r.chars().all(|c| c.is_ascii_digit() || "#b+-^()°ø,/".contains(c)) {
+        return None;
+    }
+    Some(s)
+}
+
+/// A plain list of chords pasted from anywhere (no bar lines, notes in between, a title and credits at the top)
+/// made into a chart: every chord one bar, each line of words that comes between chord lines a new section
+/// named after its first word ("Main theme" -> MAIN), the lines before the first chords left out. You can then
+/// fix the timing by hand.
+pub fn from_loose(text: &str) -> String {
+    let mut out = String::from("T44");
+    let mut label: Option<String> = None;
+    let mut started = false;
+    for line in text.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.is_empty() {
+            continue;
+        }
+        let chords: Vec<String> = words.iter().filter_map(|w| loose_chord(w)).collect();
+        // a chord line is mostly chords (a few words like "to main theme" may trail); "End : G6(bassA) Dm7" is a
+        // label and chords on one line
+        let prose = words.len() - chords.len();
+        if chords.is_empty() || (prose > chords.len() + 1 && chords.len() < 3) {
+            // words: the name of what comes next (once the chords have begun, or right before they do)
+            let name: String = words[0].chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_uppercase();
+            if !name.is_empty() {
+                label = Some(name.chars().take(10).collect());
+            }
+            continue;
+        }
+        // words before the first chord on a chord line name it too ("End : G6(bassA) Dm7")
+        if loose_chord(words[0]).is_none() {
+            let name: String = words[0].chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_uppercase();
+            if !name.is_empty() {
+                label = Some(name.chars().take(10).collect());
+            }
+        }
+        if let Some(l) = label.take() {
+            out += &format!(" *{}", l);
+        } else if !started {
+            out += " *A";
+        }
+        started = true;
+        for c in chords {
+            out += &format!(" {} |", c);
+        }
+    }
+    out
+}
+
 pub fn transpose(chord: &str, semis: i32) -> String {
     if semis == 0 || chord == "N.C." || chord.is_empty() {
         return chord.to_string();
@@ -960,6 +1054,31 @@ mod tests {
         assert_eq!(parse_friendly(&c.to_text()).bars[0].label, "A");
         c.edit(2, "@coda");
         assert!(parse_friendly(&c.to_text()).bars[2].marks.contains(&"CODA".to_string()));
+    }
+
+    #[test]
+    fn bar_edits_by_click() {
+        let mut c = parse_friendly("T44 Dm7 | G7 | Cmaj7 | A7 |");
+        c.edit(0, "join");
+        assert_eq!(c.bars.len(), 3);
+        assert_eq!(c.bars[0].chords, vec!["Dm7", "G7"]);
+        c.edit(0, "split");
+        assert_eq!((c.bars.len(), c.bars[1].chords.clone()), (4, vec!["G7".to_string()]));
+        c.edit(2, "set:Em7 A7");
+        assert_eq!(c.bars[2].chords, vec!["Em7", "A7"]);
+        assert_eq!(parse_friendly(&c.to_text()).bars.len(), 4);
+    }
+
+    #[test]
+    fn loose_chord_lists() {
+        let see = "Song : See the world\nAlbum : Secret Story\n\nChords transcribed by Frederic Kakon and Vladimir Nikolov\n\nI didn't put the bar measures because chords are not played exactly on the main bars. Just keep the feeling of the song...\n\nMain theme\n\nDm7     Gm7     Am7     Em11    Cm7     Gm7\n\nGm7     Am7     Bbm7    Fm7\n\nFm7/Bb  Em7/A   Gadd9(bassA)\n\nSolo on 2 main themes and then :\n\nFadd9(bassG)    Asus4   Fadd9(bassG)    Asus4   A7#5 to main theme\n\nEnd : G6(bassA) Dm7     Gm7     Am7\n\nDm";
+        let c = from_loose(see);
+        assert!(c.starts_with("T44 *MAIN Dm7 | Gm7 | Am7 | Em11 | Cm7 | Gm7 |"), "{}", c);
+        assert!(c.contains(" Gadd9/A | *SOLO Fadd9/G | Asus4 |") && c.contains(" A7#5 |"), "{}", c);
+        assert!(c.contains("*END G6/A | Dm7 | Gm7 | Am7 | Dm |"), "{}", c);
+        assert!(!c.contains("Song") && !c.contains("Album") && !c.contains("Chords") && !c.contains("theme |"), "{}", c);
+        let chart = parse_friendly(&c);
+        assert_eq!(chart.bars.len(), 6 + 4 + 3 + 5 + 4 + 1);
     }
 
     #[test]

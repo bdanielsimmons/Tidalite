@@ -289,6 +289,9 @@ fn sw(text: &str, px: f32) -> f32 {
 }
 
 pub fn text_w(text: &str, px: f32) -> f32 {
+    if text.contains(DRAWN) {
+        return drawn_split(text).iter().map(|s| s.map_or_else(|c| drawn_w(c, px), |s| text_w(s, px))).sum();
+    }
     if skinned() || modern() {
         return sw(text, px);
     }
@@ -346,6 +349,9 @@ fn draw_char(p: &egui::Painter, tex: egui::TextureId, c: char, x: f32, y: f32, p
 /// Draw bitmap text. `anchor` is the left/center/right edge at the vertical center of the capitals.
 /// Returns the text width.
 pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, color: Color32) -> f32 {
+    if text.contains(DRAWN) {
+        return ptext_drawn(p, anchor, h, text, px, color);
+    }
     if skinned() {
         return crate::winamp_ui::sans_text(p, anchor, h, text, skin_size(px), f32::INFINITY, color);
     }
@@ -386,8 +392,88 @@ fn draw_dots(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, col
     w
 }
 
+// ------------------------------------------------------------------ drawn symbols
+// The chord symbols no font draws well (a triangle for major 7, a small circle for diminished) are drawn as shapes,
+// sized to the capitals of whatever font is on.
+const DRAWN: [char; 2] = ['\u{0394}', '\u{00b0}'];
+
+/// Text cut into runs of plain text (Ok) and drawn symbols (Err).
+fn drawn_split(text: &str) -> Vec<Result<&str, char>> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, c) in text.char_indices() {
+        if DRAWN.contains(&c) {
+            if i > start {
+                out.push(Ok(&text[start..i]));
+            }
+            out.push(Err(c));
+            start = i + c.len_utf8();
+        }
+    }
+    if start < text.len() {
+        out.push(Ok(&text[start..]));
+    }
+    out
+}
+
+/// The height of the capitals, as drawn.
+fn cap_h(px: f32) -> f32 {
+    if skinned() || modern() {
+        text_w("H", px) * 1.15
+    } else {
+        7.0 * spx(px)
+    }
+}
+
+fn drawn_w(c: char, px: f32) -> f32 {
+    let h = cap_h(px);
+    if c == '\u{00b0}' {
+        h * 0.6
+    } else {
+        h * 1.05 + h * 0.2
+    }
+}
+
+fn ptext_drawn(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, color: Color32) -> f32 {
+    let w = text_w(text, px);
+    let mut x = match h {
+        Align::Min => anchor.x,
+        Align::Center => anchor.x - w / 2.0,
+        Align::Max => anchor.x - w,
+    };
+    let ch = cap_h(px);
+    let line = (ch * 0.14).max(1.2);
+    for run in drawn_split(text) {
+        match run {
+            Ok(s) => x += ptext(p, Pos2::new(x, anchor.y), Align::Min, s, px, color),
+            Err('\u{00b0}') => {
+                // a small ring at the top of the capitals
+                let r = ch * 0.2;
+                p.circle_stroke(Pos2::new(x + ch * 0.3, anchor.y - ch * 0.5 + r), r, egui::Stroke::new(line * 0.8, color));
+                x += drawn_w('\u{00b0}', px);
+            }
+            Err(c) => {
+                // an upright triangle, as tall as the capitals
+                let (l, r, top, bot) = (x + ch * 0.1, x + ch * 1.15, anchor.y - ch * 0.5, anchor.y + ch * 0.5);
+                let pts = vec![Pos2::new((l + r) / 2.0, top), Pos2::new(r, bot), Pos2::new(l, bot)];
+                p.add(egui::Shape::closed_line(pts, egui::Stroke::new(line, color)));
+                x += drawn_w(c, px);
+            }
+        }
+    }
+    w
+}
+
 /// Like `ptext`, but shrinks the dot size until the text fits `max_w`.
 pub fn ptext_fit(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, max_w: f32, color: Color32) {
+    if text.contains(DRAWN) {
+        let mut k = px;
+        while k > px * 0.5 && text_w(text, k) > max_w {
+            k -= 0.05;
+        }
+        ptext(p, anchor, h, text, k, color);
+        return;
+    }
     if skinned() {
         crate::winamp_ui::sans_text(p, anchor, h, text, skin_size(px), max_w, color);
         return;

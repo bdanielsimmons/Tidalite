@@ -52,6 +52,12 @@ pub enum Opt {
     Band,
     BandStyleSet(u8),
     Part(usize),
+    /// a part's level: which part, and up (true) or down
+    PartLevel(usize, bool),
+    /// times through the chart: up or down (0 = endless)
+    BandLoops(bool),
+    /// write the backing track to a WAV file
+    BandExport,
     PomoSound,
     UnitSet(u8),
     Group,
@@ -113,7 +119,7 @@ fn tune_name_from(title: &str) -> String {
     }
 }
 
-fn safe_name(s: &str) -> String {
+pub(crate) fn safe_name(s: &str) -> String {
     s.chars().map(|c| if "<>:\"/\\|?*".contains(c) || c.is_control() { '_' } else { c }).collect::<String>().trim().to_string()
 }
 
@@ -423,8 +429,113 @@ impl App {
     // ------------------------------------------------------------------ band
     fn band_sig_now(&self) -> u64 {
         let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as u64;
-        bpm ^ (self.band_style as u64) << 12
-            ^ (self.band_parts.iter().enumerate().map(|(i, p)| (*p as u64) << i).sum::<u64>()) << 20
+        let lv: u64 = self.band_levels().iter().enumerate().map(|(i, l)| ((l * 10.0).round() as u64) << (i * 5)).sum();
+        bpm ^ (self.band_style as u64) << 12 ^ lv << 20 ^ (self.band_loops as u64) << 40
+    }
+
+    /// A song's new title and artist (files, YouTube, SoundCloud): everywhere Tidalite keeps it (your lists,
+    /// liked songs, playlists, tunes, the queue, where you left off), and in the file's own tags for your files.
+    pub(crate) fn save_info(&mut self, id: i64, title: String, artist: String) {
+        let (title, artist) = (title.trim().to_string(), artist.trim().to_string());
+        if title.is_empty() {
+            return;
+        }
+        let mut file: Option<String> = None;
+        for list in [&mut self.store.files, &mut self.store.yt, &mut self.store.sc, &mut self.store.hearts] {
+            for e in list.iter_mut().filter(|e| e.id == id) {
+                e.title = title.clone();
+                e.artist = artist.clone();
+                if e.kind == "file" {
+                    file = Some(e.src.clone());
+                }
+            }
+        }
+        for e in self.yt_results.iter_mut().chain(self.sc_results.iter_mut()).filter(|e| e.id == id) {
+            e.title = title.clone();
+            e.artist = artist.clone();
+        }
+        let fix = |v: &mut store::Version| {
+            if v.id == id {
+                v.title = title.clone();
+                v.artist = artist.clone();
+            }
+        };
+        for p in &mut self.store.playlists {
+            p.items.iter_mut().for_each(fix);
+        }
+        for t in &mut self.store.tunes {
+            t.versions.iter_mut().for_each(fix);
+        }
+        if let Some(l) = self.store.last.as_mut() {
+            fix(&mut l.version);
+        }
+        let fix_track = |t: &mut Track| {
+            if t.id == id {
+                t.title = title.clone();
+                t.artist = artist.clone();
+            }
+        };
+        Arc::make_mut(&mut self.queue).iter_mut().for_each(fix_track);
+        if let Some(q) = self.orig_queue.as_mut() {
+            q.iter_mut().for_each(fix_track);
+        }
+        self.store_dirty = true;
+        self.serial += 1;
+        self.set_note(&format!("RENAMED: {} - {}", artist, title));
+        // your own file: its tags too, so other players see the new names
+        if let Some(path) = file {
+            let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::TagsSaved(write_tags(&path, &title, &artist)));
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    /// Each part's level, with a muted part at 0.
+    fn band_levels(&self) -> [f32; 3] {
+        [0, 1, 2].map(|i| if self.band_parts[i] { self.band_lv[i] } else { 0.0 })
+    }
+
+    /// The backing track as a file: the count-in, the chart as many times as LOOPS says (once when endless),
+    /// and an ending. Asks where to save it.
+    fn band_export(&mut self) {
+        let Some(text) = self.chart_text() else {
+            self.set_note("NO CHART TO EXPORT YET");
+            return;
+        };
+        let chart = crate::chart::parse_friendly(&text);
+        if chart.bars.is_empty() {
+            return;
+        }
+        let once = chart.play_order();
+        let order: Vec<usize> = (0..self.band_loops.max(1)).flat_map(|_| once.iter().copied()).collect();
+        let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32;
+        let (style, lv, beats) = (self.band_style, self.band_levels(), chart.beats);
+        let name = self.chart_tune().map(|i| self.store.tunes[i].name.clone()).unwrap_or_else(|| "backing track".to_string());
+        let file = format!(
+            "{} - {} {} bpm x{}.wav",
+            crate::extras::safe_name(&name),
+            band::STYLES[style as usize % band::STYLES.len()].to_lowercase(),
+            bpm.round(),
+            self.band_loops.max(1)
+        );
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Save the backing track")
+                .set_file_name(&file)
+                .add_filter("WAV audio", &["wav"])
+                .save_file()
+            else {
+                return;
+            };
+            let mut pcm = band::count_in(beats, bpm);
+            pcm.extend(band::render(&chart, &order, bpm, style, lv, true));
+            let r = std::fs::write(&path, band::wav(&pcm)).map(|_| path.to_string_lossy().to_string()).map_err(|e| e.to_string());
+            let _ = tx.send(Msg::BandSaved(r));
+            ctx.request_repaint();
+        });
     }
 
     fn band_start(&mut self) {
@@ -438,12 +549,52 @@ impl App {
         }
         let order = chart.play_order();
         let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32;
-        let body = band::render(&chart, &order, bpm, self.band_style, self.band_parts);
-        let lead = band::count_in(chart.beats, bpm);
-        self.band_bar = chart.beats as f32 * 60.0 / bpm;
-        self.band_lead = self.band_bar;
+        // the parts are rendered again only when the chart, tempo or style changed; levels just remix them
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (&text, bpm.to_bits(), self.band_style).hash(&mut h);
+            h.finish()
+        };
+        let stems = match &self.band_stems {
+            Some((k, s)) if *k == key => s.clone(),
+            _ => {
+                let s = std::sync::Arc::new(band::render_parts(&chart, &order, bpm, self.band_style, false));
+                self.band_stems = Some((key, s.clone()));
+                s
+            }
+        };
+        let mut body = band::mix_parts(&stems, self.band_levels());
+        let bar = chart.beats as f32 * 60.0 / bpm;
+        // already playing: carry on from the same spot in the chart (no count-in, no jump back to the top)
+        let resume = if self.band_on && self.band_order.len() == order.len() && !body.is_empty() {
+            let t = self.band_t0.elapsed().as_secs_f32() - self.band_lead;
+            let old_chorus = self.band_order.len() as f32 * self.band_bar;
+            (t > 0.0 && old_chorus > 0.0).then(|| {
+                let passes = (t / old_chorus).floor();
+                let frac = (t / old_chorus).fract();
+                (passes, frac)
+            })
+        } else {
+            None
+        };
+        let lead = match resume {
+            Some((passes, frac)) => {
+                let at = ((frac * body.len() as f32) as usize).min(body.len() - 1);
+                body.rotate_left(at);
+                let chorus = order.len() as f32 * bar;
+                // keep the clock in step: as if it had started that long ago at the new tempo
+                self.band_t0 = Instant::now() - Duration::from_secs_f32(bar + (passes + frac) * chorus);
+                Vec::new()
+            }
+            None => {
+                self.band_t0 = Instant::now();
+                band::count_in(chart.beats, bpm)
+            }
+        };
+        self.band_bar = bar;
+        self.band_lead = bar;
         self.band_order = order;
-        self.band_t0 = Instant::now();
         self.band_on = true;
         self.band_chart = text;
         self.band_sig = self.band_sig_now();
@@ -457,10 +608,18 @@ impl App {
         }
     }
 
-    /// Restart the band when its tempo, style or parts changed.
+    /// Restart the band when its tempo, style or parts changed; stop it after its LOOPS times through.
     fn band_tick(&mut self) {
         if self.band_on && self.band_sig != self.band_sig_now() {
             self.band_start();
+        }
+        if self.band_on && self.band_loops > 0 {
+            let chorus = self.band_order.len() as f32 * self.band_bar;
+            let done = self.band_lead + chorus * self.band_loops as f32;
+            if self.band_t0.elapsed().as_secs_f32() >= done {
+                self.band_stop();
+                self.set_note(&format!("THE BAND PLAYED IT {} TIMES", self.band_loops));
+            }
         }
     }
 
@@ -872,6 +1031,14 @@ impl App {
                 }
             }
             Msg::WaSkin(r) => self.wear_skin(r, true),
+            Msg::TagsSaved(r) => match r {
+                Ok(name) => self.set_note(&format!("SAVED IN THE FILE TOO: {}", name)),
+                Err(e) => self.set_err(format!("RENAMED IN TIDALITE, BUT THE FILE ITSELF COULD NOT BE CHANGED: {}", e)),
+            },
+            Msg::BandSaved(r) => match r {
+                Ok(p) => self.set_note(&format!("SAVED: {}", p)),
+                Err(e) => self.set_err(format!("COULD NOT SAVE THE BACKING TRACK: {}", e)),
+            },
             Msg::TourSong(r) => match r {
                 Ok(path) => self.tour_put_on(path),
                 Err(e) => crate::api::log(&format!("tour song: {}", e)),
@@ -988,7 +1155,7 @@ impl App {
     pub(crate) fn apply_extra(&mut self, a: Action) {
         match a {
             Action::Section(s) => {
-                if matches!(s, Sec::Tunes | Sec::Diary) {
+                if matches!(s, Sec::Tunes | Sec::Diary | Sec::Chords) {
                     self.last_practice = s;
                 } else {
                     self.last_music = s;
@@ -2067,6 +2234,14 @@ impl App {
             }
             Opt::BandStyleSet(i) => self.band_style = i,
             Opt::Part(i) => self.band_parts[i.min(2)] = !self.band_parts[i.min(2)],
+            Opt::PartLevel(i, up) => {
+                let l = &mut self.band_lv[i.min(2)];
+                *l = ((*l + if up { 0.1 } else { -0.1 }) * 10.0).round().clamp(0.0, 15.0) / 10.0;
+            }
+            Opt::BandLoops(up) => {
+                self.band_loops = if up { (self.band_loops + 1).min(99) } else { self.band_loops.saturating_sub(1) }
+            }
+            Opt::BandExport => self.band_export(),
             Opt::PomoSound => self.pomo_sound = !self.pomo_sound,
         }
     }
@@ -2148,6 +2323,22 @@ mod tests {
     }
 
     #[test]
+    fn tags_are_written_into_files() {
+        use lofty::prelude::*;
+        let dir = std::env::temp_dir().join("tidalite_tag_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("song.wav");
+        std::fs::write(&path, crate::band::wav(&vec![0i16; 4410])).unwrap();
+        let p = path.to_string_lossy().to_string();
+        write_tags(&p, "New Title", "New Artist").unwrap();
+        let back = lofty::read_from_path(&p).unwrap();
+        let tag = back.primary_tag().unwrap();
+        assert_eq!(tag.title().as_deref(), Some("New Title"));
+        assert_eq!(tag.artist().as_deref(), Some("New Artist"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn knob_steps() {
         assert_eq!(knob_step(Knob::LoopA), 0.2);
         assert_eq!(knob_step(Knob::Speed), 1.0);
@@ -2199,4 +2390,20 @@ mod tempo_tests {
         assert_eq!(tempo_in_notes("bpm: 180"), Some(180));
         assert_eq!(tempo_in_notes(""), None);
     }
+}
+
+/// Write a title and an artist into an audio file's own tags (ID3, Vorbis comments, MP4 atoms... whatever the file
+/// uses; a tag is added when it has none).
+fn write_tags(path: &str, title: &str, artist: &str) -> Result<String, String> {
+    use lofty::prelude::*;
+    let mut tagged = lofty::read_from_path(path).map_err(|e| e.to_string())?;
+    if tagged.primary_tag().is_none() {
+        let kind = tagged.primary_tag_type();
+        tagged.insert_tag(lofty::tag::Tag::new(kind));
+    }
+    let tag = tagged.primary_tag_mut().ok_or("no tag")?;
+    tag.set_title(title.to_string());
+    tag.set_artist(artist.to_string());
+    tag.save_to_path(path, lofty::config::WriteOptions::default()).map_err(|e| e.to_string())?;
+    Ok(std::path::Path::new(path).file_name().map_or(path.to_string(), |n| n.to_string_lossy().to_string()))
 }

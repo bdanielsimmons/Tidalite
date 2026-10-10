@@ -378,9 +378,22 @@ impl App {
         let look = crate::gen_look(self.wa_worn.as_ref());
         let museum = self.wa_worn.clone().filter(|_| look == 0);
         let cur = SKIN.load(Ordering::Relaxed) % PALS.len();
-        for (title, g) in [("ORIGINAL", 2usize), ("RETRO ORIGINAL", 0)] {
+        for (gi, (title, g)) in [("ORIGINAL", 2usize), ("RETRO ORIGINAL", 0)].into_iter().enumerate() {
             ui.add_space(6.0);
-            para(ui, title, pal().ink2);
+            // folded up: its name and the one worn from it; open to pick another
+            let worn_here = (if g == 0 { self.wa_worn.is_none() } else { look == g }).then(|| SKIN_NAMES[cur]);
+            let head = format!(
+                "{} {}{}",
+                if self.skins_open[gi] { "-" } else { "+" },
+                title,
+                worn_here.map(|n| format!(":  {}", n)).unwrap_or_default()
+            );
+            if menu_item(ui, &head) {
+                self.skins_open[gi] = !self.skins_open[gi];
+            }
+            if !self.skins_open[gi] {
+                continue;
+            }
             for (n, name) in SKIN_NAMES.iter().enumerate() {
                 let on = n == cur && if g == 0 { self.wa_worn.is_none() } else { look == g };
                 if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name)) {
@@ -389,7 +402,17 @@ impl App {
             }
         }
         ui.add_space(6.0);
-        para(ui, "WINAMP", pal().ink2);
+        let head = format!(
+            "{} WINAMP{}",
+            if self.skins_open[2] { "-" } else { "+" },
+            museum.as_ref().map(|w| format!(":  {}", w.1.to_uppercase())).unwrap_or_default()
+        );
+        if menu_item(ui, &head) {
+            self.skins_open[2] = !self.skins_open[2];
+        }
+        if !self.skins_open[2] {
+            return;
+        }
         // the one worn first, then the ones worn lately (X takes one off the list)
         let mut list: Vec<(String, String)> = Vec::new();
         if let Some(w) = &museum {
@@ -427,9 +450,6 @@ impl App {
     pub(crate) fn tidalite_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(6.0);
-            title_line(ui, "SKINS", 3.0, pal().ink);
-            self.skin_lists(ui, acts);
-            ui.add_space(14.0);
             title_line(ui, "TIDALITE", 3.0, pal().ink);
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
@@ -455,6 +475,9 @@ impl App {
                     acts.push(Action::Logout);
                 }
             });
+            ui.add_space(14.0);
+            title_line(ui, "SKINS", 3.0, pal().ink);
+            self.skin_lists(ui, acts);
             ui.add_space(20.0);
         });
     }
@@ -689,7 +712,7 @@ impl App {
             }
             // HOME: Tidal home in MUSIC (your files when not signed in), your tunes in PRACTICE
             if !side {
-                let in_practice = matches!(self.sec, Sec::Tunes | Sec::Diary);
+                let in_practice = matches!(self.sec, Sec::Tunes | Sec::Diary | Sec::Chords);
                 let tip = if in_practice {
                     "Your tunes"
                 } else if self.offline {
@@ -800,6 +823,7 @@ impl App {
                     Sec::Sc => self.sc_view(ui, acts),
                     Sec::Tunes => self.tunes_view(ui, acts),
                     Sec::Diary => self.diary_view(ui, acts),
+                    Sec::Chords => self.chords_view(ui, acts),
                     Sec::Lists => self.playlists_view(ui, acts),
                 });
             });

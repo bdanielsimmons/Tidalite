@@ -23,6 +23,10 @@ pub enum Cmd {
     /// A side sound on its own sink (slot 0 metronome, 1 band): `lead` plays once, then `body` repeats
     /// forever. An empty body switches the slot off. (slot, lead, body, gain)
     Pcm(u8, Vec<i16>, Vec<i16>, f32),
+    /// a short sound played once over everything (a chord to hear)
+    Once(Vec<i16>, f32),
+    /// stop every Once sound still playing
+    StopOnce,
     /// short three-note chime (focus timer, only when you switch it on)
     Chime,
     Stop,
@@ -1063,6 +1067,7 @@ impl Player {
             let mut sink: Option<Sink> = None;
             let mut vol = 0.64f32;
             let mut slots: [Option<(Sink, f32)>; 2] = [None, None];
+            let mut once: Vec<Sink> = Vec::new();
             let mut user_paused = false;
             let mut last_wraps = 0u32;
 
@@ -1206,6 +1211,19 @@ impl Player {
                                 m.append(rodio::buffer::SamplesBuffer::new(1, 44100, body).repeat_infinite());
                                 slots[slot] = Some((m, gain));
                             }
+                        }
+                    }
+                    Ok(Cmd::Once(pcm, gain)) => {
+                        once.retain(|s| !s.empty());
+                        if let Ok(c) = Sink::try_new(&handle) {
+                            c.set_volume((vol * gain).clamp(0.2, 1.0));
+                            c.append(rodio::buffer::SamplesBuffer::new(1, 44100, pcm));
+                            once.push(c);
+                        }
+                    }
+                    Ok(Cmd::StopOnce) => {
+                        for s in once.drain(..) {
+                            s.stop();
                         }
                     }
                     Ok(Cmd::Chime) => {

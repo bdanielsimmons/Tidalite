@@ -1,4 +1,4 @@
-//! Skins: the thirteen palettes, which look each one belongs to, and the colour helpers the whole UI draws with.
+//! Skins: the seventeen palettes, which look each one belongs to, and the colour helpers the whole UI draws with.
 
 use super::*;
 
@@ -31,7 +31,7 @@ pub(crate) const fn c(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-pub(crate) const SKIN_NAMES: [&str; 13] = [
+pub(crate) const SKIN_NAMES: [&str; 17] = [
     "OLIVE",
     "AQUA",
     "DARK",
@@ -43,11 +43,15 @@ pub(crate) const SKIN_NAMES: [&str; 13] = [
     "AERO GLASS",
     "SLEEK DARK",
     "SLEEK LIGHT",
+    "NEON",
+    "SUNSET",
+    "OCEAN",
+    "CITRUS",
     "HIGH CONTRAST DARK",
     "HIGH CONTRAST LIGHT",
 ];
 
-pub(crate) static PALS: [Pal; 13] = [
+pub(crate) static PALS: [Pal; 17] = [
     // OLIVE: the classic beige/olive player
     Pal {
         app_bg: c(8, 8, 10),
@@ -301,50 +305,145 @@ pub(crate) static PALS: [Pal; 13] = [
         bar_txt: c(255, 255, 255),
         edge: c(44, 50, 70),
     },
-    // HIGH CONTRAST DARK: white on black with yellow and cyan, outlined like a high-contrast desktop theme
-    // (every control drawn on black with a bright edge), for low vision; every text well past WCAG AAA
+    // NEON: synthwave - cyan and hot pink on deep violet
+    Pal {
+        app_bg: c(8, 4, 16),
+        trim: c(150, 90, 200),
+        beige: c(40, 20, 64),
+        beige_lt: c(80, 44, 120),
+        beige_dk: c(24, 10, 40),
+        beige_h: c(56, 30, 88),
+        lcd: c(12, 6, 24),
+        lcd_ghost: c(28, 15, 48),
+        groove: c(30, 16, 50),
+        sel: c(62, 22, 92),
+        ink: c(0, 240, 255),
+        ink2: c(255, 120, 225),
+        dim: c(190, 160, 235),
+        red: c(255, 70, 180),
+        btn_face: c(70, 36, 110),
+        btn_hi: c(110, 60, 160),
+        row_alt: c(18, 9, 34),
+        row_sel: c(170, 0, 135),
+        bar_txt: c(255, 255, 255),
+        edge: c(0, 0, 0),
+    },
+    // SUNSET: amber and coral on dark plum
+    Pal {
+        app_bg: c(14, 6, 8),
+        trim: c(220, 120, 90),
+        beige: c(64, 26, 34),
+        beige_lt: c(104, 48, 56),
+        beige_dk: c(40, 14, 20),
+        beige_h: c(82, 36, 44),
+        lcd: c(24, 10, 14),
+        lcd_ghost: c(42, 19, 25),
+        groove: c(46, 20, 26),
+        sel: c(92, 34, 40),
+        ink: c(255, 195, 115),
+        ink2: c(255, 150, 125),
+        dim: c(225, 170, 158),
+        red: c(255, 100, 95),
+        btn_face: c(110, 44, 52),
+        btn_hi: c(150, 70, 76),
+        row_alt: c(32, 13, 18),
+        row_sel: c(185, 62, 34),
+        bar_txt: c(255, 255, 255),
+        edge: c(0, 0, 0),
+    },
+    // OCEAN: aquamarine and sky blue on deep navy, with an orange buoy for the accent
+    Pal {
+        app_bg: c(2, 10, 18),
+        trim: c(90, 190, 210),
+        beige: c(16, 46, 66),
+        beige_lt: c(34, 80, 108),
+        beige_dk: c(8, 28, 42),
+        beige_h: c(24, 62, 86),
+        lcd: c(4, 20, 32),
+        lcd_ghost: c(11, 35, 53),
+        groove: c(14, 38, 56),
+        sel: c(16, 70, 90),
+        ink: c(120, 255, 220),
+        ink2: c(150, 215, 255),
+        dim: c(160, 205, 215),
+        red: c(255, 175, 85),
+        btn_face: c(24, 80, 110),
+        btn_hi: c(44, 120, 150),
+        row_alt: c(6, 26, 40),
+        row_sel: c(0, 110, 130),
+        bar_txt: c(255, 255, 255),
+        edge: c(0, 0, 0),
+    },
+    // CITRUS: lime and lemon on dark green, with a tangerine accent
+    Pal {
+        app_bg: c(6, 12, 4),
+        trim: c(170, 220, 90),
+        beige: c(34, 52, 20),
+        beige_lt: c(64, 90, 40),
+        beige_dk: c(20, 32, 10),
+        beige_h: c(46, 68, 28),
+        lcd: c(10, 20, 6),
+        lcd_ghost: c(23, 38, 15),
+        groove: c(26, 40, 16),
+        sel: c(50, 80, 20),
+        ink: c(215, 255, 100),
+        ink2: c(255, 232, 100),
+        dim: c(185, 212, 155),
+        red: c(255, 135, 65),
+        btn_face: c(60, 90, 30),
+        btn_hi: c(90, 130, 50),
+        row_alt: c(14, 26, 8),
+        row_sel: c(56, 100, 0),
+        bar_txt: c(255, 255, 255),
+        edge: c(0, 0, 0),
+    },
+    // HIGH CONTRAST DARK, after the classic high-contrast desktop themes: white text on black, yellow for the second
+    // line of text and window titles, green for hints and lines, cyan for loops, accents and button edges (with
+    // magenta shadows), the playing song in yellow on purple. Every text colour clears WCAG AAA (7:1) on black.
     Pal {
         app_bg: c(0, 0, 0),
-        trim: c(255, 255, 255),
+        trim: c(255, 255, 0),
         beige: c(0, 0, 0),
-        beige_lt: c(255, 255, 255),
-        beige_dk: c(150, 150, 150),
-        beige_h: c(40, 40, 40),
+        beige_lt: c(26, 235, 255),
+        beige_dk: c(210, 0, 210),
+        beige_h: c(46, 0, 70),
         lcd: c(0, 0, 0),
-        lcd_ghost: c(60, 60, 60),
-        groove: c(190, 190, 190),
-        sel: c(60, 60, 0),
+        lcd_ghost: c(44, 0, 66),
+        groove: c(63, 242, 63),
+        sel: c(0, 70, 90),
         ink: c(255, 255, 255),
-        ink2: c(255, 240, 70),
-        dim: c(215, 215, 215),
+        ink2: c(255, 255, 0),
+        dim: c(63, 242, 63),
         red: c(26, 235, 255),
         btn_face: c(0, 0, 0),
-        btn_hi: c(60, 60, 60),
-        row_alt: c(16, 16, 16),
-        row_sel: c(0, 0, 170),
+        btn_hi: c(0, 70, 90),
+        row_alt: c(0, 10, 34),
+        row_sel: c(96, 0, 160),
         bar_txt: c(255, 255, 0),
         edge: c(0, 0, 0),
     },
-    // HIGH CONTRAST LIGHT: black on white with deep blue, outlined in black, for low vision in bright rooms
+    // HIGH CONTRAST LIGHT, the same idea on white: black text, navy for the second line and lines, deep green for
+    // hints, burnt orange for loops and accents, purple shadows, yellow window titles, the playing song in white on
+    // purple.
     Pal {
         app_bg: c(255, 255, 255),
-        trim: c(255, 255, 255),
+        trim: c(255, 230, 0),
         beige: c(255, 255, 255),
         beige_lt: c(255, 255, 255),
-        beige_dk: c(60, 60, 60),
-        beige_h: c(232, 232, 232),
+        beige_dk: c(110, 0, 170),
+        beige_h: c(255, 238, 200),
         lcd: c(255, 255, 255),
-        lcd_ghost: c(200, 200, 200),
-        groove: c(60, 60, 60),
-        sel: c(255, 240, 120),
+        lcd_ghost: c(214, 204, 242),
+        groove: c(0, 0, 159),
+        sel: c(255, 230, 160),
         ink: c(0, 0, 0),
-        ink2: c(0, 0, 150),
-        dim: c(50, 50, 50),
-        red: c(170, 0, 0),
+        ink2: c(0, 0, 159),
+        dim: c(0, 90, 0),
+        red: c(140, 52, 0),
         btn_face: c(255, 255, 255),
-        btn_hi: c(225, 225, 225),
-        row_alt: c(244, 244, 244),
-        row_sel: c(0, 0, 150),
+        btn_hi: c(255, 238, 200),
+        row_alt: c(234, 241, 255),
+        row_sel: c(55, 0, 110),
         bar_txt: c(255, 255, 255),
         edge: c(0, 0, 0),
     },
@@ -466,8 +565,28 @@ mod contrast_tests {
     use super::*;
 
     #[test]
+    fn colourful_skins_read_well() {
+        let c = crate::winamp::contrast;
+        for i in 11..15usize {
+            let p = &PALS[i];
+            for (what, fg, bg, min) in [
+                ("text on panels", p.ink, p.beige, 7.0),
+                ("text on lists", p.ink, p.lcd, 7.0),
+                ("second text", p.ink2, p.lcd, 7.0),
+                ("hints", p.dim, p.lcd, 4.5),
+                ("accent", p.red, p.lcd, 4.5),
+                ("playing row", p.bar_txt, p.row_sel, 4.5),
+                ("button text", p.ink, p.btn_face, 4.5),
+            ] {
+                assert!(c(fg, bg) >= min, "{} {}: {:.1}", SKIN_NAMES[i], what, c(fg, bg));
+            }
+        }
+        assert_eq!(&SKIN_NAMES[15..], ["HIGH CONTRAST DARK", "HIGH CONTRAST LIGHT"]);
+    }
+
+    #[test]
     fn high_contrast_skins_meet_aaa() {
-        for i in [11usize, 12] {
+        for i in [15usize, 16] {
             let p = &PALS[i];
             let c = crate::winamp::contrast;
             for (what, fg, bg) in [
@@ -476,6 +595,9 @@ mod contrast_tests {
                 ("second text", p.ink2, p.lcd),
                 ("playing row", p.bar_txt, p.row_sel),
                 ("button text", p.ink, p.btn_face),
+                ("hints", p.dim, p.lcd),
+                ("accent", p.red, p.lcd),
+                ("hovered text", p.ink, p.sel),
             ] {
                 assert!(c(fg, bg) >= 7.0, "{} {}: {:.1}", SKIN_NAMES[i], what, c(fg, bg));
             }

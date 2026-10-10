@@ -37,6 +37,8 @@ mod meta;
 mod sources;
 #[path = "data/store.rs"]
 mod store;
+#[path = "data/theory.rs"]
+mod theory;
 #[path = "data/update.rs"]
 mod update;
 #[path = "data/winamp.rs"]
@@ -44,6 +46,8 @@ mod winamp;
 
 #[path = "ui/album_view.rs"]
 mod album_view;
+#[path = "ui/chords.rs"]
+mod chords;
 #[path = "ui/credits.rs"]
 mod credits;
 #[path = "ui/font.rs"]
@@ -170,6 +174,10 @@ enum Msg {
     IntroFile(Option<String>),
     /// the tour's song, fetched
     TourSong(Result<std::path::PathBuf, String>),
+    /// the backing track was saved (its path) or not
+    BandSaved(Result<String, String>),
+    /// a file's own tags were written (or why not)
+    TagsSaved(Result<String, String>),
     /// a track's credits: (role, names)
     Credits(Result<Vec<(String, String)>, String>),
     /// stem separation finished for this track id
@@ -187,6 +195,7 @@ enum Sec {
     Sc,
     Tunes,
     Diary,
+    Chords,
     Lists,
 }
 
@@ -285,6 +294,17 @@ enum Action {
     ToggleCacheView,
     /// the TIDALITE tab: skins, preferences, help, storage, the log
     TidalitePage,
+    /// sound these notes (MIDI) as a chord
+    PlayNotes(Vec<i32>),
+    /// sound these chords one after another
+    PlaySequence(Vec<Vec<i32>>),
+    /// chords one after another, this many seconds apart
+    PlaySequenceAt(Vec<Vec<i32>>, f32, String),
+    /// stop a sequence started with PlaySequenceAt
+    StopSequence,
+    /// open the editor for a song's title and artist (not Tidal's), and save what was typed
+    EditInfo(i64, String, String),
+    SaveInfo(i64, String, String),
     /// load your Tidal library again
     RefreshLibrary,
     /// look at a picture big: its link, its title, and whether it is an artist's
@@ -1150,6 +1170,11 @@ fn list_row(
 /// A track with several artists gets one entry per artist, so you pick which one.
 fn goto_items(ui: &mut egui::Ui, acts: &mut Vec<Action>, t: &Track, tidal: bool) {
     if !tidal {
+        // your files, YouTube and SoundCloud songs can be renamed (Tidal's come from Tidal)
+        if menu_item(ui, "Edit info...") {
+            acts.push(Action::EditInfo(t.id, t.title.clone(), t.artist.clone()));
+            ui.close_menu();
+        }
         return;
     }
     let mut go = |ui: &mut egui::Ui, label: &str, a: Action| {
@@ -1279,7 +1304,8 @@ fn chip(ui: &egui::Ui, rect: Rect, text: &str, active: bool, id: &str) -> egui::
 
 /// Sunken LCD readout box.
 fn lcd_box(ui: &mut egui::Ui, text: &str, w: f32, col: Color32) {
-    let w = w * font::ui_scale();
+    // never narrower than its text (a wide font or a bigger number would be cut off)
+    let w = (w * font::ui_scale()).max(text_w(text, 2.0) + 16.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
     inset(ui.painter(), rect, pal().lcd);
     ptext_fit(ui.painter(), rect.center(), Align::Center, text, 2.0, w - 12.0, col);
@@ -2322,6 +2348,42 @@ struct App {
     rtab: u8,
     chart_tr: i32,
     chart_edit: bool,
+    /// the CHORDS tab: which side (find / name), the chord typed, the notes clicked on the neck and the piano,
+    /// and guitar shapes already worked out
+    chords_tab: u8,
+    chord_q: String,
+    an_frets: [Option<u8>; 6],
+    /// how chord names are written, the details panel, the neck's size, how strong the hover rings are
+    chord_sp: theory::Spelling,
+    chord_details: bool,
+    /// the CLUSTERS tab: key, parent scale, notes in the cluster, string set, the degree on show
+    cl_key: i32,
+    cl_scale: usize,
+    cl_view: u8,
+    cl_semi: bool,
+    cl_low: i32,
+    cl_bass: i32,
+    cl_changes: String,
+    cl_chord: usize,
+    vc_family: u8,
+    vc_root: i32,
+    vc_type: usize,
+    vc_set: usize,
+    pass_pair: usize,
+    /// a chord sequence playing: (started, seconds a chord, which list, chords)
+    seq_play: Option<(Instant, f32, String, usize)>,
+    /// the song whose info is being edited: its id, the title and the artist as typed
+    edit_info: Option<(i64, String, String)>,
+    /// which skin groups are open on the TIDALITE page (ORIGINAL, RETRO ORIGINAL, WINAMP)
+    skins_open: [bool; 3],
+    neck_zoom: f32,
+    ghost_alpha: f32,
+    /// the analyzer's reading: the one picked (click), the one hovered
+    an_pick: Option<String>,
+    an_hover: Option<String>,
+    shape_cache: HashMap<String, Vec<[Option<u8>; 6]>>,
+    /// the bar being edited by click in the chart: which bar, and its chords as typed
+    bar_edit: Option<(usize, String)>,
     chart_busy: bool,
     chart_sugg: Vec<String>,
     chart_q: String,
@@ -2354,6 +2416,12 @@ struct App {
     band_on: bool,
     band_style: u8,
     band_parts: [bool; 3],
+    /// how loud each part plays (bass, chords, drums), 0 to 1.5
+    band_lv: [f32; 3],
+    /// times through the chart before the band stops (0 = until you stop it)
+    band_loops: u32,
+    /// the band's parts as last rendered (for which chart, tempo and style), so a level change only remixes
+    band_stems: Option<(u64, std::sync::Arc<[Vec<f32>; 3]>)>,
     band_t0: Instant,
     band_lead: f32,
     band_bar: f32,
@@ -2668,6 +2736,33 @@ impl App {
             rtab: 0,
             chart_tr: 0,
             chart_edit: false,
+            bar_edit: None,
+            chords_tab: 0,
+            chord_q: "Dm7".to_string(),
+            an_frets: [None; 6],
+            chord_sp: theory::Spelling { slash: true, ..theory::Spelling::default() },
+            chord_details: false,
+            cl_key: 0,
+            cl_scale: 0,
+            cl_view: 0,
+            cl_semi: true,
+            cl_low: 11,
+            cl_bass: 0,
+            cl_changes: "Dm7b5 G7 Cmaj7 Gbm7b5 Fm7 Em7 Ebdim7 Dm7 G7 Cmaj7".to_string(),
+            cl_chord: 0,
+            vc_family: 4,
+            vc_root: 0,
+            vc_type: 0,
+            vc_set: 0,
+            pass_pair: 0,
+            seq_play: None,
+            skins_open: [false; 3],
+            edit_info: None,
+            neck_zoom: 1.0,
+            ghost_alpha: 0.7,
+            an_pick: None,
+            an_hover: None,
+            shape_cache: HashMap::new(),
             chart_busy: false,
             chart_sugg: Vec::new(),
             chart_q: String::new(),
@@ -2699,6 +2794,9 @@ impl App {
             band_on: false,
             band_style: 0,
             band_parts: [true; 3],
+            band_lv: [1.0; 3],
+            band_loops: 0,
+            band_stems: None,
             band_t0: Instant::now(),
             band_lead: 0.0,
             band_bar: 2.0,
@@ -2755,6 +2853,17 @@ impl App {
         }
         skin::LOOP_SAFE.store(st["loop_safe"].as_bool().unwrap_or(false), Ordering::Relaxed);
         skin::CALM.store(st["reduce_motion"].as_bool().unwrap_or(false), Ordering::Relaxed);
+        if let Some(z) = st["neck_zoom"].as_f64() {
+            app.neck_zoom = (z as f32).clamp(0.8, 2.2);
+        }
+        if let Some(a) = st["ghost_alpha"].as_f64() {
+            app.ghost_alpha = (a as f32).clamp(0.1, 1.0);
+        }
+        if let Some(v) = st["chord_sp"].as_array() {
+            let b = |i: usize, d: bool| v.get(i).and_then(|x| x.as_bool()).unwrap_or(d);
+            app.chord_sp =
+                theory::Spelling { symbols: b(0, false), sharps: b(1, false), detailed: b(2, false), slash: b(3, true) };
+        }
         if let Some(m) = st["intro"].as_u64() {
             app.intro = (m as u8).min(2);
         }
@@ -2935,6 +3044,9 @@ impl App {
             "tour_seen": self.tour_seen,
             "auto_restart": self.auto_restart,
             "intro": self.intro,
+            "neck_zoom": self.neck_zoom,
+            "ghost_alpha": self.ghost_alpha,
+            "chord_sp": [self.chord_sp.symbols, self.chord_sp.sharps, self.chord_sp.detailed, self.chord_sp.slash],
             "loop_safe": skin::LOOP_SAFE.load(Ordering::Relaxed),
             "reduce_motion": skin::calm(),
             "intro_file": self.intro_file,
@@ -3619,6 +3731,32 @@ impl App {
             }
             // one history for the whole library: every tab, page, tune and side page (history.rs)
             Action::Back => self.hist_go(true),
+            Action::EditInfo(id, title, artist) => {
+                self.edit_info = Some((id, title, artist));
+                self.ed.id = 0;
+            }
+            Action::SaveInfo(id, title, artist) => self.save_info(id, title, artist),
+            Action::PlaySequence(chords) => {
+                if !chords.is_empty() {
+                    self.player.send(Cmd::Once(band::sequence_sound(&chords, 0.9), 0.9));
+                }
+            }
+            Action::PlaySequenceAt(chords, gap, tag) => {
+                if !chords.is_empty() {
+                    self.player.send(Cmd::StopOnce);
+                    self.player.send(Cmd::Once(band::sequence_sound(&chords, gap), 0.9));
+                    self.seq_play = Some((Instant::now(), gap, tag, chords.len()));
+                }
+            }
+            Action::StopSequence => {
+                self.player.send(Cmd::StopOnce);
+                self.seq_play = None;
+            }
+            Action::PlayNotes(notes) => {
+                if !notes.is_empty() {
+                    self.player.send(Cmd::Once(band::chord_sound(&notes), 0.9));
+                }
+            }
             Action::ShowLog => {
                 self.show_log = true;
                 self.show_tl = false;
@@ -4541,6 +4679,7 @@ impl eframe::App for App {
         self.help_overlay(ctx, &mut acts);
         self.credits_overlay(ctx);
         self.art_preview_overlay(ctx);
+        self.edit_info_panel(ctx);
         self.skin_loading_panel(ctx);
         self.viz_panel(ctx);
         self.artist_picker(ctx, &mut acts);

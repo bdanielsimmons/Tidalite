@@ -47,11 +47,17 @@ pub const F_UNIT: u32 = 47;
 pub const F_TUNE_IREAL: u32 = 48;
 pub const F_LOOK: u32 = 49;
 pub const F_WINAMP: u32 = 50;
+pub const F_BAR: u32 = 51;
+pub const F_CHORD: u32 = 52;
+pub const F_INFO_TITLE: u32 = 53;
+pub const F_INFO_ARTIST: u32 = 54;
+pub const F_CL_CHANGES: u32 = 55;
 
 impl App {
     /// A box you can type into. Shows `shown`; returns the typed text when you press Enter or click away.
     pub(crate) fn entry(&mut self, ui: &mut egui::Ui, id: u32, w: f32, shown: &str) -> Option<String> {
-        let w = w * crate::font::ui_scale();
+        // never narrower than what it shows
+        let w = (w * crate::font::ui_scale()).max(crate::text_w(shown, 2.0) + 18.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
         let editing = self.ed.id == id;
         if editing && self.ebuf_id != id {
@@ -640,14 +646,48 @@ impl App {
                 label(ui, "BPM", 36.0);
                 let s = self.knob_bpm().to_string();
                 self.num_step(ui, acts, F_BAND_BPM, 46.0, Knob::Bpm, s, "Band tempo");
+            });
+            // the mixer: each part on / off and how loud; how many times through; and a file to keep
+            ui.horizontal_wrapped(|ui| {
                 for (i, n) in ["BASS", "CHORDS", "DRUMS"].iter().enumerate() {
                     if retro_btn_w(ui, n, 70.0, self.band_parts[i]).tip("Turn this part on or off").clicked() {
                         acts.push(Action::Opt(Opt::Part(i)));
                     }
+                    if retro_btn_w(ui, "-", 24.0, false).tip("Softer").clicked() {
+                        acts.push(Action::Opt(Opt::PartLevel(i, false)));
+                    }
+                    crate::lcd_box(ui, &format!("{}%", (self.band_lv[i] * 100.0).round()), 52.0, pal().ink);
+                    if retro_btn_w(ui, "+", 24.0, false).tip("Louder").clicked() {
+                        acts.push(Action::Opt(Opt::PartLevel(i, true)));
+                    }
+                    ui.add_space(8.0);
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                label(ui, "LOOPS", 56.0);
+                if retro_btn_w(ui, "-", 24.0, false).clicked() {
+                    acts.push(Action::Opt(Opt::BandLoops(false)));
+                }
+                let loops = if self.band_loops == 0 { "ENDLESS".to_string() } else { format!("{}x", self.band_loops) };
+                crate::lcd_box(ui, &loops, 84.0, pal().ink);
+                if retro_btn_w(ui, "+", 24.0, false).tip("Times through the chart before the band stops").clicked() {
+                    acts.push(Action::Opt(Opt::BandLoops(true)));
+                }
+                ui.add_space(8.0);
+                if retro_btn(ui, "EXPORT WAV", false)
+                    .tip("Save the band as a WAV: the count-in, the chart as many times as LOOPS says (once when endless), and an ending")
+                    .clicked()
+                {
+                    acts.push(Action::Opt(Opt::BandExport));
                 }
             });
             if self.band_on && self.band_chart != text {
                 self.band_stop();
+            }
+            // the chord the band is on, on a piano and a guitar box
+            if self.band_on {
+                let ch = crate::chart::parse_friendly(&text);
+                self.instrument_view(ui, &ch);
             }
         }
         ui.add_space(2.0);
@@ -660,6 +700,20 @@ impl App {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 150.0), Sense::hover());
                 let o = field(ui, &mut self.ed, F_CHART, &mut self.store.tunes[ti].chart, rect, "T44 *A | Dm7 G7 | Cmaj7 |", true);
                 self.store_dirty |= o.changed;
+                // a plain chord list pasted from a website (no bar lines, notes in between) made into a chart
+                ui.horizontal_wrapped(|ui| {
+                    if retro_btn(ui, "TIDY PASTED CHORDS", false)
+                        .tip("Pasted a plain list of chords? Each chord becomes a bar, notes between them become sections, and the title and credits are left out. Then fix the timing by hand.")
+                        .clicked()
+                    {
+                        let tidy = crate::chart::from_loose(&self.store.tunes[ti].chart);
+                        if tidy.trim() != "T44" {
+                            self.store.tunes[ti].chart = tidy;
+                            self.store_dirty = true;
+                        }
+                    }
+                    label(ui, "EACH CHORD BECOMES ONE BAR", 260.0);
+                });
                 ui.add_space(8.0);
                 para(ui, "Or paste an iReal Pro link (irealb://...). It fills in the changes, key, tempo and composer.", pal().ink2);
                 ui.horizontal(|ui| {
@@ -763,7 +817,14 @@ impl App {
                     let now = now_bar == Some(idx);
                     inset(p, cell, if now { pal().sel } else { pal().lcd });
                     if ti.is_some() {
-                        let rsp = ui.interact(cell, ui.id().with(("bar", idx)), Sense::click());
+                        let rsp = ui
+                            .interact(cell, ui.id().with(("bar", idx)), Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        if rsp.clicked() {
+                            self.bar_edit = Some((idx, bar.chords.join(" ")));
+                            self.ed.id = F_BAR;
+                            self.ed.cur = bar.chords.join(" ").chars().count();
+                        }
                         rsp.context_menu(|ui| {
                             for (lab, op) in [
                                 ("Insert a bar after (copy)", "ins"),
@@ -896,6 +957,65 @@ impl App {
             }
             ui.add_space(14.0);
         });
+        // the little bar editor: type the chords (Enter), or join / split / hold / delete with a click
+        if let (Some((bi, _)), Some(_)) = (self.bar_edit.clone(), ti) {
+            let mut close = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            let mut op: Option<String> = None;
+            egui::Area::new(egui::Id::new("bar_editor"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::none().fill(pal().beige).stroke(egui::Stroke::new(2.0_f32, pal().edge)).inner_margin(12.0).show(
+                        ui,
+                        |ui| {
+                            ui.set_width(420.0);
+                            crate::title_line(ui, &format!("BAR {}", bi + 1), 2.5, pal().ink);
+                            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), bh()), Sense::hover());
+                            if let Some((_, buf)) = self.bar_edit.as_mut() {
+                                let o = field(ui, &mut self.ed, F_BAR, buf, rect, "Dm7 G7", false);
+                                if o.enter {
+                                    op = Some(format!("set:{}", buf));
+                                }
+                            }
+                            crate::views::dim_line(ui, "TYPE THE CHORDS (SPACE BETWEEN THEM), ENTER TO KEEP", 1.0, pal().dim);
+                            ui.add_space(4.0);
+                            ui.horizontal_wrapped(|ui| {
+                                for (lab, o, tip) in [
+                                    ("JOIN NEXT", "join", "The next bar's chords move into this one (two chords in a bar)"),
+                                    ("SPLIT", "split", "Two or more chords: the second half moves to a bar of its own"),
+                                    ("+ BAR", "ins", "Hold this chord one more bar (a copy after it)"),
+                                    ("DELETE", "del", "Take this bar out"),
+                                ] {
+                                    if retro_btn(ui, lab, false).tip(tip).clicked() {
+                                        op = Some(o.to_string());
+                                    }
+                                }
+                                if retro_btn(ui, "DONE", true).clicked() {
+                                    close = true;
+                                }
+                            });
+                        },
+                    );
+                });
+            if let (Some(o), Some(tune)) = (op, ti) {
+                let mut c = chart.clone();
+                c.edit(bi, &o);
+                self.store.tunes[tune].chart = c.to_text();
+                self.store_dirty = true;
+                let after = crate::chart::parse_friendly(&self.store.tunes[tune].chart);
+                match after.bars.get(bi) {
+                    // stay on the bar after joining / splitting / holding; close after typing or deleting
+                    Some(b) if !o.starts_with("set:") && o != "del" => {
+                        self.bar_edit = Some((bi, b.chords.join(" ")));
+                    }
+                    _ => close = true,
+                }
+            }
+            if close {
+                self.bar_edit = None;
+                self.ed.id = 0;
+            }
+        }
         if let (Some((i, op)), Some(tune)) = (req, ti) {
             if op == "text" {
                 self.chart_edit = true;

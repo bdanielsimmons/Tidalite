@@ -179,11 +179,12 @@ impl App {
             acts.push(Action::ClearStatus);
         }
 
-        // ---- tempo / key / quality (the stream's kbps and kHz show on hover)
+        // ---- tempo and key (the stream's kbps and kHz show on hover)
         let info = track.as_ref().and_then(|t| meta::get(t.id)).filter(|_| active).unwrap_or_default();
         let from = if info.tidal { "from Tidal" } else { "an estimate from listening to the track" };
         let stream = |s: String| if active && !s.is_empty() { format!("\nStream: {}", s) } else { String::new() };
-        let kb = rc(112.0, 34.0, 50.0, 12.0);
+        // (stream quality lives on the title bar now, so tempo and key share the row)
+        let kb = rc(112.0, 34.0, 66.0, 12.0);
         inset(p, kb, pal().lcd);
         let kb_txt = info.bpm.map_or("--- BPM".to_string(), |b| format!("{} BPM", b));
         ptext_fit(p, kb.center(), Align::Center, &kb_txt, px_sm, kb.width() - 6.0, pal().ink);
@@ -193,7 +194,7 @@ impl App {
         };
         ui.interact(kb, ui.id().with("bpm"), Sense::hover())
             .tip(kb_tip + &stream(if self.kbps > 0 { format!("{} kbps", self.kbps) } else { String::new() }));
-        let kh = rc(166.0, 34.0, 40.0, 12.0);
+        let kh = rc(182.0, 34.0, 68.0, 12.0);
         inset(p, kh, pal().lcd);
         let kh_txt = if info.key.is_some() { meta::key_text(&info) } else { "KEY --".to_string() };
         ptext_fit(p, kh.center(), Align::Center, &kh_txt, px_sm, kh.width() - 6.0, pal().ink);
@@ -203,22 +204,6 @@ impl App {
         };
         ui.interact(kh, ui.id().with("key"), Sense::hover())
             .tip(kh_tip + &stream(if rate > 0 { format!("{} kHz", rate / 1000) } else { String::new() }));
-        let qb = rc(210.0, 34.0, 40.0, 12.0);
-        let qr = ui.interact(qb, ui.id().with("quality"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-        raised_h(p, qb, qr.is_pointer_button_down_on(), qr.hovered());
-        ptext_fit(
-            p,
-            qb.center(),
-            Align::Center,
-            if self.prefer_lossless { "HIFI" } else { "320K" },
-            px_sm,
-            qb.width() - 6.0,
-            pal().ink,
-        );
-        if qr.clicked() {
-            acts.push(Action::ToggleLossless);
-        }
-
         // ---- cover art
         let cv = rc(258.0, 34.0, 36.0, 36.0);
         tour::mark("COVER", cv);

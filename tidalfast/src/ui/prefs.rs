@@ -344,6 +344,17 @@ impl App {
                             pal().ink2,
                         );
 
+                        section_header(ui, "CHORDS");
+                        para(ui, "How strong the faint rings are that show the rest of a chord on the guitar neck.", pal().ink2);
+                        ui.horizontal_wrapped(|ui| {
+                            for (lab, a) in [("SUBTLE", 0.3f32), ("MEDIUM", 0.55), ("STRONG", 0.8), ("FULL", 1.0)] {
+                                if retro_btn(ui, lab, (self.ghost_alpha - a).abs() < 0.05).clicked() {
+                                    self.ghost_alpha = a;
+                                    self.dirty = true;
+                                }
+                            }
+                        });
+
                         section_header(ui, "SIZE OF EVERYTHING");
                         para(ui, "Makes buttons and text bigger or smaller. Ctrl and + / - (Cmd on a Mac) does the same.", pal().ink2);
                         ui.horizontal_wrapped(|ui| {
