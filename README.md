@@ -7,14 +7,14 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- **v9.48:** Skins sorted into ORIGINAL (sleek, Silkscreen), RETRO ORIGINAL (the classic pixel look) and WINAMP
+- **v9.48:** Your last 8 Winamp skins stay in the menu, back in one click
+- **v9.48:** Practice panel: roomier, A and B, a speed drop-down; timer and metronome in their own corner
 - **v9.47:** Every Tidalite skin now comes as a Winamp-style skin drawn by Tidalite itself - SLEEK (the new default) or PIXEL
 - **v9.47:** Art view song titles in soft white or soft black, with a right-click menu for size and colour
 - **v9.46:** Winamp skins drawn from their own art: the player, equalizer and playlist windows, window frames, tabs and buttons, with every button working
 - **v9.46:** Browse 90,000+ classic skins from the Winamp Skin Museum and wear one with a click
 - **v9.46:** Pick the sound output (speakers, headphones, Bluetooth) from its own button
-- **v9.46:** Visualizer settings panel with a live preview
-- **v9.44:** Playback speed for everyone, 0.25x to 2.5x with the pitch kept: presets or any speed typed in, and records spin to match
-- **v9.44:** Practice in the album view: loop and speed tools come along when you open it in practice mode
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
