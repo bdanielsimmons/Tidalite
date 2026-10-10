@@ -94,39 +94,57 @@ impl App {
         let corners = |h: f32| [xf(-h, -h), xf(h, -h), xf(h, h), xf(-h, h)];
         let h = a / 2.0;
 
-        // shadow, frame, cover
-        let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 20.0);
-        let shadow: Vec<Pos2> = corners(h + 6.0).iter().map(|c| *c + off).collect();
-        let see = self.art_op < 0.99;
-        p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(if see { 50 } else { 120 }), Stroke::NONE));
-        // when the cover is see-through the frame is only an outline, so the visualizer behind it stays visible
-        p.add(egui::Shape::convex_polygon(
-            corners(h + 9.0).to_vec(),
-            if see { Color32::TRANSPARENT } else { Color32::BLACK },
-            Stroke::new(2.0_f32, pal().trim),
-        ));
-        let cs = corners(h);
-        match tex {
-            Some(id) => {
-                let mut mesh = egui::Mesh::with_texture(id);
-                let uvs = [Pos2::new(0.0, 0.0), Pos2::new(1.0, 0.0), Pos2::new(1.0, 1.0), Pos2::new(0.0, 1.0)];
-                for (c, uv) in cs.iter().zip(uvs.iter()) {
-                    mesh.vertices.push(egui::epaint::Vertex {
-                        pos: *c,
-                        uv: *uv,
-                        color: Color32::from_white_alpha((self.art_op * 255.0) as u8),
-                    });
+        // click the cover to put it on a record (and back)
+        let cover_hit = ui.interact(Rect::from_center_size(center, Vec2::splat(a)), ui.id().with("cover_vinyl"), Sense::click());
+        if cover_hit.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            acts.push(Action::ToggleVinyl);
+        }
+        if VINYL.load(Ordering::Relaxed) && tex.is_some() {
+            // the record: a soft round shadow, then the disc turning while the music plays
+            let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 16.0);
+            p.circle_filled(center + off, a * 0.5 + 4.0, Color32::from_black_alpha((60.0 * self.art_op) as u8));
+            let spin = vinyl_angle(ui, active && !self.paused);
+            // follows the cover opacity setting, and never fully solid, so the visualizer shows through
+            paint_vinyl(&p, Rect::from_center_size(center, Vec2::splat(a)), tex, spin, self.art_op.min(0.8));
+        } else {
+            // shadow, frame, cover
+            let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 20.0);
+            let shadow: Vec<Pos2> = corners(h + 6.0).iter().map(|c| *c + off).collect();
+            let see = self.art_op < 0.99;
+            p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(if see { 50 } else { 120 }), Stroke::NONE));
+            // when the cover is see-through the frame is only an outline, so the visualizer behind it stays visible
+            p.add(egui::Shape::convex_polygon(
+                corners(h + 9.0).to_vec(),
+                if see { Color32::TRANSPARENT } else { Color32::BLACK },
+                Stroke::new(2.0_f32, pal().trim),
+            ));
+            let cs = corners(h);
+            match tex {
+                Some(id) => {
+                    let mut mesh = egui::Mesh::with_texture(id);
+                    let uvs = [Pos2::new(0.0, 0.0), Pos2::new(1.0, 0.0), Pos2::new(1.0, 1.0), Pos2::new(0.0, 1.0)];
+                    for (c, uv) in cs.iter().zip(uvs.iter()) {
+                        mesh.vertices.push(egui::epaint::Vertex {
+                            pos: *c,
+                            uv: *uv,
+                            color: Color32::from_white_alpha((self.art_op * 255.0) as u8),
+                        });
+                    }
+                    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+                    p.add(egui::Shape::mesh(mesh));
                 }
-                mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
-                p.add(egui::Shape::mesh(mesh));
-            }
-            None => {
-                p.add(egui::Shape::convex_polygon(cs.to_vec(), pal().ink2, Stroke::NONE));
-                // no cover (yet): the record, turning while it loads
-                let loading = !url.is_empty() && !self.images.failed(&url);
-                paint_record(&p, Rect::from_center_size(center, Vec2::splat(a)), loading.then(|| ui.input(|i| i.time) as f32));
-                if loading {
-                    ui.ctx().request_repaint();
+                None => {
+                    p.add(egui::Shape::convex_polygon(cs.to_vec(), pal().ink2, Stroke::NONE));
+                    // no cover (yet): the record, turning while it loads
+                    let loading = !url.is_empty() && !self.images.failed(&url);
+                    paint_record(
+                        &p,
+                        Rect::from_center_size(center, Vec2::splat(a)),
+                        loading.then(|| ui.input(|i| i.time) as f32),
+                    );
+                    if loading {
+                        ui.ctx().request_repaint();
+                    }
                 }
             }
         }
@@ -435,7 +453,7 @@ impl App {
             &p,
             Pos2::new(full.max.x - 30.0, full.max.y - 14.0),
             Align::Max,
-            "Esc close    F fullscreen    G b&w    L lyrics    H like    Space play/pause",
+            "Click the cover: record    Esc close    F fullscreen    G b&w    L lyrics    H like    Space play/pause",
             1.0,
             pal().dim,
         );

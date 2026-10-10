@@ -444,6 +444,7 @@ impl App {
         let loading = self.loading;
         let tab = self.lib_tab;
         let playing_id = self.cur_track().map(|t| t.id);
+        let sounding = self.cur.is_some() && !self.paused && !self.stopped;
         let (show_log, show_eq, show_cache) = (self.show_log, self.show_eq, self.show_cache);
         let sec = self.sec;
         let sec_i = sec as u8;
@@ -477,7 +478,7 @@ impl App {
                             );
                         }
                         if let Some(pg) = &page {
-                            page_view(ui, &mut self.images, pg, playing_id, tab, &self.liked, acts);
+                            page_view(ui, &mut self.images, pg, playing_id, sounding, tab, &self.liked, acts);
                         }
                     }
                     Sec::Files => self.files_view(ui, acts),

@@ -190,6 +190,8 @@ enum Action {
     Search(String),
     Back,
     Forward,
+    /// covers as spinning records, or square
+    ToggleVinyl,
     Tab(Tab),
     Play(Vec<Track>, usize),
     PlayShuffled(Vec<Track>),
@@ -1434,6 +1436,75 @@ fn paint_record(p: &egui::Painter, rect: Rect, spin: Option<f32>) {
     p.rect_filled(Rect::from_center_size(tip, Vec2::splat(r * 0.16)), Rounding::same(1.0), pal().trim);
 }
 
+/// Covers shown as records instead of squares (click a cover to switch). Saved in the settings.
+static VINYL: AtomicBool = AtomicBool::new(false);
+
+/// How far the record has turned: it spins up to 33 1/3 rpm while music plays and coasts to a stop on pause.
+fn vinyl_angle(ui: &egui::Ui, playing: bool) -> f32 {
+    let id = egui::Id::new("vinyl_angle");
+    let dt = ui.input(|i| i.stable_dt).min(0.1);
+    let (ang, vel): (f32, f32) = ui.ctx().data(|d| d.get_temp(id)).unwrap_or((0.0, 0.0));
+    let target = if playing { 3.49 } else { 0.0 }; // radians a second
+    let vel = vel + (target - vel) * (1.0 - (-dt * 2.0).exp());
+    let ang = (ang + vel * dt) % std::f32::consts::TAU;
+    ui.ctx().data_mut(|d| d.insert_temp(id, (ang, vel)));
+    if vel > 0.005 {
+        ui.ctx().request_repaint();
+    }
+    ang
+}
+
+/// A record whose label is the cover, turned by `angle`. The light on the grooves stays put, like a real one.
+/// `alpha` below 1 lets what is behind it (the visualizer) show through.
+fn paint_vinyl(p: &egui::Painter, rect: Rect, tex: Option<egui::TextureId>, angle: f32, alpha: f32) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.5;
+    let k = |col: Color32| col.gamma_multiply(alpha);
+    p.circle_filled(c, r, k(Color32::from_gray(14)));
+    for g in 0..9 {
+        let shade = Color32::from_gray(if g % 3 == 0 { 44 } else { 30 });
+        p.circle_stroke(c, r * (0.47 + g as f32 * 0.058), Stroke::new(1.0_f32, k(shade)));
+    }
+    // the light: two soft wedges, fixed
+    for (a0, a1) in [(-2.4f32, -1.9f32), (0.75, 1.25)] {
+        let mut pts = vec![];
+        for s in 0..=8 {
+            pts.push(c + Vec2::angled(a0 + (a1 - a0) * s as f32 / 8.0) * r * 0.97);
+        }
+        for s in (0..=8).rev() {
+            pts.push(c + Vec2::angled(a0 + (a1 - a0) * s as f32 / 8.0) * r * 0.46);
+        }
+        p.add(egui::Shape::Path(egui::epaint::PathShape::convex_polygon(pts, k(Color32::from_white_alpha(10)), Stroke::NONE)));
+    }
+    // the label: the cover cut to a circle, turning
+    let lr = r * 0.42;
+    match tex {
+        Some(id) => {
+            let tint = k(Color32::WHITE);
+            let mut mesh = egui::Mesh::with_texture(id);
+            mesh.vertices.push(egui::epaint::Vertex { pos: c, uv: Pos2::new(0.5, 0.5), color: tint });
+            let n = 64;
+            for s in 0..=n {
+                let a = s as f32 / n as f32 * std::f32::consts::TAU;
+                let uv = Vec2::angled(a - angle) * 0.5;
+                let pos = c + Vec2::angled(a) * lr;
+                mesh.vertices.push(egui::epaint::Vertex { pos, uv: Pos2::new(0.5 + uv.x, 0.5 + uv.y), color: tint });
+                if s > 0 {
+                    mesh.indices.extend_from_slice(&[0, s as u32, s as u32 + 1]);
+                }
+            }
+            p.add(egui::Shape::mesh(mesh));
+        }
+        None => {
+            p.circle_filled(c, lr, k(pal().red));
+            let mark = [c + Vec2::angled(angle) * lr * 0.3, c + Vec2::angled(angle) * lr * 0.85];
+            p.line_segment(mark, Stroke::new(2.0_f32, k(Color32::from_white_alpha(120))));
+        }
+    }
+    p.circle_stroke(c, lr, Stroke::new(1.5_f32, k(Color32::from_black_alpha(160))));
+    p.circle_filled(c, (r * 0.035).max(2.0), Color32::from_gray(8));
+}
+
 /// A page's own picture, round for an artist; a spinning record while it loads, a still one when there is none.
 fn paint_page_art(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, artist: bool) {
     match images.get(url) {
@@ -1693,6 +1764,7 @@ fn page_view(
     images: &mut Images,
     page: &Page,
     playing_id: Option<i64>,
+    sounding: bool,
     tab: Tab,
     liked: &HashSet<i64>,
     acts: &mut Vec<Action>,
@@ -1750,11 +1822,27 @@ fn page_view(
     let has_header = !page.image.is_empty() || !page.subtitle.is_empty();
     if has_header {
         ui.horizontal(|ui| {
-            let (cr, _) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::hover());
-            if !page.artist {
-                inset(ui.painter(), cr, pal().edge);
+            let (cr, art_r) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::click());
+            let art_r = art_r.on_hover_cursor(egui::CursorIcon::PointingHand).tip(if VINYL.load(Ordering::Relaxed) {
+                "Click to show the cover"
+            } else {
+                "Click to put it on a record"
+            });
+            if art_r.clicked() {
+                acts.push(Action::ToggleVinyl);
             }
-            paint_page_art(ui, images, &page.image, cr.shrink(2.0), page.artist);
+            let tex = images.get(&page.image);
+            if VINYL.load(Ordering::Relaxed) && tex.is_some() {
+                // it turns while a song from this page plays
+                // an album's record turns while one of its songs plays; an artist's whenever music plays
+                let mine = sounding && (page.artist || page.tracks.iter().any(|t| Some(t.id) == playing_id));
+                paint_vinyl(ui.painter(), cr, tex, vinyl_angle(ui, mine), 1.0);
+            } else {
+                if !page.artist {
+                    inset(ui.painter(), cr, pal().edge);
+                }
+                paint_page_art(ui, images, &page.image, cr.shrink(2.0), page.artist);
+            }
             ui.vertical(|ui| {
                 title_line(ui, &page.title, 3.0, pal().ink);
                 title_line(ui, &page.subtitle, 2.0, pal().ink2);
@@ -2434,6 +2522,9 @@ impl App {
             let new = if st["cols_v"].as_u64().unwrap_or(1) < 2 { 0b1000 } else { 0 };
             COLS.store(c as u32 | new, Ordering::Relaxed);
         }
+        if let Some(v) = st["vinyl"].as_bool() {
+            VINYL.store(v, Ordering::Relaxed);
+        }
         if let Some(w) = st["col_w"].as_array() {
             let w: Vec<f32> = w.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect();
             if w.len() == 3 && w.iter().all(|x| *x > 0.01) {
@@ -2509,6 +2600,7 @@ impl App {
             "pomo_sound": self.pomo_sound,
             "cols": COLS.load(Ordering::Relaxed),
             "cols_v": 2,
+            "vinyl": VINYL.load(Ordering::Relaxed),
             "col_w": *COL_W.lock().unwrap(),
             "loops": self.loops.iter().map(|(k, v)| (k.to_string(), serde_json::json!([v.0, v.1]))).collect::<serde_json::Map<String, serde_json::Value>>(),
         });
@@ -3133,6 +3225,16 @@ impl App {
                     }
                     self.serial += 1;
                 }
+            }
+            Action::ToggleVinyl => {
+                let on = !VINYL.fetch_xor(true, Ordering::Relaxed);
+                if on {
+                    // a flick: it spins fast and winds down to its normal speed
+                    let id = egui::Id::new("vinyl_angle");
+                    let ang: f32 = self.ctx.data(|d| d.get_temp::<(f32, f32)>(id)).map_or(0.0, |s| s.0);
+                    self.ctx.data_mut(|d| d.insert_temp(id, (ang, 14.0f32)));
+                }
+                self.dirty = true;
             }
             Action::Forward => {
                 if let Some(p) = self.fwd.pop() {
