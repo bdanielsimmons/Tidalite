@@ -515,6 +515,230 @@ impl App {
     }
 }
 
+// ------------------------------------------------------------------ recording a demo
+// BACKLINE_DEMO=regular or practice runs that tour by itself and records it to BACKLINE_DEMO_OUT (an .mp4):
+// the app's own frames and its own sound (muted), so nothing else on the screen or the speakers gets in.
+
+/// Which tour to record, from BACKLINE_DEMO.
+pub(crate) fn demo_kind() -> Option<u8> {
+    match std::env::var("BACKLINE_DEMO").ok()?.as_str() {
+        "practice" => Some(1),
+        "regular" => Some(0),
+        _ => None,
+    }
+}
+
+const FPS: f64 = 30.0;
+
+/// A demo being recorded.
+pub(crate) struct DemoRec {
+    kind: u8,
+    start: std::time::Instant,
+    /// 0 waiting to start, 1 touring, 2 ending
+    phase: u8,
+    step: usize,
+    step_at: std::time::Instant,
+    end_at: std::time::Instant,
+    ffmpeg: Option<std::process::Child>,
+    size: Option<[usize; 2]>,
+    frames: u64,
+    out: std::path::PathBuf,
+}
+
+impl DemoRec {
+    pub(crate) fn new(kind: u8) -> DemoRec {
+        let now = std::time::Instant::now();
+        let out = std::env::var_os("BACKLINE_DEMO_OUT").map(std::path::PathBuf::from).unwrap_or_else(|| "demo.mp4".into());
+        DemoRec { kind, start: now, phase: 0, step: 0, step_at: now, end_at: now, ffmpeg: None, size: None, frames: 0, out }
+    }
+
+    fn ffmpeg_exe() -> String {
+        std::env::var("BACKLINE_FFMPEG").unwrap_or_else(|_| "ffmpeg".into())
+    }
+
+    /// One frame of the app: written as many times as the clock says, so the video keeps real time.
+    fn frame(&mut self, img: &egui::ColorImage) {
+        let [w, h] = img.size;
+        if self.ffmpeg.is_none() {
+            let video = self.out.with_extension("video.mp4");
+            let child = std::process::Command::new(Self::ffmpeg_exe())
+                .args([
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgba",
+                    "-s",
+                    &format!("{}x{}", w, h),
+                    "-r",
+                    "30",
+                    "-i",
+                    "-",
+                ])
+                .args([
+                    "-vf",
+                    "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "20",
+                    "-pix_fmt",
+                    "yuv420p",
+                ])
+                .arg(&video)
+                .stdin(std::process::Stdio::piped())
+                .spawn();
+            match child {
+                Ok(c) => {
+                    self.ffmpeg = Some(c);
+                    self.size = Some([w, h]);
+                }
+                Err(e) => {
+                    crate::api::log(&format!("demo: could not start ffmpeg: {}", e));
+                    return;
+                }
+            }
+        }
+        if self.size != Some([w, h]) {
+            return;
+        }
+        let want = (self.start.elapsed().as_secs_f64() * FPS) as u64;
+        if want <= self.frames {
+            return;
+        }
+        let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+        if let Some(stdin) = self.ffmpeg.as_mut().and_then(|c| c.stdin.as_mut()) {
+            use std::io::Write;
+            while self.frames < want {
+                if stdin.write_all(&bytes).is_err() {
+                    break;
+                }
+                self.frames += 1;
+            }
+        }
+    }
+
+    /// The video is done: close it, keep the sound as a WAV, and put the two together in the .mp4.
+    fn finish(&mut self) {
+        let video = self.out.with_extension("video.mp4");
+        if let Some(mut c) = self.ffmpeg.take() {
+            drop(c.stdin.take());
+            let _ = c.wait();
+        }
+        let audio = self.out.with_extension("wav");
+        let mut offset = 0.0;
+        if let Some(r) = crate::player::rec_take() {
+            if let Some(s) = r.started {
+                offset = s.duration_since(self.start).as_secs_f64();
+            }
+            let _ = std::fs::write(&audio, wav(&r.data, r.rate, r.channels));
+        }
+        let ok = std::process::Command::new(Self::ffmpeg_exe())
+            .args(["-y", "-loglevel", "error", "-i"])
+            .arg(&video)
+            .args(["-itsoffset", &format!("{:.3}", offset), "-i"])
+            .arg(&audio)
+            .args(["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"])
+            .arg(&self.out)
+            .status()
+            .is_ok_and(|s| s.success());
+        if ok {
+            let _ = std::fs::remove_file(&video);
+            let _ = std::fs::remove_file(&audio);
+        }
+        crate::api::log(&format!("demo: wrote {} ({} frames, sound from {:.2}s)", self.out.display(), self.frames, offset));
+    }
+}
+
+/// A 16-bit PCM WAV file.
+fn wav(data: &[i16], rate: u32, ch: u16) -> Vec<u8> {
+    let mut v = Vec::with_capacity(44 + data.len() * 2);
+    let bytes = (data.len() * 2) as u32;
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&(36 + bytes).to_le_bytes());
+    v.extend_from_slice(b"WAVEfmt ");
+    v.extend_from_slice(&16u32.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&ch.to_le_bytes());
+    v.extend_from_slice(&rate.to_le_bytes());
+    v.extend_from_slice(&(rate * ch as u32 * 2).to_le_bytes());
+    v.extend_from_slice(&(ch * 2).to_le_bytes());
+    v.extend_from_slice(&16u16.to_le_bytes());
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&bytes.to_le_bytes());
+    for s in data {
+        v.extend_from_slice(&s.to_le_bytes());
+    }
+    v
+}
+
+impl App {
+    /// Recording a demo: start the tour, move it on at reading pace, capture every frame, then finish and close.
+    pub(crate) fn demo_tick(&mut self, ctx: &egui::Context) {
+        let Some(mut rec) = self.demo_rec.take() else { return };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        let shots: Vec<std::sync::Arc<egui::ColorImage>> = ctx.input(|i| {
+            i.raw
+                .events
+                .iter()
+                .filter_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None })
+                .collect()
+        });
+        for s in &shots {
+            rec.frame(s);
+        }
+        let now = std::time::Instant::now();
+        match rec.phase {
+            0 if rec.start.elapsed().as_secs_f32() > 1.5 => {
+                crate::player::rec_start();
+                self.tour_start(rec.kind);
+                rec.phase = 1;
+                rec.step = 0;
+                rec.step_at = now;
+            }
+            1 => match self.tour {
+                Some((kind, i)) => {
+                    if i != rec.step {
+                        rec.step = i;
+                        rec.step_at = now;
+                    }
+                    let list = steps(kind);
+                    // long enough to read the card: a few seconds plus time for its words
+                    let words = list[i].text.split_whitespace().count() as f32;
+                    let stay = (2.0 + words / 5.0).clamp(4.0, 10.0);
+                    // the first step waits for the tour's song to be playing
+                    let waiting = i == 0 && self.tour_play.as_ref().is_some_and(|s| s.song.is_none());
+                    if waiting {
+                        rec.step_at = now;
+                    } else if now.duration_since(rec.step_at).as_secs_f32() > stay {
+                        if i + 1 < list.len() {
+                            self.tour = Some((kind, i + 1));
+                        } else {
+                            self.tour_end();
+                        }
+                    }
+                }
+                None => {
+                    rec.phase = 2;
+                    rec.end_at = now;
+                }
+            },
+            2 if now.duration_since(rec.end_at).as_secs_f32() > 1.5 => {
+                rec.finish();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+            _ => {}
+        }
+        ctx.request_repaint();
+        self.demo_rec = Some(rec);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

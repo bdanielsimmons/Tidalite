@@ -1,3 +1,6 @@
 
 # a pattern book to hand to friends (kept on this computer only)
 /share/pattern_book.txt
+
+# demo videos and the script that records them (run it when you want new ones: bash demo/record.sh)
+/demo/

@@ -892,6 +892,43 @@ impl<S: Source<Item = i16>> Source for Equalizer<S> {
     }
 }
 
+// ------------------------------------------------------------------ demo recording
+/// Recording a demo: the main track's samples are kept as they leave the effects (before the volume), and every
+/// sink plays silently, so nothing is heard and nothing else on the computer is recorded.
+pub static REC_ON: AtomicBool = AtomicBool::new(false);
+pub static MUTED: AtomicBool = AtomicBool::new(false);
+static REC: Mutex<Option<RecBuf>> = Mutex::new(None);
+
+/// What a demo recording kept: interleaved samples, their rate and channels, and when the first one played.
+pub struct RecBuf {
+    pub rate: u32,
+    pub channels: u16,
+    pub started: Option<std::time::Instant>,
+    pub data: Vec<i16>,
+}
+
+/// Start keeping the sound (and mute the speakers).
+pub fn rec_start() {
+    MUTED.store(true, Ordering::Relaxed);
+    *REC.lock().unwrap_or_else(|e| e.into_inner()) = Some(RecBuf { rate: 44100, channels: 2, started: None, data: Vec::new() });
+    REC_ON.store(true, Ordering::Relaxed);
+}
+
+/// Stop keeping the sound and hand over what was kept.
+pub fn rec_take() -> Option<RecBuf> {
+    REC_ON.store(false, Ordering::Relaxed);
+    REC.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// A sink's volume, or silence while a demo records.
+fn out(v: f32) -> f32 {
+    if MUTED.load(Ordering::Relaxed) {
+        0.0
+    } else {
+        v
+    }
+}
+
 /// Pass-through source that copies one channel of samples into `Viz`.
 struct Tap<S: Source<Item = i16>> {
     inner: S,
@@ -899,12 +936,14 @@ struct Tap<S: Source<Item = i16>> {
     scratch: Vec<f32>,
     ch: u16,
     phase: u16,
+    /// samples kept for a demo recording, handed over in batches
+    rec: Vec<i16>,
 }
 
 impl<S: Source<Item = i16>> Tap<S> {
     fn new(inner: S, viz: Arc<Mutex<Viz>>) -> Tap<S> {
         let ch = inner.channels().max(1);
-        Tap { inner, viz, scratch: Vec::with_capacity(256), ch, phase: 0 }
+        Tap { inner, viz, scratch: Vec::with_capacity(256), ch, phase: 0, rec: Vec::new() }
     }
 
     fn flush(&mut self) {
@@ -925,6 +964,20 @@ impl<S: Source<Item = i16>> Iterator for Tap<S> {
 
     fn next(&mut self) -> Option<i16> {
         let s = self.inner.next()?;
+        if REC_ON.load(Ordering::Relaxed) {
+            self.rec.push(s);
+            if self.rec.len() >= 4096 {
+                if let Some(r) = REC.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                    if r.started.is_none() {
+                        r.started = Some(std::time::Instant::now());
+                        r.rate = self.inner.sample_rate();
+                        r.channels = self.inner.channels();
+                    }
+                    r.data.append(&mut self.rec);
+                }
+                self.rec.clear();
+            }
+        }
         self.phase += 1;
         if self.phase >= self.ch {
             self.phase = 0;
@@ -972,7 +1025,7 @@ fn chime_buf() -> Vec<i16> {
 /// Play a count-in on its own sink and wait for it to finish.
 fn play_clicks(handle: &OutputStreamHandle, beats: u32, interval: f32, vol: f32) {
     if let Ok(c) = Sink::try_new(handle) {
-        c.set_volume((vol * 1.2).min(1.0));
+        c.set_volume(out((vol * 1.2).min(1.0)));
         c.append(rodio::buffer::SamplesBuffer::new(1, 44100, click_buf(beats, interval.clamp(0.15, 4.0), false)));
         c.sleep_until_end();
     }
@@ -1100,7 +1153,7 @@ impl Player {
                             (Ok(s), Ok(dec)) => {
                                 let rate = dec.sample_rate();
                                 log(&format!("decoder ok: {} Hz, {} ch", rate, dec.channels()));
-                                s.set_volume(vol);
+                                s.set_volume(out(vol));
                                 {
                                     let mut v = vz.lock().unwrap();
                                     v.samples.clear();
@@ -1191,10 +1244,10 @@ impl Player {
                     Ok(Cmd::Volume(v)) => {
                         vol = v;
                         if let Some(s) = &sink {
-                            s.set_volume(v);
+                            s.set_volume(out(v));
                         }
                         for (m, g) in slots.iter().flatten() {
-                            m.set_volume((v * g).min(1.0));
+                            m.set_volume(out((v * g).min(1.0)));
                         }
                     }
                     Ok(Cmd::Pcm(slot, lead, body, gain)) => {
@@ -1204,7 +1257,7 @@ impl Player {
                         }
                         if !body.is_empty() {
                             if let Ok(m) = Sink::try_new(&handle) {
-                                m.set_volume((vol * gain).min(1.0));
+                                m.set_volume(out((vol * gain).min(1.0)));
                                 if !lead.is_empty() {
                                     m.append(rodio::buffer::SamplesBuffer::new(1, 44100, lead));
                                 }
@@ -1216,7 +1269,7 @@ impl Player {
                     Ok(Cmd::Once(pcm, gain)) => {
                         once.retain(|s| !s.empty());
                         if let Ok(c) = Sink::try_new(&handle) {
-                            c.set_volume((vol * gain).clamp(0.2, 1.0));
+                            c.set_volume(out((vol * gain).clamp(0.2, 1.0)));
                             c.append(rodio::buffer::SamplesBuffer::new(1, 44100, pcm));
                             once.push(c);
                         }
@@ -1228,7 +1281,7 @@ impl Player {
                     }
                     Ok(Cmd::Chime) => {
                         if let Ok(c) = Sink::try_new(&handle) {
-                            c.set_volume((vol * 1.5).clamp(0.3, 1.0));
+                            c.set_volume(out((vol * 1.5).clamp(0.3, 1.0)));
                             c.append(rodio::buffer::SamplesBuffer::new(1, 44100, chime_buf()));
                             c.detach();
                         }

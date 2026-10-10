@@ -2306,6 +2306,8 @@ struct App {
     tour_restore: Option<(bool, bool, bool, u8)>,
     /// what was playing before the tour (it plays its own song), put back when it ends
     tour_play: Option<tour::TourPlay>,
+    /// recording a demo of a tour (BACKLINE_DEMO)
+    demo_rec: Option<tour::DemoRec>,
     tour_seen: bool,
     help_tab: usize,
     /// (track id, cents from A440, confidence) from the tuning check
@@ -2754,6 +2756,7 @@ impl App {
             tour: None,
             tour_restore: None,
             tour_play: None,
+            demo_rec: tour::demo_kind().map(tour::DemoRec::new),
             tour_seen: false,
             help_tab: 0,
             tuning: None,
@@ -4815,6 +4818,7 @@ impl eframe::App for App {
             self.dirty = true;
         }
         self.tour_overlay(ctx);
+        self.demo_tick(ctx);
         if self.tour.is_none() && !self.show_prefs && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
             self.open_palette();
         }
@@ -4956,14 +4960,21 @@ fn main() -> eframe::Result<()> {
     if update::apply_staged_at_start() {
         return Ok(());
     }
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Backline")
-            .with_icon(Arc::new(app_icon()))
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([980.0, 640.0]),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Backline")
+        .with_icon(Arc::new(app_icon()))
+        .with_inner_size([1280.0, 820.0])
+        .with_min_inner_size([980.0, 640.0]);
+    // recording a demo: a fixed size, away to the side, never taking the keyboard from what you are doing
+    if tour::demo_kind().is_some() {
+        viewport = viewport
+            .with_inner_size([1600.0, 900.0])
+            .with_resizable(false)
+            .with_position([-1700.0, 40.0])
+            .with_active(false)
+            .with_taskbar(false);
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("Backline", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
 }
 

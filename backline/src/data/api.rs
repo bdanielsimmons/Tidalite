@@ -27,6 +27,10 @@ fn now() -> u64 {
 }
 
 pub fn config_dir() -> PathBuf {
+    // BACKLINE_HOME: use another folder instead (a clean, empty profile for recording demos)
+    if let Some(home) = std::env::var_os("BACKLINE_HOME") {
+        return PathBuf::from(home);
+    }
     dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("backline")
 }
 
@@ -34,6 +38,9 @@ pub fn config_dir() -> PathBuf {
 /// the pattern book) is moved to "backline", and the paths saved inside it follow; from the older "tidalfast"
 /// folder only the login is carried over.
 pub fn migrate_config() {
+    if std::env::var_os("BACKLINE_HOME").is_some() {
+        return;
+    }
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     let new = config_dir();
     let old = base.join("tidalite");
