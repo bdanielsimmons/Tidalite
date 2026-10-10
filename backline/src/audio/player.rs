@@ -899,25 +899,69 @@ pub static REC_ON: AtomicBool = AtomicBool::new(false);
 pub static MUTED: AtomicBool = AtomicBool::new(false);
 static REC: Mutex<Option<RecBuf>> = Mutex::new(None);
 
-/// What a demo recording kept: interleaved samples, their rate and channels, and when the first one played.
-pub struct RecBuf {
+/// One sound a demo recording kept, with when it started: a piece of the song, a strummed chord, a played line, the
+/// band (its lead-in, then its body round and round until `until`).
+pub struct Piece {
+    pub at: std::time::Instant,
     pub rate: u32,
     pub channels: u16,
-    pub started: Option<std::time::Instant>,
+    pub gain: f32,
     pub data: Vec<i16>,
+    pub body: Vec<i16>,
+    pub until: Option<std::time::Instant>,
+    slot: Option<usize>,
+}
+
+/// What a demo recording kept: every sound, each with its time.
+pub struct RecBuf {
+    pub pieces: Vec<Piece>,
 }
 
 /// Start keeping the sound (and mute the speakers).
 pub fn rec_start() {
     MUTED.store(true, Ordering::Relaxed);
-    *REC.lock().unwrap_or_else(|e| e.into_inner()) = Some(RecBuf { rate: 44100, channels: 2, started: None, data: Vec::new() });
+    *REC.lock().unwrap_or_else(|e| e.into_inner()) = Some(RecBuf { pieces: Vec::new() });
     REC_ON.store(true, Ordering::Relaxed);
 }
 
-/// Stop keeping the sound and hand over what was kept.
+/// Stop keeping the sound and hand over what was kept (anything still going on ends now).
 pub fn rec_take() -> Option<RecBuf> {
     REC_ON.store(false, Ordering::Relaxed);
-    REC.lock().unwrap_or_else(|e| e.into_inner()).take()
+    let mut r = REC.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+    let now = std::time::Instant::now();
+    for p in r.pieces.iter_mut().filter(|p| !p.body.is_empty() && p.until.is_none()) {
+        p.until = Some(now);
+    }
+    Some(r)
+}
+
+/// Keep a mono 44.1 kHz sound that starts now (a chord, a line, the chime); with a `body` that repeats from `slot`.
+fn rec_sound(data: &[i16], body: &[i16], gain: f32, slot: Option<usize>) {
+    if !REC_ON.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some(r) = REC.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        r.pieces.push(Piece {
+            at: std::time::Instant::now(),
+            rate: 44100,
+            channels: 1,
+            gain,
+            data: data.to_vec(),
+            body: body.to_vec(),
+            until: None,
+            slot,
+        });
+    }
+}
+
+/// A repeating sound in `slot` stops now.
+fn rec_slot_end(slot: usize) {
+    if let Some(r) = REC.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        let now = std::time::Instant::now();
+        for p in r.pieces.iter_mut().filter(|p| p.slot == Some(slot) && p.until.is_none()) {
+            p.until = Some(now);
+        }
+    }
 }
 
 /// A sink's volume, or silence while a demo records.
@@ -967,13 +1011,21 @@ impl<S: Source<Item = i16>> Iterator for Tap<S> {
         if REC_ON.load(Ordering::Relaxed) {
             self.rec.push(s);
             if self.rec.len() >= 4096 {
+                // the piece just played: it started as long ago as it lasts
+                let (rate, ch) = (self.inner.sample_rate().max(1), self.inner.channels().max(1));
+                let secs = self.rec.len() as f64 / (rate as f64 * ch as f64);
+                let at = std::time::Instant::now() - Duration::from_secs_f64(secs);
                 if let Some(r) = REC.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-                    if r.started.is_none() {
-                        r.started = Some(std::time::Instant::now());
-                        r.rate = self.inner.sample_rate();
-                        r.channels = self.inner.channels();
-                    }
-                    r.data.append(&mut self.rec);
+                    r.pieces.push(Piece {
+                        at,
+                        rate,
+                        channels: ch,
+                        gain: 1.0,
+                        data: std::mem::take(&mut self.rec),
+                        body: Vec::new(),
+                        until: None,
+                        slot: None,
+                    });
                 }
                 self.rec.clear();
             }
@@ -1255,7 +1307,9 @@ impl Player {
                         if let Some((m, _)) = slots[slot].take() {
                             m.stop();
                         }
+                        rec_slot_end(slot);
                         if !body.is_empty() {
+                            rec_sound(&lead, &body, gain, Some(slot));
                             if let Ok(m) = Sink::try_new(&handle) {
                                 m.set_volume(out((vol * gain).min(1.0)));
                                 if !lead.is_empty() {
@@ -1268,6 +1322,7 @@ impl Player {
                     }
                     Ok(Cmd::Once(pcm, gain)) => {
                         once.retain(|s| !s.empty());
+                        rec_sound(&pcm, &[], gain, None);
                         if let Ok(c) = Sink::try_new(&handle) {
                             c.set_volume(out((vol * gain).clamp(0.2, 1.0)));
                             c.append(rodio::buffer::SamplesBuffer::new(1, 44100, pcm));

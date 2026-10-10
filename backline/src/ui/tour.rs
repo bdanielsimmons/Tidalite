@@ -49,6 +49,8 @@ enum Scene {
     AlbumPractice,
     /// practice mode, the CHORDS tab on its chord finder
     Chords,
+    /// practice mode, the CHORDS tab on its analyzer, with a grip on the neck
+    Analyzer,
     /// practice mode, LINES on Slonimsky's Diary
     Lines,
     /// practice mode, the lead sheet on the right with a ii-V-I on it
@@ -221,9 +223,17 @@ const PRACTICE_TOUR: &[Step] = &[
         ..BASE
     },
     Step {
+        key: "CHORDSVIEW",
+        scene: Scene::Analyzer,
+        title: "9. NAME A CHORD",
+        text: "The analyzer works the other way round: click notes on the neck (or a piano) and it names the chord, with other names it could have and its grips. This one is Dm7.",
+        act: 4,
+        ..BASE
+    },
+    Step {
         key: "LINESVIEW",
         scene: Scene::Lines,
-        title: "9. LINES",
+        title: "10. LINES",
         text: "Slonimsky's Diary and scales in 3rds, 4ths and more, written out in notation and tab, played back and looped at your tempo.",
         act: 2,
         ..BASE
@@ -231,7 +241,7 @@ const PRACTICE_TOUR: &[Step] = &[
     Step {
         key: "SHEET",
         scene: Scene::Sheet,
-        title: "10. THE LEAD SHEET AND THE BAND",
+        title: "11. THE LEAD SHEET AND THE BAND",
         text: "Every tune can have a chart, and a little band plays it at your tempo: bass, chords and drums. Drag across bars to loop just those. This one is a ii-V-I.",
         act: 3,
         ..BASE
@@ -239,7 +249,7 @@ const PRACTICE_TOUR: &[Step] = &[
     Step {
         key: "TABS",
         scene: Scene::Practice,
-        title: "11. KEEP TRACK",
+        title: "12. KEEP TRACK",
         text: "The PRACTICE tab holds TUNES (your repertoire, recordings and charts the band can play) and the DIARY (what you practiced). DONE puts everything back the way you had it.",
         ..BASE
     },
@@ -265,6 +275,7 @@ pub(crate) struct TourPlay {
     prac_chart: Option<(String, String)>,
     chords_tab: u8,
     ln_tab: u8,
+    an_frets: [Option<u8>; 6],
     /// the step whose action has been done, and whether the tour paused its song or started the band
     acted: Option<usize>,
     paused: bool,
@@ -307,6 +318,7 @@ impl App {
             prac_chart: self.prac_chart.clone(),
             chords_tab: self.chords_tab,
             ln_tab: self.ln_tab,
+            an_frets: self.an_frets,
             acted: None,
             paused: false,
             band: false,
@@ -415,6 +427,7 @@ impl App {
         self.prac_chart = s.prac_chart.clone();
         self.chords_tab = s.chords_tab;
         self.ln_tab = s.ln_tab;
+        self.an_frets = s.an_frets;
         if s.song.is_some() {
             self.apply(Action::StopBtn);
         }
@@ -454,7 +467,13 @@ impl App {
         let want_art = matches!(scene, Scene::Album | Scene::AlbumPractice);
         let want_practice = match scene {
             Scene::PracticeOff => false,
-            Scene::Practice | Scene::PracticeMore(_) | Scene::AlbumPractice | Scene::Chords | Scene::Lines | Scene::Sheet => true,
+            Scene::Practice
+            | Scene::PracticeMore(_)
+            | Scene::AlbumPractice
+            | Scene::Chords
+            | Scene::Analyzer
+            | Scene::Lines
+            | Scene::Sheet => true,
             _ => practice,
         };
         let (want_more, want_tab) = match scene {
@@ -473,6 +492,10 @@ impl App {
             Scene::Chords => {
                 self.sec = crate::Sec::Chords;
                 self.chords_tab = 0;
+            }
+            Scene::Analyzer => {
+                self.sec = crate::Sec::Chords;
+                self.chords_tab = 1;
             }
             Scene::Lines => {
                 self.sec = crate::Sec::Lines;
@@ -530,6 +553,14 @@ impl App {
                 if let Some(c) = crate::theory::chord_notes("Cmaj7") {
                     self.apply(Action::PlayNotes(crate::chords::piano_voicing(&c)));
                 }
+            }
+            4 => {
+                // Dm7 on the neck: x 5 7 5 6 5, strummed
+                let grip = [None, Some(5), Some(7), Some(5), Some(6), Some(5)];
+                self.an_frets = grip;
+                let notes: Vec<i32> =
+                    grip.iter().enumerate().filter_map(|(s, f)| f.map(|f| crate::theory::STANDARD[s] + f as i32)).collect();
+                self.apply(Action::PlayNotes(notes));
             }
             2 => {
                 // the line on show: a pattern from the book when one was added, else one from Slonimsky's system
@@ -768,12 +799,10 @@ impl DemoRec {
             let _ = c.wait();
         }
         let audio = self.out.with_extension("wav");
-        let mut offset = 0.0;
+        let offset = 0.0;
         if let Some(r) = crate::player::rec_take() {
-            if let Some(s) = r.started {
-                offset = s.duration_since(self.start).as_secs_f64();
-            }
-            let _ = std::fs::write(&audio, wav(&r.data, r.rate, r.channels));
+            let secs = self.frames as f64 / FPS;
+            let _ = std::fs::write(&audio, wav(&mix(&r, self.start, secs), MIX_RATE, 2));
         }
         let ok = std::process::Command::new(Self::ffmpeg_exe())
             .args(["-y", "-loglevel", "error", "-i"])
@@ -790,6 +819,50 @@ impl DemoRec {
         }
         crate::api::log(&format!("demo: wrote {} ({} frames, sound from {:.2}s)", self.out.display(), self.frames, offset));
     }
+}
+
+const MIX_RATE: u32 = 44100;
+
+/// Everything the recording kept, laid on one timeline from `start` for `secs` seconds: the song where it played
+/// (with its pauses), the chords, lines and the band where they played. Stereo, 44.1 kHz.
+fn mix(r: &crate::player::RecBuf, start: std::time::Instant, secs: f64) -> Vec<i16> {
+    let n = (secs * MIX_RATE as f64) as usize;
+    let mut acc = vec![0i32; n * 2];
+    for p in &r.pieces {
+        let ch = p.channels.max(1) as usize;
+        let at = p.at.checked_duration_since(start).map_or(0.0, |d| d.as_secs_f64());
+        let o0 = (at * MIX_RATE as f64) as usize;
+        // how many output frames this piece fills: its own length, or until it was stopped for a repeating body
+        let src_frames = p.data.len() / ch;
+        let lead_out = (src_frames as f64 * MIX_RATE as f64 / p.rate.max(1) as f64) as usize;
+        let total = match p.until {
+            Some(u) if !p.body.is_empty() => {
+                let end = u.checked_duration_since(start).map_or(0.0, |d| d.as_secs_f64());
+                ((end - at).max(0.0) * MIX_RATE as f64) as usize
+            }
+            _ => lead_out,
+        };
+        let step = p.rate as f64 / MIX_RATE as f64;
+        for k in 0..total {
+            let o = o0 + k;
+            if o >= n {
+                break;
+            }
+            let f = (k as f64 * step) as usize;
+            let (l, rgt) = if f < src_frames {
+                let i = f * ch;
+                (p.data[i] as f32, p.data[i + (ch - 1).min(1)] as f32)
+            } else if !p.body.is_empty() {
+                let v = p.body[(f - src_frames) % p.body.len()] as f32;
+                (v, v)
+            } else {
+                break;
+            };
+            acc[o * 2] += (l * p.gain) as i32;
+            acc[o * 2 + 1] += (rgt * p.gain) as i32;
+        }
+    }
+    acc.into_iter().map(|v| v.clamp(-32768, 32767) as i16).collect()
 }
 
 /// A 16-bit PCM WAV file.
