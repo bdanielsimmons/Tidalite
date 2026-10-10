@@ -1983,15 +1983,16 @@ fn page_view(
     if page.tracks.is_empty() && page.rows.is_empty() {
         title_line(ui, "Nothing to show.", 2.0, pal().ink2);
     }
-    for (title, cards) in &page.rows {
-        section_header(ui, title);
-        cards_list(ui, cards, true, acts);
-    }
+    // songs first, as in any music player, then the albums / artists / playlists
     if !page.tracks.is_empty() {
         if !page.rows.is_empty() {
             section_header(ui, "SONGS");
         }
         tracks_list(ui, &page.tracks, playing_id, liked, acts);
+    }
+    for (title, cards) in &page.rows {
+        section_header(ui, title);
+        cards_list(ui, cards, true, acts);
     }
     ui.add_space(20.0);
 }

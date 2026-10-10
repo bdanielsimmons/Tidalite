@@ -795,7 +795,8 @@ impl Api {
         let v = self.get("/search", &[("query", q), ("limit", "30"), ("types", "TRACKS,ALBUMS,ARTISTS,PLAYLISTS")])?;
         let mut p = Page { title: format!("Results for \"{}\"", q), ..Default::default() };
         p.tracks = tracks_from(arr(&v["tracks"]["items"]));
-        for (label, key) in [("Albums", "albums"), ("Artists", "artists"), ("Playlists", "playlists")] {
+        // songs first (drawn above these), then artists, albums and playlists
+        for (label, key) in [("Artists", "artists"), ("Albums", "albums"), ("Playlists", "playlists")] {
             let c = cards_from(arr(&v[key]["items"]));
             if !c.is_empty() {
                 p.rows.push((label.to_string(), c));
