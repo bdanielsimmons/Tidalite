@@ -18,7 +18,11 @@ impl App {
 
         // ---- layout
         let bar_h = 96.0;
-        let area = Rect::from_min_max(full.min + Vec2::new(28.0, 28.0), Pos2::new(full.max.x - 28.0, full.max.y - bar_h - 12.0));
+        // in practice mode the loop and speed tools get their own band along the top; everything else moves down
+        let prac = PRACTICE && self.practice;
+        let strip_h = BTN_H + 14.0;
+        let top = 28.0 + if prac { strip_h + 10.0 } else { 0.0 };
+        let area = Rect::from_min_max(full.min + Vec2::new(28.0, top), Pos2::new(full.max.x - 28.0, full.max.y - bar_h - 12.0));
         let lyrics_on = self.show_lyrics && area.width() > 640.0;
         let art_zone = if lyrics_on {
             Rect::from_min_max(area.min, Pos2::new(area.min.x + area.width() * 0.5 - 10.0, area.max.y))
@@ -314,9 +318,10 @@ impl App {
         // ---- buttons
         let row = Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.max.y - 52.0), Vec2::new(full.width() - 56.0, BTN_H));
         tour::mark("ARTBTNS", row);
-        if PRACTICE && self.practice {
-            // practice mode: a small strip of the loop and speed tools, so practicing can go on in here
-            let strip = Rect::from_min_size(Pos2::new(row.min.x, row.min.y - BTN_H - 14.0), Vec2::new(row.width(), BTN_H + 8.0));
+        if prac {
+            // practice mode: the loop tools on the left, the speed on the right, in the band along the top
+            let strip =
+                Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.min.y + 12.0), Vec2::new(full.width() - 56.0, strip_h));
             p.rect_filled(strip, Rounding::same(if style() != 0 { 8.0 } else { 0.0 }), Color32::from_black_alpha(120));
             tour::mark("ARTPRACTICE", strip);
             let both = self.loop_a.is_some() && self.loop_b.is_some();
@@ -325,7 +330,7 @@ impl App {
                 self.loop_a.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()),
                 self.loop_b.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string())
             );
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(strip.shrink2(Vec2::new(8.0, 4.0))), |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(strip.shrink2(Vec2::new(10.0, 7.0))), |ui| {
                 ui.horizontal(|ui| {
                     if retro_btn_w(ui, "SET A", 64.0, false).tip("Loop start here  ([ key)").clicked() && active {
                         acts.push(Action::SetAAt(pos));
@@ -336,18 +341,27 @@ impl App {
                     if icon_btn(ui, &IC_REP, self.loop_on && both, pal().ink).tip("Loop on / off  (\\ key)").clicked() {
                         acts.push(Action::LoopToggle);
                     }
-                    lcd_box(ui, &ab, 190.0, pal().ink);
-                    ui.add_space(10.0);
-                    label(ui, "SPEED", 56.0);
-                    self.num_step(
-                        ui,
-                        acts,
-                        F_SPEED,
-                        64.0,
-                        Knob::Speed,
-                        format!("{}%", self.speed),
-                        "Slower / faster (Down / Up keys) - or type a percent",
-                    );
+                    if icon_btn(ui, &IC_X, false, pal().ink).tip("Clear the loop").clicked() {
+                        acts.push(Action::LoopClear);
+                    }
+                    lcd_box(ui, &ab, 200.0, pal().ink);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.num_step(
+                            ui,
+                            acts,
+                            F_SPEED,
+                            64.0,
+                            Knob::Speed,
+                            format!("{}%", self.speed),
+                            "Slower / faster (Down / Up keys) - or type a percent",
+                        );
+                        for pct in [125u32, 100, 85, 70, 50] {
+                            if retro_btn_w(ui, &format!("{}", pct), 44.0, self.speed == pct).clicked() {
+                                acts.push(Action::Speed(pct));
+                            }
+                        }
+                        label(ui, "SPEED", 56.0);
+                    });
                 });
             });
         }
