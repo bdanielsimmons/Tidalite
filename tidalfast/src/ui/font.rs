@@ -239,9 +239,29 @@ fn adv(c: char) -> f32 {
     met(c).1 as f32 + 1.0
 }
 
+/// With a Winamp skin on, all text takes the skin's playlist font (drawn the Winamp way); Tidalite's own pixel
+/// size `px` maps to about this many points.
+fn skin_size(px: f32) -> f32 {
+    // never below 12 points, so small labels stay readable
+    (px * 8.0).max(12.0)
+}
+
+fn skinned() -> bool {
+    crate::winamp_ui::text_override()
+}
+
+/// Text width for the smooth-font looks (the modern skins, or a Winamp skin's playlist font).
+fn sw(text: &str, px: f32) -> f32 {
+    if skinned() {
+        crate::winamp_ui::sans_width(text, skin_size(px))
+    } else {
+        mw(text, px)
+    }
+}
+
 pub fn text_w(text: &str, px: f32) -> f32 {
-    if modern() {
-        return mw(text, px);
+    if skinned() || modern() {
+        return sw(text, px);
     }
     let px = spx(px);
     let n: f32 = text.chars().map(adv).sum();
@@ -303,6 +323,9 @@ fn draw_char(p: &egui::Painter, tex: egui::TextureId, c: char, x: f32, y: f32, p
 /// Draw bitmap text. `anchor` is the left/center/right edge at the vertical center of the capitals.
 /// Returns the text width.
 pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, color: Color32) -> f32 {
+    if skinned() {
+        return crate::winamp_ui::sans_text(p, anchor, h, text, skin_size(px), f32::INFINITY, color);
+    }
     if modern() {
         let w = mw(text, px);
         let al = match h {
@@ -338,6 +361,10 @@ pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, col
 
 /// Like `ptext`, but shrinks the dot size until the text fits `max_w`.
 pub fn ptext_fit(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, max_w: f32, color: Color32) {
+    if skinned() {
+        crate::winamp_ui::sans_text(p, anchor, h, text, skin_size(px), max_w, color);
+        return;
+    }
     if modern() {
         let mut k = px;
         while k > px * 0.55 && mw(text, k) > max_w {
@@ -359,13 +386,13 @@ pub fn fit(text: &str, px: f32, max_w: f32) -> String {
     if text_w(text, px) <= max_w {
         return text.to_string();
     }
-    if modern() {
+    if skinned() || modern() {
         let chars: Vec<char> = text.chars().collect();
         let (mut lo, mut hi) = (0usize, chars.len());
         while lo < hi {
             let mid = (lo + hi + 1) / 2;
             let t: String = chars[..mid].iter().collect::<String>().trim_end().to_string() + "...";
-            if mw(&t, px) <= max_w {
+            if sw(&t, px) <= max_w {
                 lo = mid;
             } else {
                 hi = mid - 1;
@@ -391,13 +418,13 @@ pub fn fit(text: &str, px: f32, max_w: f32) -> String {
 
 /// Greedy word wrap.
 pub fn wrap(text: &str, px: f32, max_w: f32) -> Vec<String> {
-    if modern() {
+    if skinned() || modern() {
         let mut out: Vec<String> = Vec::new();
         for raw in text.split('\n') {
             let mut line = String::new();
             for word in raw.split(' ') {
                 let t = if line.is_empty() { word.to_string() } else { format!("{} {}", line, word) };
-                if mw(&t, px) > max_w && !line.is_empty() {
+                if sw(&t, px) > max_w && !line.is_empty() {
                     out.push(std::mem::take(&mut line));
                     line = word.to_string();
                 } else {

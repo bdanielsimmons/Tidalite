@@ -1,4 +1,5 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![recursion_limit = "256"]
 
 // Folders: audio/ = playback and sound analysis, data/ = Tidal, files, library and updates, ui/ = everything drawn.
 // The modules keep flat names (crate::player, crate::views...) so the folders are purely for reading.
@@ -24,6 +25,8 @@ mod api;
 mod cache;
 #[path = "data/chart.rs"]
 mod chart;
+#[path = "data/genskin.rs"]
+mod genskin;
 #[path = "data/meta.rs"]
 mod meta;
 #[path = "data/sources.rs"]
@@ -200,6 +203,7 @@ enum Action {
     Search(String),
     Back,
     Forward,
+    /// put the windows back the classic way
     /// the queue: 0 shuffle, 1 sort by artist, 2 sort by title, 3 reverse
     QueueOp(u8),
     /// pick the playlist font (index into winamp_ui::PL_FONTS)
@@ -211,6 +215,8 @@ enum Action {
     WaSearch,
     WaMore,
     WaApply(winamp::WaSkin),
+    /// wear the palette as a Winamp skin drawn by Tidalite: 0 off, then one per look (genskin::LOOKS)
+    WaGen(usize),
     /// play through another sound output (None = the system default)
     SetDevice(Option<String>),
     /// covers as spinning records, or square
@@ -441,7 +447,15 @@ fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) 
 
 /// Right-click list of every skin; the current one is marked.
 /// The skin list; a worn Winamp skin shows as the one picked (click it to browse others).
-fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, winamp: Option<&str>) {
+/// The look Tidalite's own palette is worn in: 0 its usual look, 1.. a Winamp skin drawn from it (genskin).
+fn gen_look(worn: Option<&(String, String)>) -> usize {
+    worn.and_then(|w| w.0.strip_prefix("gen:")?.parse::<usize>().ok()).unwrap_or(0)
+}
+
+fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, worn: Option<&(String, String)>) {
+    let look = gen_look(worn);
+    // a downloaded skin (Tidalite's own are listed with their style below)
+    let winamp = worn.filter(|_| look == 0).map(|w| w.1.as_str());
     if let Some(name) = winamp {
         if menu_item(ui, &format!("> WINAMP: {}", name.to_uppercase())) {
             acts.push(Action::WaOpen);
@@ -450,8 +464,18 @@ fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, winamp: Option<&str>) {
     }
     for (n, name) in SKIN_NAMES.iter().enumerate() {
         let mark = if winamp.is_none() && n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
-        if menu_item(ui, &format!("{}{}", mark, name)) {
+        if menu_item(ui, &format!("{}TIDALITE {}", mark, name)) {
             acts.push(Action::SkinSet(n));
+            ui.close_menu();
+        }
+    }
+    ui.add_space(4.0);
+    para(ui, "STYLE", pal().ink2);
+    // SLEEK (the default) and PIXEL are Winamp skins drawn by Tidalite; PLAIN is Tidalite's own panels
+    for (g, name) in [(2usize, "SLEEK"), (1, "PIXEL"), (0, "PLAIN")] {
+        let mark = if winamp.is_none() && g == look { "> " } else { "  " };
+        if menu_item(ui, &format!("{}{}", mark, name)) {
+            acts.push(Action::WaGen(g));
             ui.close_menu();
         }
     }
@@ -478,9 +502,7 @@ fn ibtn(ui: &mut egui::Ui, icon: &[&str], text: &str, on: bool) -> egui::Respons
 /// Interface text (buttons, tabs, headers, titles): in the worn Winamp skin's own font when there is one,
 /// otherwise Tidalite's.
 fn ui_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, px: f32, max_w: f32, col: Color32) {
-    if !winamp_ui::skin_text(p, pos, align, text, px, max_w) {
-        ptext_fit(p, pos, align, text, px, max_w, col);
-    }
+    ptext_fit(p, pos, align, text, px, max_w, col);
 }
 
 /// Fit a pixel icon into `r` as large as whole dots allow.
@@ -813,7 +835,7 @@ fn logo_mark(p: &egui::Painter, origin: Pos2, px: f32) {
     }
 }
 
-/// Logo strip at the top of the library window.
+/// Logo strip at the top of the library window (its words in the skin's font when a skin is worn).
 fn logo(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.0), Sense::hover());
     let p = ui.painter();
@@ -986,7 +1008,7 @@ fn mini_header(ui: &mut egui::Ui, text: &str) {
 /// otherwise; cut to fit `max_w`. Returns how wide it came out.
 fn row_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, max_w: f32, col: Color32) -> f32 {
     if winamp_ui::chrome_on() {
-        winamp_ui::sans_text(p, pos, align, text, ROW_H * 0.62, max_w, col)
+        winamp_ui::sans_text(p, pos, align, text, ROW_H * 0.7, max_w, col)
     } else {
         ptext(p, pos, align, &fit(text, 2.0, max_w), 2.0, col)
     }
@@ -2061,6 +2083,9 @@ struct App {
     wa_art: Option<winamp_ui::WaTex>,
     /// the album view cover's border (right-click the cover): 0 none, 1 subtle, 2 the skin's colour
     art_border: u8,
+    /// art view caption: size (0 small, 1 medium, 2 large) and soft black text on a light plate instead of soft white
+    cap_size: u8,
+    cap_dark: bool,
     /// the album view's background colours as shown, easing toward the new cover's
     bg_now: Option<[Color32; 2]>,
     /// the sound output chosen in Preferences (None = the system default), and the outputs last found
@@ -2261,6 +2286,7 @@ struct App {
     stack_frac: f32,
     /// the queue hidden (the PL button), the player taking the whole column
     queue_hidden: bool,
+    /// where each floating window sits (outer rectangle), by name
     /// the first row shown in the Winamp playlist (a fraction while scrolling)
     wa_pl_top: f32,
     /// the playlist font picked (index into winamp_ui::PL_FONTS; 0 = the skin's own)
@@ -2396,6 +2422,8 @@ impl App {
             wa_worn: None,
             wa_art: None,
             art_border: 1,
+            cap_size: 1,
+            cap_dark: false,
             bg_now: None,
             out_device: None,
             out_list: Vec::new(),
@@ -2629,11 +2657,22 @@ impl App {
             app.out_device = Some(d.to_string());
             app.player.send(Cmd::Device(app.out_device.clone()));
         }
+        if let Some(b) = st["cap_size"].as_u64() {
+            app.cap_size = (b as u8).min(2);
+        }
+        if let Some(b) = st["cap_dark"].as_bool() {
+            app.cap_dark = b;
+        }
         if let Some(b) = st["art_border"].as_u64() {
             app.art_border = (b as u8).min(2);
         }
         // the Winamp skin worn last time, from its saved file
-        if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
+        if let Some(g) = st["winamp"][0].as_str().and_then(|m| m.strip_prefix("gen:")).and_then(|g| g.parse::<usize>().ok()) {
+            app.apply(Action::WaGen(g));
+        } else if st["winamp"].is_null() && st["plain"].as_bool() != Some(true) {
+            // the SLEEK style unless PLAIN was picked
+            app.apply(Action::WaGen(2));
+        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
             let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
             let (tx, ctx) = (app.tx.clone(), app.ctx.clone());
             std::thread::spawn(move || {
@@ -2660,6 +2699,7 @@ impl App {
                 }
             }
         }
+
         if let Some(f) = st["spec_frame"].as_u64() {
             app.spec_frame = (f as u8).min(1);
         }
@@ -2781,7 +2821,10 @@ impl App {
             "eq_songs": self.eq_songs,
             "balance": self.balance,
             "winamp": self.wa_worn,
+            "plain": self.wa_worn.is_none(),
             "art_border": self.art_border,
+            "cap_size": self.cap_size,
+            "cap_dark": self.cap_dark,
             "out_device": self.out_device,
             "viz": [self.viz[0].save(), self.viz[1].save()],
             "lyrics": self.show_lyrics,
@@ -3466,6 +3509,26 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            Action::WaGen(g) => {
+                if g == 0 {
+                    self.apply(Action::SkinSet(SKIN.load(Ordering::Relaxed)));
+                    return;
+                }
+                let n = SKIN.load(Ordering::Relaxed) % PALS.len();
+                let look = (g - 1).min(genskin::LOOKS.len() - 1);
+                let s = winamp::WaSkin {
+                    md5: format!("gen:{}", look + 1),
+                    name: if look == 1 {
+                        format!("TIDALITE {}", SKIN_NAMES[n])
+                    } else {
+                        format!("TIDALITE {} {}", SKIN_NAMES[n], genskin::LOOKS[look])
+                    },
+                    shot: String::new(),
+                    download: String::new(),
+                };
+                let _ = self.tx.send(Msg::WaSkin(genskin::wear(&PALS[n], look).map(|(p, art)| (s, p, art))));
+                self.ctx.request_repaint();
+            }
             Action::Balance(b) => {
                 self.balance = b.clamp(-100, 100);
                 self.player.ctl.set_balance(self.balance);
@@ -3741,6 +3804,13 @@ impl App {
                 }
                 self.refresh_prefetch();
             }
+            Action::SkinSet(n) if gen_look(self.wa_worn.as_ref()) > 0 => {
+                // in the Winamp style: draw the new palette's skin
+                let g = gen_look(self.wa_worn.as_ref());
+                SKIN.store(n % PALS.len(), Ordering::Relaxed);
+                self.dirty = true;
+                self.apply(Action::WaGen(g));
+            }
             Action::SkinSet(n) => {
                 skin::set_custom(None);
                 self.wa_worn = None;
@@ -3751,6 +3821,9 @@ impl App {
                 setup_style(&self.ctx);
                 self.dirty = true;
                 self.set_note(&format!("SKIN: {}", SKIN_NAMES[n]));
+            }
+            Action::Skin if gen_look(self.wa_worn.as_ref()) > 0 => {
+                self.apply(Action::SkinSet(SKIN.load(Ordering::Relaxed) + 1));
             }
             Action::Skin => {
                 skin::set_custom(None);
@@ -4114,10 +4187,8 @@ impl eframe::App for App {
                 let right_w = screen.width() - lib_w;
                 let inner_w = right_w - 28.0;
                 let practice_h = if !self.practice { 0.0 } else { 262.0 };
-                let stack_max = self.stack_frac * screen.height();
                 let max_inner_h = ((screen.height() - practice_h) * 0.5 - 44.0).max(120.0);
-                let drag_inner_h = (stack_max - practice_h - 44.0).max(110.0);
-                let s = (inner_w / 300.0).min(max_inner_h / 138.0).min(drag_inner_h / 138.0).clamp(0.8, 3.0);
+                let s = (inner_w / 300.0).min(max_inner_h / 138.0).clamp(0.8, 3.0);
                 let player_h = 138.0 * s + 44.0;
 
                 if !self.focus_mode {
@@ -4164,8 +4235,9 @@ impl eframe::App for App {
                             .frame(panel_frame())
                             .show(ctx, |ui| self.eq_dock(ui));
                     }
+                    // the practice panel sits under the playlist, so player, equalizer and playlist stay one stack
                     if self.practice {
-                        egui::TopBottomPanel::top("practice")
+                        egui::TopBottomPanel::bottom("practice")
                             .exact_height(practice_h)
                             .resizable(false)
                             .show_separator_line(false)
@@ -4186,16 +4258,6 @@ impl eframe::App for App {
                         Some(None) => self.lib_frac = 0.34,
                         None => {}
                     }
-                }
-                let y = player_h + practice_h + if self.show_eq { eq_h } else { 0.0 };
-                let r = Rect::from_min_size(Pos2::new(lib_w, y - 7.0), Vec2::new(right_w, 14.0));
-                match if self.queue_hidden { None } else { splitter(ctx, "split_h", r, false) } {
-                    Some(Some(y)) => {
-                        self.stack_frac = (y / screen.height()).clamp(0.3, 1.0);
-                        self.dirty = true;
-                    }
-                    Some(None) => self.stack_frac = 1.0,
-                    None => {}
                 }
             }
         }

@@ -851,11 +851,12 @@ impl App {
                 Err(e) => self.set_err(format!("WINAMP SKIN: {}", e)),
             },
             Msg::FontReady(choice, r) => match r {
-                Ok(b) if choice == self.pl_font => {
-                    crate::winamp_ui::set_playlist_font(&self.ctx, Some(b), choice);
+                Ok(_) => {
+                    // kept on disk now: wear it if it is still the one wanted
+                    let _ = choice;
+                    self.apply_pl_font();
                     self.set_note("FONT READY");
                 }
-                Ok(_) => {}
                 Err(e) => self.set_err(format!("FONT: {}", e)),
             },
             Msg::Meta(id, found) => {

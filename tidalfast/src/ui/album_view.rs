@@ -29,7 +29,8 @@ impl App {
         } else {
             area
         };
-        let caption_h = 64.0;
+        let cap_k = [0.8, 1.0, 1.35][self.cap_size.min(2) as usize];
+        let caption_h = 64.0 * cap_k;
         let a = (art_zone.width().min(art_zone.height() - caption_h) * 0.82).max(120.0);
         let center = Pos2::new(art_zone.center().x, art_zone.min.y + (art_zone.height() - caption_h) / 2.0);
 
@@ -239,16 +240,44 @@ impl App {
         // ---- caption
         if let Some(tr) = &track {
             let cx = art_zone.center().x;
-            let y0 = art_zone.max.y - caption_h + 14.0;
+            let k = cap_k;
+            let y0 = art_zone.max.y - caption_h + 14.0 * k;
             let w = art_zone.width() - 60.0;
             let sub = format!("{} - {}", tr.artists_text(), tr.album);
-            // a soft dark plate sized to the words, so they stay readable over the visualizer
-            let tw = text_w(&tr.title, 3.0).max(text_w(&sub, 2.0)).min(w);
-            let plate =
-                Rect::from_min_max(Pos2::new(cx - tw * 0.5 - 18.0, y0 - 20.0), Pos2::new(cx + tw * 0.5 + 18.0, y0 + 46.0));
-            p.rect_filled(plate, Rounding::same(if style() != 0 { 10.0 } else { 0.0 }), Color32::from_black_alpha(170));
-            ptext_fit(&p, Pos2::new(cx, y0), Align::Center, &tr.title, 3.0, w, pal().bar_txt);
-            ptext_fit(&p, Pos2::new(cx, y0 + 30.0), Align::Center, &sub, 2.0, w, pal().bar_txt.gamma_multiply(0.8));
+            // soft white on a near-black plate (or soft black on a near-white one): the most restful contrast,
+            // whatever the skin, sized to the words so they stay readable over the visualizer
+            let (ink, plate_col) = if self.cap_dark {
+                (Color32::from_rgb(24, 24, 24), Color32::from_rgba_unmultiplied(238, 238, 234, 235))
+            } else {
+                (Color32::from_rgb(238, 238, 234), Color32::from_rgba_unmultiplied(16, 16, 16, 225))
+            };
+            let tw = text_w(&tr.title, 3.0 * k).max(text_w(&sub, 2.0 * k)).min(w);
+            let plate = Rect::from_min_max(
+                Pos2::new(cx - tw * 0.5 - 18.0, y0 - 20.0 * k),
+                Pos2::new(cx + tw * 0.5 + 18.0, y0 + 46.0 * k),
+            );
+            p.rect_filled(plate, Rounding::same(if style() != 0 { 10.0 } else { 0.0 }), plate_col);
+            ptext_fit(&p, Pos2::new(cx, y0), Align::Center, &tr.title, 3.0 * k, w, ink);
+            ptext_fit(&p, Pos2::new(cx, y0 + 30.0 * k), Align::Center, &sub, 2.0 * k, w, ink.gamma_multiply(0.85));
+            // right-click: text size and colour
+            ui.interact(plate, ui.id().with("caption"), Sense::click()).context_menu(|ui| {
+                for (i, name) in ["SMALL", "MEDIUM", "LARGE"].iter().enumerate() {
+                    let mark = if self.cap_size as usize == i { "> " } else { "   " };
+                    if menu_item(ui, &format!("{}TEXT: {}", mark, name)) {
+                        self.cap_size = i as u8;
+                        self.dirty = true;
+                        ui.close_menu();
+                    }
+                }
+                for (dark, name) in [(false, "SOFT WHITE"), (true, "SOFT BLACK")] {
+                    let mark = if self.cap_dark == dark { "> " } else { "   " };
+                    if menu_item(ui, &format!("{}COLOUR: {}", mark, name)) {
+                        self.cap_dark = dark;
+                        self.dirty = true;
+                        ui.close_menu();
+                    }
+                }
+            });
         } else {
             ptext(&p, art_zone.center(), Align::Center, "Nothing playing", 3.0, pal().trim);
         }

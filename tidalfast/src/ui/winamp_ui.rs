@@ -60,9 +60,25 @@ impl Place {
         let snap = |v: f32| (v * ppp).round() / ppp;
         Place { o: Pos2::new(snap(area.center().x - 137.5 * s), snap(area.center().y - 58.0 * s)), s }
     }
+    /// The same column as the main window (its left edge and scale), centred down `area`, when it fits there:
+    /// the equalizer and playlist line up under the player, as Winamp stacks them.
+    fn under_main(area: Rect) -> Place {
+        match MAIN_COL.with(|c| c.get()) {
+            Some((x, s)) if 116.0 * s <= area.height() + 0.5 && x >= area.min.x - 0.5 && x + 275.0 * s <= area.max.x + 0.5 => {
+                let ppp = font::ppp();
+                Place { o: Pos2::new(x, (((area.center().y - 58.0 * s) * ppp).round()) / ppp), s }
+            }
+            _ => Place::fit(area),
+        }
+    }
     fn r(&self, x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::from_min_size(self.o + Vec2::new(x, y) * self.s, Vec2::new(w, h) * self.s)
     }
+}
+
+thread_local! {
+    /// The main window's left edge and scale this frame, for the windows stacked under it.
+    static MAIN_COL: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
 }
 
 /// text.bmp: which cell (row, column) each character is in; cells are 5 x 6.
@@ -165,39 +181,6 @@ pub(crate) fn set_chrome(t: Option<&WaTex>) {
     CHROME.with(|c| *c.borrow_mut() = v);
 }
 
-/// Interface text (buttons, tabs, headers) in the worn skin's own font, at about the height Tidalite's text
-/// would be (`px` is Tidalite's size), scaled down to fit `max_w`. False when no skin font is worn.
-pub(crate) fn skin_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, px: f32, max_w: f32) -> bool {
-    CHROME.with(|c| {
-        let c = c.borrow();
-        let Some((_, Some((tex, size)))) = c.as_ref() else { return false };
-        let ppp = font::ppp();
-        let n = text.chars().count().max(1) as f32;
-        let mut k = ((px * 1.15 * ppp).round().max(1.0)) / ppp;
-        if n * 5.0 * k > max_w && max_w > 0.0 {
-            k = (max_w / (n * 5.0)).max(0.5);
-        }
-        let w = n * 5.0 * k;
-        let x0 = match align {
-            Align::Min => pos.x,
-            Align::Center => pos.x - w / 2.0,
-            Align::Max => pos.x - w,
-        };
-        let y0 = ((pos.y - 3.0 * k) * ppp).round() / ppp;
-        for (i, ch) in text.chars().enumerate() {
-            let (row, col) = glyph(ch);
-            let src = (col as f32 * 5.0, row as f32 * 6.0);
-            let uv = Rect::from_min_max(
-                Pos2::new((src.0 + 0.02) / size.x, (src.1 + 0.02) / size.y),
-                Pos2::new((src.0 + 4.98) / size.x, (src.1 + 5.98) / size.y),
-            );
-            let x = ((x0 + i as f32 * 5.0 * k) * ppp).round() / ppp;
-            p.image(tex.id(), Rect::from_min_size(Pos2::new(x, y0), Vec2::new(5.0 * k, 6.0 * k)), uv, Color32::WHITE);
-        }
-        true
-    })
-}
-
 /// A tab drawn as a piece of the skin's title bar (lit when it is the open one). False when no skin is worn.
 pub(crate) fn skin_tab(p: &egui::Painter, r: Rect, on: bool) -> bool {
     CHROME.with(|c| {
@@ -279,28 +262,21 @@ pub(crate) fn draw_frame(p: &egui::Painter, outer: Rect, inner: Rect, title: &st
             );
             x += tw;
         }
-        // the title, in the skin's font, on a small plate so it reads over any decoration
-        if let Some((ttex, tsize)) = text {
-            let s = (top_h * 0.32 / 6.0).max(1.0);
-            let label = title.to_uppercase();
-            let w = label.chars().count() as f32 * 5.0 * s;
-            let at = Pos2::new(outer.min.x + tw + 6.0, top.center().y - 3.0 * s);
-            p.rect_filled(
-                Rect::from_min_size(at - Vec2::new(4.0, 3.0), Vec2::new(w + 8.0, 6.0 * s + 6.0)),
-                0.0,
-                Color32::from_black_alpha(170),
-            );
-            for (i, ch) in label.chars().enumerate() {
-                let (row, col) = glyph(ch);
-                piece(
-                    p,
-                    ttex,
-                    *tsize,
-                    (col as f32 * 5.0, row as f32 * 6.0, 5.0, 6.0),
-                    Rect::from_min_size(at + Vec2::new(i as f32 * 5.0 * s, 0.0), Vec2::new(5.0 * s, 6.0 * s)),
-                );
-            }
-        }
+        // the title on a dark plate in light text, so it reads over any decoration in any skin
+        let size = top_h * 0.46;
+        let label = title.to_uppercase();
+        let tw2 = sans_width(&label, size);
+        let at = Pos2::new(outer.min.x + tw + 6.0, top.center().y);
+        p.rect_filled(
+            Rect::from_min_max(
+                Pos2::new(at.x - 5.0, top.min.y + top_h * 0.18),
+                Pos2::new(at.x + tw2 + 5.0, top.max.y - top_h * 0.18),
+            ),
+            2.0,
+            Color32::from_black_alpha(190),
+        );
+        sans_text(p, at, Align::Min, &label, size, outer.width() * 0.5, Color32::from_gray(235));
+        let _ = text;
         true
     })
 }
@@ -309,10 +285,14 @@ impl App {
     /// The main window, drawn from the worn skin. Everything is clickable and drives Tidalite.
     pub(crate) fn winamp_main(&mut self, ui: &mut egui::Ui, area: Rect, acts: &mut Vec<Action>) {
         let Some(t) = self.wa_art.take() else { return };
-        // the album cover beside the skin: a click on it opens the album view, as everywhere else
-        let side = (area.height() * 0.9).min(area.width() * 0.3);
-        let cover = Rect::from_min_size(Pos2::new(area.max.x - side - 8.0, area.center().y - side / 2.0), Vec2::splat(side));
-        let skin_area = Rect::from_min_max(area.min, Pos2::new(cover.min.x - 12.0, area.max.y));
+        // the player sits in the middle (the equalizer and playlist line up under it); the album cover is small,
+        // in the margin to its right. A click on it opens the album view, as everywhere else
+        let side = (area.height() * 0.55).min(area.width() * 0.14);
+        let skin_area = area.shrink2(Vec2::new(side + 20.0, 0.0));
+        let pl = Place::fit(skin_area);
+        MAIN_COL.with(|c| c.set(Some((pl.o.x, pl.s))));
+        let right = pl.o.x + 275.0 * pl.s;
+        let cover = Rect::from_center_size(Pos2::new((right + area.max.x) / 2.0, area.center().y), Vec2::splat(side));
         if let Some(tr) = self.cur_track() {
             let url = cover_url(&tr.cover, 320);
             // framed like a button in the skin's colours: it is the way into the album view
@@ -329,7 +309,6 @@ impl App {
         if ch.clicked() {
             acts.push(Action::ToggleArt);
         }
-        let pl = Place::fit(skin_area);
         let p = ui.painter().clone();
         let track = self.cur_track();
         let pos = self.seek_drag.unwrap_or(self.pos());
@@ -492,28 +471,32 @@ impl App {
         }
         if vh.dragged() || vh.clicked() {
             if let Some(pp) = vh.interact_pointer_pos() {
-                acts.push(Action::Volume(((pp.x - vr.min.x) / vr.width()).clamp(0.0, 1.0)));
+                // the knob's middle follows the mouse, as in Winamp
+                acts.push(Action::Volume(((pp.x - vr.min.x - pl.s * 7.0) / (pl.s * 54.0)).clamp(0.0, 1.0)));
             }
         }
         vh.context_menu(|ui| self.output_menu(ui, acts));
         // balance: left / right; double-click to centre it again
         let br = pl.r(177.0, 57.0, 38.0, 13.0);
-        let bframe = (self.balance.unsigned_abs() as f32 / 100.0 * (frames("balance") - 1.0)).round();
-        t.spr(&p, "balance", (9.0, bframe * 15.0, 38.0, 13.0), br);
+        // skins without a balance picture borrow the volume one, as Winamp does
+        let bal = if t.size("balance").is_some() { "balance" } else { "volume" };
+        let bframe = (self.balance.unsigned_abs() as f32 / 100.0 * (frames(bal) - 1.0)).round();
+        t.spr(&p, bal, (9.0, bframe * 15.0, 38.0, 13.0), br);
         let bh = hit(ui, "balance", br, true).tip(match self.balance {
             0 => "Balance: centre  (drag; double-click to centre)".to_string(),
             b if b < 0 => format!("Balance: {}% left  (double-click to centre)", -b),
             b => format!("Balance: {}% right  (double-click to centre)", b),
         });
-        if t.size("balance").map_or(false, |s| s.y >= 433.0) {
+        if t.size(bal).map_or(false, |s| s.y >= 433.0) {
             let src = if bh.dragged() { (0.0, 422.0, 14.0, 11.0) } else { (15.0, 422.0, 14.0, 11.0) };
-            t.spr(&p, "balance", src, pl.r(177.0 + (self.balance + 100) as f32 / 200.0 * 24.0, 58.0, 14.0, 11.0));
+            t.spr(&p, bal, src, pl.r(177.0 + (self.balance + 100) as f32 / 200.0 * 24.0, 58.0, 14.0, 11.0));
         }
         if bh.double_clicked() {
             acts.push(Action::Balance(0));
         } else if bh.dragged() || bh.clicked() {
             if let Some(pp) = bh.interact_pointer_pos() {
-                let b = (((pp.x - br.min.x) / br.width()) * 200.0 - 100.0).round() as i32;
+                let f = ((pp.x - br.min.x - pl.s * 7.0) / (pl.s * 24.0)).clamp(0.0, 1.0);
+                let b = (f * 200.0 - 100.0).round() as i32;
                 // it clicks into the middle
                 acts.push(Action::Balance(if b.abs() < 10 { 0 } else { b }));
             }
@@ -607,7 +590,7 @@ impl App {
     /// The equalizer, drawn from the worn skin: ON, PRESETS, the curve and the ten sliders.
     pub(crate) fn winamp_eq(&mut self, ui: &mut egui::Ui, area: Rect) {
         let Some(t) = self.wa_art.take() else { return };
-        let pl = Place::fit(area);
+        let pl = Place::under_main(area);
         let p = ui.painter().clone();
         let id = ui.id().with("winamp_eq");
         let mut changed = false;
@@ -766,7 +749,7 @@ pub(crate) enum FontSrc {
     Skin,
     /// a font installed on the computer, by family name
     Sys(&'static str),
-    /// fetched once from Google Fonts: (path in google/fonts, how much bigger it needs drawing)
+    /// fetched once from Google Fonts: (path in google/fonts, the pixel size it is drawn at)
     Web(&'static str, f32),
 }
 
@@ -777,18 +760,58 @@ pub(crate) const PL_FONTS: [(&str, FontSrc); 13] = [
     ("VERDANA", FontSrc::Sys("verdana")),
     ("ARIAL", FontSrc::Sys("arial")),
     ("LUCIDA CONSOLE", FontSrc::Sys("lucida console")),
-    ("VT323 (TERMINAL)", FontSrc::Web("ofl/vt323/VT323-Regular.ttf", 1.35)),
-    ("PIXELIFY SANS", FontSrc::Web("ofl/pixelifysans/PixelifySans%5Bwght%5D.ttf", 1.0)),
-    ("SILKSCREEN", FontSrc::Web("ofl/silkscreen/Silkscreen-Regular.ttf", 0.85)),
-    ("SHARE TECH MONO", FontSrc::Web("ofl/sharetechmono/ShareTechMono-Regular.ttf", 1.0)),
-    ("PRESS START 2P", FontSrc::Web("ofl/pressstart2p/PressStart2P-Regular.ttf", 0.7)),
-    ("JERSEY 10", FontSrc::Web("ofl/jersey10/Jersey10-Regular.ttf", 1.3)),
-    ("MICRO 5", FontSrc::Web("ofl/micro5/Micro5-Regular.ttf", 1.5)),
+    ("VT323 (TERMINAL)", FontSrc::Web("ofl/vt323/VT323-Regular.ttf", 14.0)),
+    ("PIXELIFY SANS", FontSrc::Web("ofl/pixelifysans/PixelifySans%5Bwght%5D.ttf", 12.0)),
+    ("SILKSCREEN", FontSrc::Web("ofl/silkscreen/Silkscreen-Regular.ttf", 8.0)),
+    ("SHARE TECH MONO", FontSrc::Web("ofl/sharetechmono/ShareTechMono-Regular.ttf", 11.0)),
+    ("PRESS START 2P", FontSrc::Web("ofl/pressstart2p/PressStart2P-Regular.ttf", 8.0)),
+    ("JERSEY 10", FontSrc::Web("ofl/jersey10/Jersey10-Regular.ttf", 12.0)),
+    ("MICRO 5", FontSrc::Web("ofl/micro5/Micro5-Regular.ttf", 10.0)),
 ];
 
-/// A font installed on this computer, by family name (Windows and Mac font folders).
+/// Windows' list of installed fonts: family name (lower case, e.g. "arial narrow", "trebuchet ms italic") to file.
+fn installed_fonts() -> &'static HashMap<String, std::path::PathBuf> {
+    static MAP: std::sync::OnceLock<HashMap<String, std::path::PathBuf>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| {
+        let mut map = HashMap::new();
+        if !cfg!(windows) {
+            return map;
+        }
+        let key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
+        for root in ["HKLM", "HKCU"] {
+            let Ok(out) = std::process::Command::new("reg").args(["query", &format!("{}\\{}", root, key)]).output() else {
+                continue;
+            };
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let Some((name, file)) = line.split_once("REG_SZ") else { continue };
+                let file = file.trim();
+                let lower = file.to_ascii_lowercase();
+                // only outline fonts can be drawn (the old .fon bitmap ones cannot)
+                if !(lower.ends_with(".ttf") || lower.ends_with(".otf") || lower.ends_with(".ttc")) {
+                    continue;
+                }
+                let path = if file.contains('\\') {
+                    std::path::PathBuf::from(file)
+                } else {
+                    std::path::Path::new("C:\\Windows\\Fonts").join(file)
+                };
+                let name = name.trim().trim_end_matches("(TrueType)").trim_end_matches("(OpenType)").trim();
+                for n in name.split(" & ") {
+                    map.entry(n.trim().to_ascii_lowercase()).or_insert_with(|| path.clone());
+                }
+            }
+        }
+        map
+    })
+}
+
+/// A font installed on this computer, by the name a skin gives (Windows' font list first, then the usual files
+/// and the Mac font folders).
 fn system_font(name: &str) -> Option<Vec<u8>> {
     let n = name.trim().to_ascii_lowercase();
+    if let Some(b) = installed_fonts().get(&n).and_then(|p| std::fs::read(p).ok()) {
+        return Some(b);
+    }
     let file = match n.as_str() {
         "arial" => "arial.ttf",
         "tahoma" => "tahoma.ttf",
@@ -802,7 +825,6 @@ fn system_font(name: &str) -> Option<Vec<u8>> {
         "comic sans ms" => "comic.ttf",
         "segoe ui" => "segoeui.ttf",
         "consolas" => "consola.ttf",
-        "franklin gothic medium" => "framd.ttf",
         _ => "",
     };
     let squashed = format!("{}.ttf", n.replace(' ', ""));
@@ -826,7 +848,7 @@ fn font_dir() -> std::path::PathBuf {
 /// (or the skin's font is not on this computer).
 pub(crate) fn font_now(choice: usize, skin_font: Option<&str>) -> Option<Vec<u8>> {
     match &PL_FONTS.get(choice)?.1 {
-        FontSrc::Skin => skin_font.and_then(system_font).or_else(|| system_font("tahoma")),
+        FontSrc::Skin => skin_font.and_then(system_font).or_else(|| system_font("arial")).or_else(|| system_font("tahoma")),
         FontSrc::Sys(n) => system_font(n),
         FontSrc::Web(path, _) => std::fs::read(font_dir().join(path.rsplit('/').next()?)).ok(),
     }
@@ -842,27 +864,129 @@ pub(crate) fn fetch_font(choice: usize) -> Result<Vec<u8>, String> {
     Ok(b.to_vec())
 }
 
-static SANS_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// how much bigger the chosen font is drawn (pixel fonts run small), as f32 bits
-static SANS_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
+/// The playlist font, drawn the way Windows drew it for Winamp: the font's own hinting snaps every stroke onto
+/// whole pixels (so stems keep one even width instead of breaking up), and each pixel is fully on or off, like
+/// Windows text before ClearType. A font's built-in bitmaps for small sizes win when it has them, as on Windows.
+/// Lines are drawn straight at the size they show on screen, once, and kept.
+struct PixFont {
+    bytes: std::sync::Arc<Vec<u8>>,
+    /// the font's own size (Winamp's 10 pixels for ordinary fonts, a pixel font's native size)
+    px: f32,
+    scaler: swash::scale::ScaleContext,
+    cache: HashMap<(String, u32), (egui::TextureHandle, Vec2)>,
+}
 
-/// Make `bytes` the playlist font (None: egui's own sans).
-pub(crate) fn set_playlist_font(ctx: &egui::Context, bytes: Option<Vec<u8>>, choice: usize) {
-    let scale = match PL_FONTS.get(choice).map(|f| &f.1) {
-        Some(FontSrc::Web(_, s)) => *s,
-        _ => 1.0,
-    };
-    SANS_SCALE.store(scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    let mut fonts = egui::FontDefinitions::default();
-    let mut family: Vec<String> = Vec::new();
-    if let Some(b) = bytes {
-        fonts.font_data.insert("skin_sans".to_string(), egui::FontData::from_owned(b));
-        family.push("skin_sans".to_string());
+impl PixFont {
+    fn new(bytes: Vec<u8>, px: f32) -> Option<PixFont> {
+        swash::FontRef::from_index(&bytes, 0)?;
+        Some(PixFont { bytes: std::sync::Arc::new(bytes), px, scaler: swash::scale::ScaleContext::new(), cache: HashMap::new() })
     }
-    family.extend(fonts.families.get(&egui::FontFamily::Proportional).cloned().unwrap_or_default());
-    fonts.families.insert(egui::FontFamily::Name("skin_sans".into()), family);
-    ctx.set_fonts(fonts);
-    SANS_READY.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    fn font(&self) -> swash::FontRef<'_> {
+        swash::FontRef::from_index(&self.bytes, 0).expect("checked in new")
+    }
+
+    /// Each character's glyph and its advance in whole pixels at `size` (whole pixels, as Windows lays text out).
+    fn glyphs(&self, s: &str, size: f32) -> Vec<(swash::GlyphId, f32)> {
+        let font = self.font();
+        let (map, metrics) = (font.charmap(), font.glyph_metrics(&[]).scale(size));
+        s.chars()
+            .map(|ch| {
+                let id = map.map(ch);
+                (id, metrics.advance_width(id).round())
+            })
+            .collect()
+    }
+
+    /// Width in screen pixels at `size` pixels.
+    fn width_at(&self, s: &str, size: f32) -> f32 {
+        self.glyphs(s, size).iter().map(|g| g.1).sum()
+    }
+
+    #[cfg(test)]
+    fn width(&self, s: &str) -> f32 {
+        self.width_at(s, self.px)
+    }
+
+    /// The line's pixels at `size`: width, height and one coverage byte per pixel (0 or 255).
+    fn raster(&mut self, s: &str, size: f32) -> (usize, usize, Vec<u8>) {
+        use swash::scale::{Render, Source, StrikeWith};
+        let glyphs = self.glyphs(s, size);
+        let bytes = self.bytes.clone();
+        let font = swash::FontRef::from_index(&bytes, 0).expect("checked in new");
+        let m = font.metrics(&[]).scale(size);
+        let asc = m.ascent.round() as i32;
+        let h = (m.ascent + m.descent).ceil() as usize + 2;
+        let w = glyphs.iter().map(|g| g.1).sum::<f32>() as usize + 4;
+        let mut px = vec![0u8; w * h];
+        let mut scaler = self.scaler.builder(font).size(size).hint(true).build();
+        let mut x = 1i32;
+        for (id, adv) in glyphs {
+            let img = Render::new(&[Source::Bitmap(StrikeWith::ExactSize), Source::Outline])
+                .format(swash::zeno::Format::Alpha)
+                .render(&mut scaler, id);
+            if let Some(img) = img {
+                let pl = img.placement;
+                let embedded = matches!(img.source, Source::Bitmap(_));
+                for gy in 0..pl.height as i32 {
+                    for gx in 0..pl.width as i32 {
+                        let c = img.data[(gy * pl.width as i32 + gx) as usize];
+                        // hinted outlines sit on the pixel grid, so half coverage is the honest cut
+                        if c >= if embedded { 1 } else { 128 } {
+                            let (dx, dy) = (x + pl.left + gx, 1 + asc - pl.top + gy);
+                            if dx >= 0 && dy >= 0 && (dx as usize) < w && (dy as usize) < h {
+                                px[dy as usize * w + dx as usize] = 255;
+                            }
+                        }
+                    }
+                }
+            }
+            x += adv as i32;
+        }
+        (w, h, px)
+    }
+
+    /// The line drawn at `size` screen pixels (cached).
+    fn line(&mut self, ctx: &egui::Context, s: &str, size: f32) -> (egui::TextureId, Vec2) {
+        let key = (s.to_string(), size.round() as u32);
+        if let Some((t, sz)) = self.cache.get(&key) {
+            return (t.id(), *sz);
+        }
+        if self.cache.len() > 900 {
+            self.cache.clear();
+        }
+        let (w, h, cov) = self.raster(s, size.round());
+        let pixels = cov.iter().map(|&v| Color32::from_rgba_premultiplied(v, v, v, v)).collect();
+        let tex = ctx.load_texture("playlist_line", egui::ColorImage { size: [w, h], pixels }, egui::TextureOptions::NEAREST);
+        let sz = Vec2::new(w as f32, h as f32);
+        let id = tex.id();
+        self.cache.insert(key, (tex, sz));
+        (id, sz)
+    }
+
+    /// The size in screen pixels for text meant to look about `size` points tall: a whole multiple of the
+    /// font's own size (pixel fonts stay pixel-perfect), never smaller than it.
+    fn screen_px(&self, size: f32, ppp: f32) -> f32 {
+        let want = size * ppp;
+        if self.px >= 10.0 {
+            want.round().max(self.px)
+        } else {
+            (want / self.px).round().max(1.0) * self.px
+        }
+    }
+}
+
+thread_local! {
+    static PIX: std::cell::RefCell<Option<PixFont>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Make `bytes` the playlist font (None: back to plain text).
+pub(crate) fn set_playlist_font(_ctx: &egui::Context, bytes: Option<Vec<u8>>, choice: usize) {
+    let px = match PL_FONTS.get(choice).map(|f| &f.1) {
+        Some(FontSrc::Web(_, px)) => *px,
+        _ => 10.0, // Winamp's playlist size
+    };
+    PIX.with(|c| *c.borrow_mut() = bytes.and_then(|b| PixFont::new(b, px)));
 }
 
 /// Whether a skin's frames are on (lists then use the playlist font and colours).
@@ -870,47 +994,94 @@ pub(crate) fn chrome_on() -> bool {
     CHROME.with(|c| c.borrow().is_some())
 }
 
-fn sans(size: f32) -> egui::FontId {
-    if SANS_READY.load(std::sync::atomic::Ordering::Relaxed) {
-        let k = f32::from_bits(SANS_SCALE.load(std::sync::atomic::Ordering::Relaxed));
-        egui::FontId::new(size * k, egui::FontFamily::Name("skin_sans".into()))
-    } else {
-        egui::FontId::proportional(size)
-    }
+/// Whether text should take the skin's playlist font (a skin is worn and its font is ready).
+pub(crate) fn text_override() -> bool {
+    chrome_on() && PIX.with(|c| c.borrow().is_some())
 }
 
-/// One line in the playlist font, cut with "..." to `max_w`; `pos` is the left / centre / right middle point.
-/// Returns how wide it came out.
+/// How wide a line comes out in the playlist font at `size`.
+pub(crate) fn sans_width(text: &str, size: f32) -> f32 {
+    PIX.with(|c| {
+        let c = c.borrow();
+        match c.as_ref() {
+            Some(pf) => {
+                let ppp = font::ppp();
+                pf.width_at(text, pf.screen_px(size, ppp)) / ppp
+            }
+            None => text.chars().count() as f32 * size * 0.5,
+        }
+    })
+}
+
+/// One line in the playlist font, cut with "..." to `max_w`; `pos` is the left / centre / right middle point and
+/// `size` about how tall it should come out. Returns how wide it came out.
 pub(crate) fn sans_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, size: f32, max_w: f32, col: Color32) -> f32 {
-    let mut job = egui::text::LayoutJob::single_section(
-        text.to_string(),
-        egui::TextFormat { font_id: sans(size), color: col, ..Default::default() },
-    );
-    job.wrap = egui::text::TextWrapping {
-        max_width: max_w.max(8.0),
-        max_rows: 1,
-        break_anywhere: true,
-        overflow_character: Some('\u{2026}'),
-    };
-    let g = p.layout_job(job);
-    let w = g.size().x;
-    let x = match align {
-        Align::Min => pos.x,
-        Align::Center => pos.x - w / 2.0,
-        Align::Max => pos.x - w,
-    };
-    p.galley(Pos2::new(x, pos.y - g.size().y / 2.0), g, col);
-    w
+    let drawn = PIX.with(|c| {
+        let mut c = c.borrow_mut();
+        let pf = c.as_mut()?;
+        let ppp = font::ppp();
+        let spx = pf.screen_px(size, ppp);
+        let mut s = text.to_string();
+        if pf.width_at(&s, spx) / ppp > max_w {
+            while !s.is_empty() && pf.width_at(&format!("{}\u{2026}", s), spx) / ppp > max_w {
+                s.pop();
+            }
+            s = format!("{}\u{2026}", s.trim_end());
+        }
+        let (tex, sz) = pf.line(p.ctx(), &s, spx);
+        let (w, h) = (sz.x / ppp, sz.y / ppp);
+        let x = match align {
+            Align::Min => pos.x,
+            Align::Center => pos.x - w / 2.0,
+            Align::Max => pos.x - w,
+        };
+        let snap = |v: f32| (v * ppp).round() / ppp;
+        let r = Rect::from_min_size(Pos2::new(snap(x), snap(pos.y - h / 2.0)), Vec2::new(w, h));
+        p.image(tex, r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), col);
+        Some(w)
+    });
+    drawn.unwrap_or_else(|| {
+        // no font yet: plain smooth text
+        let mut job = egui::text::LayoutJob::single_section(
+            text.to_string(),
+            egui::TextFormat { font_id: egui::FontId::proportional(size), color: col, ..Default::default() },
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: max_w.max(8.0),
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('\u{2026}'),
+        };
+        let g = p.layout_job(job);
+        let w = g.size().x;
+        let x = match align {
+            Align::Min => pos.x,
+            Align::Center => pos.x - w / 2.0,
+            Align::Max => pos.x - w,
+        };
+        p.galley(Pos2::new(x, pos.y - g.size().y / 2.0), g, col);
+        w
+    })
 }
 
 impl App {
     /// Put the chosen playlist font in place (fetching a free one first if it is not here yet).
     pub(crate) fn apply_pl_font(&mut self) {
         let skin_font = self.wa_art.as_ref().and_then(|t| t.font.clone());
-        match font_now(self.pl_font, skin_font.as_deref()) {
-            Some(b) => set_playlist_font(&self.ctx, Some(b), self.pl_font),
-            None if matches!(PL_FONTS.get(self.pl_font).map(|f| &f.1), Some(FontSrc::Web(..))) => {
-                let (tx, ctx, choice) = (self.tx.clone(), self.ctx.clone(), self.pl_font);
+        // the skin's own font, when it names one of the free fonts (SLEEK asks for Silkscreen), comes from there
+        let mut choice = self.pl_font;
+        if matches!(PL_FONTS.get(choice).map(|f| &f.1), Some(FontSrc::Skin)) {
+            if let Some(i) = skin_font
+                .as_deref()
+                .and_then(|n| PL_FONTS.iter().position(|f| matches!(f.1, FontSrc::Web(..)) && f.0.eq_ignore_ascii_case(n)))
+            {
+                choice = i;
+            }
+        }
+        match font_now(choice, skin_font.as_deref()) {
+            Some(b) => set_playlist_font(&self.ctx, Some(b), choice),
+            None if matches!(PL_FONTS.get(choice).map(|f| &f.1), Some(FontSrc::Web(..))) => {
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 self.set_note("FETCHING THE FONT...");
                 std::thread::spawn(move || {
                     let _ = tx.send(Msg::FontReady(choice, fetch_font(choice)));
@@ -934,6 +1105,13 @@ impl App {
     /// tracks in the playlist font and colours, its scrollbar, and the bottom bar with working buttons.
     pub(crate) fn winamp_playlist(&mut self, ui: &mut egui::Ui, outer: Rect, acts: &mut Vec<Action>) {
         let Some(t) = self.wa_art.take() else { return };
+        // as wide as the player above, and right under it
+        let mut outer = outer;
+        if let Some((x, s)) = MAIN_COL.with(|c| c.get()) {
+            if x >= outer.min.x - 0.5 && x + 275.0 * s <= outer.max.x + 0.5 {
+                outer = Rect::from_min_max(Pos2::new(x, outer.min.y), Pos2::new(x + 275.0 * s, outer.max.y));
+            }
+        }
         let p = ui.painter().clone();
         let ppp = font::ppp();
         let k = ((1.5 * ppp).round().max(1.0)) / ppp;
@@ -1179,5 +1357,57 @@ impl App {
             }
         }
         self.wa_art = Some(t);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn skins_fonts_are_found_by_name() {
+        // the names skins really give, styles included
+        for name in [
+            "Arial",
+            "Arial Narrow",
+            "Arial Bold",
+            "Trebuchet MS Italic",
+            "Verdana Italic",
+            "Tahoma",
+            "Comic Sans MS",
+            "MS Sans Serif",
+        ] {
+            assert!(system_font(name).is_some(), "{} not found", name);
+        }
+        assert!(system_font("Adelaide CE").is_none(), "a font that is not installed is None (Arial stands in)");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn lines_are_crisp_pixels() {
+        let mut pf = PixFont::new(system_font("Arial").unwrap(), 10.0).unwrap();
+        let w = pf.width("1. Kanye West - FML");
+        assert!(w > 60.0 && w < 140.0, "about Winamp's width at 10 px: {}", w);
+        assert!(pf.width("WWW") > pf.width("iii"), "proportional");
+        assert!(pf.screen_px(20.0, 1.0) >= 20.0 && pf.screen_px(4.0, 1.0) >= 10.0, "never below its own size");
+        let pixel = PixFont::new(system_font("Arial").unwrap(), 8.0).unwrap();
+        assert_eq!(pixel.screen_px(15.0, 1.0), 16.0, "a pixel font comes in whole multiples of its size");
+        // hinted: every upright stroke comes out the same width at every size, the cure for grainy text
+        for size in [10.0, 12.0, 13.0, 15.0, 17.0, 20.0] {
+            let (w, h, px) = pf.raster("lllllll", size);
+            let mut widths = std::collections::BTreeSet::new();
+            let y = (0..h).max_by_key(|y| (0..w).filter(|x| px[y * w + x] > 0).count()).unwrap();
+            let mut run = 0;
+            for x in 0..w {
+                if px[y * w + x] > 0 {
+                    run += 1;
+                } else if run > 0 {
+                    widths.insert(run);
+                    run = 0;
+                }
+            }
+            assert_eq!(widths.len(), 1, "even stems at {} px: {:?}", size, widths);
+        }
     }
 }

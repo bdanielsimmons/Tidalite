@@ -150,20 +150,66 @@ fn viscolor(text: &str) -> Vec<Color32> {
         .collect()
 }
 
-fn lum(c: Color32) -> f32 {
+pub(crate) fn lum(c: Color32) -> f32 {
     (0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32) / 255.0
 }
 
-fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+/// How far apart two colours read (the WCAG contrast ratio: 1 = the same, 21 = black on white; 4.5 is the
+/// usual bar for body text).
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let rel = |c: Color32| {
+        let ch = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    };
+    let (x, y) = (rel(a), rel(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// `c` moved toward white or black (whichever ends up further from `other`) until the two read at `min`
+/// contrast, changing it as little as possible.
+fn apart(c: Color32, other: Color32, min: f32) -> Color32 {
+    if contrast(c, other) >= min {
+        return c;
+    }
+    let to_white = contrast(Color32::WHITE, other) >= contrast(Color32::BLACK, other);
+    let mut out = c;
+    for i in 1..=20 {
+        let t = i as f32 / 20.0;
+        out = if to_white { lighter(c, t) } else { darker(c, t) };
+        if contrast(out, other) >= min {
+            break;
+        }
+    }
+    out
+}
+
+/// A text colour that reads on `bg`.
+pub(crate) fn readable(fg: Color32, bg: Color32, min: f32) -> Color32 {
+    apart(fg, bg, min)
+}
+
+/// A background (panel, button) that `fg` reads on.
+fn backing(bg: Color32, fg: Color32, min: f32) -> Color32 {
+    apart(bg, fg, min)
+}
+
+pub(crate) fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
     Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
 }
 
-fn lighter(c: Color32, t: f32) -> Color32 {
+pub(crate) fn lighter(c: Color32, t: f32) -> Color32 {
     mix(c, Color32::WHITE, t)
 }
 
-fn darker(c: Color32, t: f32) -> Color32 {
+pub(crate) fn darker(c: Color32, t: f32) -> Color32 {
     mix(c, Color32::BLACK, t)
 }
 
@@ -291,31 +337,32 @@ fn palette_from(f: &HashMap<String, Vec<u8>>) -> Result<Pal, String> {
         Color32::from_gray(16),
         Color32::from_gray(150),
     ));
-    // panels take the main window's tone, pushed far enough from the text colour to read
-    let mut beige = chrome;
-    let mut tries = 0;
-    while (lum(beige) - lum(normal)).abs() < 0.42 && tries < 12 {
-        beige = if lum(normal) > 0.5 { darker(beige, 0.15) } else { lighter(beige, 0.15) };
-        tries += 1;
-    }
+    // text first: the list text and the playing song's text must read on the list background (and the playing
+    // song's also on the selection colour), whatever the skin chose
+    let ink = readable(normal, normal_bg, 4.5);
+    let bar_txt = readable(current, normal_bg, 4.5);
+    // the selection colour bends to the playing text, not the other way round
+    let sel_bg = backing(sel_bg, bar_txt, 4.5);
+    // panels and buttons take the skin's tones, moved just far enough from the text to read
+    let beige = backing(chrome, ink, 4.5);
     let accent = vis.get(2).copied().filter(|c| lum(*c) > 0.15).unwrap_or(current);
-    // buttons take the tone of the skin's own transport buttons
     let (btn, btn_light) = match f.get("cbuttons.bmp").and_then(|b| tones(b)) {
         Some((avg, _, light)) => {
-            let mut b = avg;
-            let mut tries = 0;
-            while (lum(b) - lum(normal)).abs() < 0.42 && tries < 12 {
-                b = if lum(normal) > 0.5 { darker(b, 0.15) } else { lighter(b, 0.15) };
-                tries += 1;
-            }
+            let b = backing(avg, ink, 4.5);
             (b, mix(light, b, 0.3))
         }
-        None => (darker(beige, 0.1), lighter(beige, 0.2)),
+        None => {
+            let b = backing(darker(beige, 0.1), ink, 4.5);
+            (b, mix(Color32::WHITE, b, 0.7))
+        }
     };
     let row_alt = if lum(normal_bg) < 0.5 { lighter(normal_bg, 0.05) } else { darker(normal_bg, 0.05) };
+    let edge = darker(dark, 0.4);
+    // header text (trim) sits on the dark edge colour
+    let trim = readable(mix(light, beige, 0.4), edge, 4.5);
     Ok(Pal {
         app_bg: darker(chrome, 0.8),
-        trim: mix(light, beige, 0.4),
+        trim,
         beige,
         beige_lt: lighter(beige, 0.12),
         beige_dk: darker(beige, 0.15),
@@ -324,16 +371,16 @@ fn palette_from(f: &HashMap<String, Vec<u8>>) -> Result<Pal, String> {
         lcd_ghost: mix(normal_bg, normal, 0.12),
         groove: mix(normal_bg, dark, 0.5),
         sel: mix(sel_bg, normal_bg, 0.5),
-        ink: normal,
-        ink2: mix(normal, normal_bg, 0.3),
-        dim: mix(normal, normal_bg, 0.55),
+        ink,
+        ink2: readable(mix(ink, normal_bg, 0.3), normal_bg, 3.0),
+        dim: readable(mix(ink, normal_bg, 0.55), normal_bg, 2.0),
         red: accent,
         btn_face: btn,
         btn_hi: btn_light,
         row_alt,
         row_sel: sel_bg,
-        bar_txt: current,
-        edge: darker(dark, 0.4),
+        bar_txt,
+        edge,
     })
 }
 
@@ -384,6 +431,41 @@ mod tests {
     }
 
     #[test]
+    fn every_text_colour_reads() {
+        // the hard cases real skins have: mid-red text, text the same as its background, a pale selection
+        // behind white "playing" text, dark text on dark panels
+        for (normal, current, bg, sel) in [
+            ("#C80000", "#FFFFFF", "#000000", "#E0E0E0"),
+            ("#202020", "#202020", "#202020", "#202020"),
+            ("#808080", "#FFFF00", "#7F7F7F", "#FFFFFF"),
+            ("#00FF00", "#00C000", "#00FF00", "#00FF00"),
+            ("#000080", "#FFFFFF", "#F0F0F0", "#000080"),
+        ] {
+            let pledit = format!(
+                "[Text]
+Normal={}
+Current={}
+NormalBG={}
+SelectedBG={}",
+                normal, current, bg, sel
+            );
+            let p = palette(&wsz(&[("pledit.txt", pledit.as_bytes())])).unwrap();
+            for (what, fg, back, min) in [
+                ("list text", p.ink, p.lcd, 4.5),
+                ("playing on list", p.bar_txt, p.lcd, 4.5),
+                ("playing on selection", p.bar_txt, p.row_sel, 4.5),
+                ("panel text", p.ink, p.beige, 4.5),
+                ("button text", p.ink, p.btn_face, 4.5),
+                ("header text", p.trim, p.edge, 4.5),
+                ("second text", p.ink2, p.lcd, 3.0),
+            ] {
+                assert!(contrast(fg, back) >= min, "{} ({}): {:.2}", what, normal, contrast(fg, back));
+            }
+        }
+        assert!((contrast(Color32::WHITE, Color32::BLACK) - 21.0).abs() < 0.1);
+    }
+
+    #[test]
     fn palette_from_a_skin() {
         // folder names and upper case vary between skins
         let f = wsz(&[
@@ -395,7 +477,7 @@ mod tests {
         assert_eq!(p.ink, Color32::from_rgb(0, 224, 0));
         assert_eq!(p.row_sel, Color32::from_rgb(32, 48, 128));
         assert_eq!(p.red, Color32::from_rgb(240, 60, 20), "the spectrum's top colour is the accent");
-        assert!((lum(p.beige) - lum(p.ink)).abs() >= 0.42, "panel text stays readable");
+        assert!(contrast(p.ink, p.beige) >= 4.5, "panel text stays readable");
         assert!(palette(&wsz(&[("readme.txt", b"hi")])).is_err());
         assert!(palette(b"not a zip").is_err());
     }

@@ -559,8 +559,8 @@ impl App {
         }
         ui.add_space(4.0);
         para(ui, "SKIN", pal().ink2);
-        let worn = self.wa_worn.as_ref().map(|w| w.1.clone());
-        skin_menu(ui, acts, worn.as_deref());
+        let worn = self.wa_worn.clone();
+        skin_menu(ui, acts, worn.as_ref());
         done || acts.len() != before
     }
 
