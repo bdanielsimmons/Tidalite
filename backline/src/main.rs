@@ -4472,6 +4472,7 @@ fn panel_frame() -> egui::Frame {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        TOUR_ON.store(self.tour.is_some(), std::sync::atomic::Ordering::Relaxed);
         // This app draws and handles its own buttons and text boxes. egui's own keyboard focus would make Enter / Space
         // "press" whichever button was clicked last (typing a loop time and pressing Enter also hit the + next to it), so drop it.
         if let Some(id) = ctx.memory(|mem| mem.focused()) {
@@ -4841,8 +4842,15 @@ impl eframe::App for App {
     }
 }
 
+/// A tour is running (set every frame): the windows can't be resized under it.
+static TOUR_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// A drag handle drawn in the gap between two windows. Some(Some(pos)) while dragging, Some(None) on double click.
 fn splitter(ctx: &egui::Context, id: &str, rect: Rect, vertical: bool) -> Option<Option<f32>> {
+    // the windows keep their sizes while a tour is showing them
+    if TOUR_ON.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
     let mut out = None;
     egui::Area::new(egui::Id::new(id)).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (r, resp) = ui.allocate_exact_size(rect.size(), Sense::click_and_drag());

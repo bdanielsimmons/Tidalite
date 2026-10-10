@@ -449,7 +449,11 @@ impl App {
                 .inner_margin(14.0);
             frame.show(ui, |ui| {
                 ui.set_width(460.0_f32.min(screen.width() - 60.0));
-                title_line(ui, &format!("{}   {}/{}", step.title, i + 1, list.len()), 2.5, Color32::from_rgb(240, 240, 236));
+                // the step's title, wrapped onto more lines when it is long (never cut off)
+                let head = format!("{}   {}/{}", step.title, i + 1, list.len());
+                for line in crate::wrap(&head, 2.5, ui.available_width() - 8.0) {
+                    title_line(ui, &line, 2.5, Color32::from_rgb(240, 240, 236));
+                }
                 para(ui, step.text, Color32::from_rgb(225, 225, 220));
                 // the credit the song's licence asks for, while it plays
                 if self.tour_play.as_ref().is_some_and(|s| s.song.is_some()) {
