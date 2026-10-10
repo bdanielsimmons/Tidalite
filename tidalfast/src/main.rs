@@ -1439,12 +1439,13 @@ fn paint_record(p: &egui::Painter, rect: Rect, spin: Option<f32>) {
 /// Covers shown as records instead of squares (click a cover to switch). Saved in the settings.
 static VINYL: AtomicBool = AtomicBool::new(false);
 
-/// How far the record has turned: it spins up to 33 1/3 rpm while music plays and coasts to a stop on pause.
-fn vinyl_angle(ui: &egui::Ui, playing: bool) -> f32 {
+/// How far the record has turned: it spins up to 33 1/3 rpm times the playback speed (`speed`, 0 = stopped)
+/// and coasts to a stop on pause.
+fn vinyl_angle(ui: &egui::Ui, speed: f32) -> f32 {
     let id = egui::Id::new("vinyl_angle");
     let dt = ui.input(|i| i.stable_dt).min(0.1);
     let (ang, vel): (f32, f32) = ui.ctx().data(|d| d.get_temp(id)).unwrap_or((0.0, 0.0));
-    let target = if playing { 3.49 } else { 0.0 }; // radians a second
+    let target = 3.49 * speed; // radians a second at 33 1/3 rpm
     let vel = vel + (target - vel) * (1.0 - (-dt * 2.0).exp());
     let ang = (ang + vel * dt) % std::f32::consts::TAU;
     ui.ctx().data_mut(|d| d.insert_temp(id, (ang, vel)));
@@ -1764,7 +1765,7 @@ fn page_view(
     images: &mut Images,
     page: &Page,
     playing_id: Option<i64>,
-    sounding: bool,
+    sounding: f32,
     tab: Tab,
     liked: &HashSet<i64>,
     acts: &mut Vec<Action>,
@@ -1835,8 +1836,8 @@ fn page_view(
             if VINYL.load(Ordering::Relaxed) && tex.is_some() {
                 // it turns while a song from this page plays
                 // an album's record turns while one of its songs plays; an artist's whenever music plays
-                let mine = sounding && (page.artist || page.tracks.iter().any(|t| Some(t.id) == playing_id));
-                paint_vinyl(ui.painter(), cr, tex, vinyl_angle(ui, mine), 1.0);
+                let mine = page.artist || page.tracks.iter().any(|t| Some(t.id) == playing_id);
+                paint_vinyl(ui.painter(), cr, tex, vinyl_angle(ui, if mine { sounding } else { 0.0 }), 1.0);
             } else {
                 if !page.artist {
                     inset(ui.painter(), cr, pal().edge);
@@ -2535,7 +2536,7 @@ impl App {
             app.pomo_sound = b;
         }
         if let Some(p) = st["speed"].as_u64() {
-            app.speed = (p as u32).clamp(25, 150);
+            app.speed = (p as u32).clamp(25, 250);
         }
         if let Some(o) = st["loops"].as_object() {
             for (k, v) in o {
@@ -2635,7 +2636,7 @@ impl App {
         let on = self.practice && self.loop_on && both.is_some();
         let (a, b) = both.unwrap_or((0.0, 0.0));
         self.player.ctl.set_loop(on, a, b);
-        self.player.ctl.set_speed(if self.practice { self.speed } else { 100 });
+        self.player.ctl.set_speed(self.speed);
         self.player.ctl.set_semis(if self.practice { self.semis } else { 0 });
         self.player.ctl.set_chan(if self.practice { self.chan } else { 0 });
         self.player.ctl.set_count_in(if self.practice { self.count_in } else { 0 }, self.bpm as f32);
@@ -3629,10 +3630,8 @@ impl App {
                 self.set_note("LOOP CLEARED");
             }
             Action::Speed(p) => {
-                self.speed = p.clamp(25, 150);
-                if self.cur.is_some() {
-                    self.practice = true;
-                }
+                // playback speed is for everyone, listening or practicing
+                self.speed = p.clamp(25, 250);
                 self.sync_loop();
             }
             Action::ToggleArt => self.art_view = !self.art_view,

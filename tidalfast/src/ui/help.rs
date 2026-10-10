@@ -183,7 +183,7 @@ fn practice_tab(ui: &mut egui::Ui) {
             "LOOP: [ and ] set the ends, \\ turns it on. Right-click the seek bar for more. Loops are remembered per track.",
             "SPEED: UP / DOWN arrows, 5 percent at a time, pitch unchanged.",
             "PITCH: semitones, or 10-cent steps. FIND TUNING lines up tracks that aren't at A440.",
-            "TIME: metronome with count-in, and a focus timer for work blocks.",
+            "TIME: metronome with count-in, and a focus (pomodoro) timer for work blocks with short rests.",
         ],
     );
     section_header(ui, "KEEPING TRACK");

@@ -67,8 +67,8 @@ pub const CMDS: &[CmdDef] = &[
     CmdDef { cmd: Cmd::LoopToggle, id: "loop", label: "Loop on / off", def: Key::Backslash, group: 2 },
     CmdDef { cmd: Cmd::Back2, id: "back2", label: "Back 2 seconds", def: Key::Comma, group: 2 },
     CmdDef { cmd: Cmd::ToA, id: "to_a", label: "Jump to loop start", def: Key::Period, group: 2 },
-    CmdDef { cmd: Cmd::SpeedUp, id: "speed_up", label: "Speed up 5 percent", def: Key::ArrowUp, group: 2 },
-    CmdDef { cmd: Cmd::SpeedDown, id: "speed_down", label: "Slow down 5 percent", def: Key::ArrowDown, group: 2 },
+    CmdDef { cmd: Cmd::SpeedUp, id: "speed_up", label: "Speed up 5 percent", def: Key::ArrowUp, group: 0 },
+    CmdDef { cmd: Cmd::SpeedDown, id: "speed_down", label: "Slow down 5 percent", def: Key::ArrowDown, group: 0 },
 ];
 
 pub fn default_binds() -> Vec<Option<Key>> {
@@ -187,16 +187,8 @@ impl App {
             Cmd::LoopToggle => acts.push(Action::LoopToggle),
             Cmd::Back2 => acts.push(Action::SeekRel(-2.0)),
             Cmd::ToA => acts.push(Action::Seek(self.loop_a.unwrap_or(0.0))),
-            Cmd::SpeedUp => {
-                if self.practice {
-                    acts.push(Action::Speed(self.speed + 5))
-                }
-            }
-            Cmd::SpeedDown => {
-                if self.practice {
-                    acts.push(Action::Speed(self.speed.saturating_sub(5)))
-                }
-            }
+            Cmd::SpeedUp => acts.push(Action::Speed(self.speed + 5)),
+            Cmd::SpeedDown => acts.push(Action::Speed(self.speed.saturating_sub(5))),
         }
     }
 

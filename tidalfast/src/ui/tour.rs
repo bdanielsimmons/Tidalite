@@ -41,8 +41,10 @@ enum Scene {
     /// practice mode off (to show where it is switched on)
     PracticeOff,
     Practice,
-    /// practice mode with MORE open on PITCH & EAR
-    PracticePitch,
+    /// practice mode with MORE open on a tab (0 TRAINER, 1 PITCH & EAR, 2 STEMS)
+    PracticeMore(u8),
+    /// the album view in practice mode, with its little practice strip
+    AlbumPractice,
 }
 
 struct Step {
@@ -79,6 +81,12 @@ const BASIC: &[Step] = &[
         text: "Play, skip, seek and volume, with the tempo and key of the song. The little screen is a visualizer: click it to change the style, right-click it for its settings.",
     },
     Step {
+        key: "SPEEDBTN",
+        scene: Scene::Normal,
+        title: "SPEED",
+        text: "Play anything from half speed to 2.5 times, and the pitch stays put. Click for the next speed, right-click to pick one or type any; UP and DOWN step it by 5 percent.",
+    },
+    Step {
         key: "COVER",
         scene: Scene::Normal,
         title: "THE COVER IS A BUTTON",
@@ -88,7 +96,7 @@ const BASIC: &[Step] = &[
         key: "ARTBTNS",
         scene: Scene::Album,
         title: "THE ALBUM VIEW",
-        text: "A big cover, lyrics you can scroll and click to jump, and the visualizer behind it. Click the cover to put it on a spinning record. These buttons switch lyrics, the spectrum, black-and-white art, fullscreen and the skin, with the volume on the right. CLOSE or ESC takes you back.",
+        text: "A big cover, lyrics you can scroll and click to jump, and the visualizer behind it. Click the cover to put it on a spinning record (it turns with the speed). These buttons switch lyrics, the spectrum, black-and-white art, fullscreen, the skin and the speed, with the volume on the right. CLOSE or ESC takes you back.",
     },
     Step {
         key: "QUEUE",
@@ -149,20 +157,38 @@ const PRACTICE_TOUR: &[Step] = &[
     },
     Step {
         key: "MOREBOX",
-        scene: Scene::PracticePitch,
-        title: "3. FIX THE PITCH",
-        text: "MORE opens this panel. PITCH moves the key in semitones or 10-cent steps; FIND TUNING tells you how far the record is from A440, and its key, and TUNE TO A440 lines it up with your instrument.",
+        scene: Scene::PracticeMore(0),
+        title: "3. LET IT SPEED YOU UP",
+        text: "MORE opens these tools. The TRAINER plays your loop a set number of times, then speeds it up by a set percent, again and again: start slow and let it bring you up to tempo.",
+    },
+    Step {
+        key: "MOREBOX",
+        scene: Scene::PracticeMore(1),
+        title: "4. FIX THE PITCH",
+        text: "PITCH moves the key in semitones or 10-cent steps; FIND TUNING tells you how far the record is from A440, and its key, and TUNE TO A440 lines it up with your instrument. The ear modes play one side of the stereo, or take the middle out.",
+    },
+    Step {
+        key: "MOREBOX",
+        scene: Scene::PracticeMore(2),
+        title: "5. PULL IT APART",
+        text: "STEMS splits a stored track into drums, bass, vocals and the rest, on this computer (a one-time download of the tool). Then play just one part, or everything but it.",
     },
     Step {
         key: "TIMEBTNS",
         scene: Scene::Practice,
-        title: "4. KEEP TIME",
-        text: "The metronome has a count-in and can lock to the track's own beat. The focus timer runs work blocks with rests between them.",
+        title: "6. KEEP TIME",
+        text: "The metronome has a count-in and can lock to the track's own beat. The focus timer is a pomodoro: work blocks with short rests between them.",
+    },
+    Step {
+        key: "ARTPRACTICE",
+        scene: Scene::AlbumPractice,
+        title: "7. PRACTICE IN THE ALBUM VIEW",
+        text: "Open the album view in practice mode and this strip comes with you: set the loop, switch it on and change the speed without leaving the big cover.",
     },
     Step {
         key: "TABS",
         scene: Scene::Practice,
-        title: "5. KEEP TRACK",
+        title: "8. KEEP TRACK",
         text: "The PRACTICE tab holds TUNES (your repertoire, recordings and charts the band can play) and the DIARY (what you practiced). Time only counts while a loop plays in practice mode.",
     },
 ];
@@ -187,13 +213,16 @@ impl App {
     /// Put the screen in the state a step needs (only what differs, so nothing flickers).
     fn tour_scene(&mut self, scene: Scene) {
         let Some((_, practice, more, mtab)) = self.tour_restore else { return };
-        let want_art = scene == Scene::Album;
+        let want_art = matches!(scene, Scene::Album | Scene::AlbumPractice);
         let want_practice = match scene {
             Scene::PracticeOff => false,
-            Scene::Practice | Scene::PracticePitch => true,
+            Scene::Practice | Scene::PracticeMore(_) | Scene::AlbumPractice => true,
             _ => practice,
         };
-        let (want_more, want_tab) = if scene == Scene::PracticePitch { (true, 1) } else { (more, mtab) };
+        let (want_more, want_tab) = match scene {
+            Scene::PracticeMore(tab) => (true, tab),
+            _ => (more, mtab),
+        };
         if self.art_view != want_art {
             self.art_view = want_art;
         }
@@ -316,9 +345,13 @@ mod tests {
     #[test]
     fn practice_steps_have_practice_on() {
         // the practice panel only exists in practice mode: steps pointing into it must switch it on
-        for s in PRACTICE_TOUR.iter().filter(|s| ["PRACTICE", "LOOPROW", "SPEEDROW", "MOREBOX"].contains(&s.key)) {
-            assert!(matches!(s.scene, Scene::Practice | Scene::PracticePitch), "{}", s.title);
+        for s in PRACTICE_TOUR.iter().filter(|s| ["PRACTICE", "LOOPROW", "SPEEDROW", "MOREBOX", "ARTPRACTICE"].contains(&s.key)) {
+            assert!(matches!(s.scene, Scene::Practice | Scene::PracticeMore(_) | Scene::AlbumPractice), "{}", s.title);
         }
+        // the MORE steps open MORE, each on its own tab
+        let tabs: Vec<u8> =
+            PRACTICE_TOUR.iter().filter_map(|s| if let Scene::PracticeMore(t) = s.scene { Some(t) } else { None }).collect();
+        assert_eq!(tabs, vec![0, 1, 2], "trainer, pitch and stems each get a step");
         assert!(BASIC.iter().any(|s| s.scene == Scene::Album), "the main tour visits the album view");
         assert!(BASIC.last().unwrap().scene == Scene::Normal, "and comes back from it");
     }

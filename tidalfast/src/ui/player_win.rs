@@ -62,7 +62,7 @@ impl App {
                 acts.push(Action::TogglePractice);
             }
             if PRACTICE
-                && chip(ui, r_lis, "LISTEN", !self.practice, "c_lis").tip("Just listening: no loop, normal speed").clicked()
+                && chip(ui, r_lis, "LISTEN", !self.practice, "c_lis").tip("Just listening: no loop, no pitch change").clicked()
                 && self.practice
             {
                 acts.push(Action::TogglePractice);
@@ -275,6 +275,19 @@ impl App {
                 acts.push(Action::Volume(self.vol_before.max(0.3)));
             }
         }
+        // speed: click for the next preset, right-click to pick one or type any
+        let spd = rc(134.0, 67.0, 40.0, 12.0);
+        tour::mark("SPEEDBTN", spd);
+        let spr = ui
+            .interact(spd, ui.id().with("speed"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip("Speed (pitch stays): click for the next one, right-click to pick or type any  (Up / Down keys)");
+        raised_h(p, spd, self.speed != 100 || spr.is_pointer_button_down_on(), spr.hovered());
+        ptext_fit(p, spd.center(), Align::Center, &crate::tools::speed_label(self.speed), px_sm, spd.width() - 4.0, pal().ink);
+        if spr.clicked() {
+            acts.push(Action::Speed(crate::tools::next_speed(self.speed)));
+        }
+        spr.context_menu(|ui| self.speed_menu(ui, acts));
         ptext(
             p,
             Pos2::new(ox + 250.0 * s, oy + 71.0 * s),

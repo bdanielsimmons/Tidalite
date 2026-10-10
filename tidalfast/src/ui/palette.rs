@@ -33,10 +33,10 @@ const ITEMS: &[(&str, &str, bool)] = &[
     ("Set loop start (A)", "mark_a", true),
     ("Set loop end (B)", "mark_b", true),
     ("Jump to loop start", "to_a", true),
-    ("Speed up 5 percent", "speed_up", true),
-    ("Slow down 5 percent", "speed_down", true),
+    ("Speed up 5 percent", "speed_up", false),
+    ("Slow down 5 percent", "speed_down", false),
     ("Metronome", "metro", true),
-    ("Focus timer", "timer", true),
+    ("Focus timer (pomodoro)", "timer", true),
 ];
 
 fn matches(label: &str, q: &str) -> bool {

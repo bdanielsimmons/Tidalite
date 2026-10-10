@@ -12,6 +12,20 @@ use crate::{
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::time::Instant;
 
+/// Playback speed presets, in percent (any other speed can be typed).
+pub(crate) const SPEEDS: [u32; 7] = [50, 75, 100, 125, 150, 200, 250];
+
+/// "1X", "1.25X", "0.5X"
+pub(crate) fn speed_label(pct: u32) -> String {
+    let s = format!("{:.2}", pct as f32 / 100.0);
+    format!("{}X", s.trim_end_matches('0').trim_end_matches('.'))
+}
+
+/// The next preset up, wrapping round to the slowest.
+pub(crate) fn next_speed(pct: u32) -> u32 {
+    SPEEDS.iter().copied().find(|&s| s > pct).unwrap_or(SPEEDS[0])
+}
+
 // text-field ids for the boxes below (the lists use 1..13)
 pub const F_FOCUS: u32 = 30;
 pub const F_REST: u32 = 31;
@@ -80,6 +94,28 @@ impl App {
             acts.push(Action::Knob(k, 1));
         }
         ui.add_space(6.0);
+    }
+
+    /// The speed presets and a box for any speed (25 to 250 percent), for a speed button's right-click menu.
+    pub(crate) fn speed_menu(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        for s in SPEEDS {
+            let mark = if self.speed == s { "> " } else { "   " };
+            if crate::menu_item(ui, &format!("{}{}", mark, speed_label(s))) {
+                acts.push(Action::Speed(s));
+                ui.close_menu();
+            }
+        }
+        ui.horizontal(|ui| {
+            self.num_step(
+                ui,
+                acts,
+                F_SPEED,
+                64.0,
+                Knob::Speed,
+                format!("{}%", self.speed),
+                "Any speed: type a percent (25 to 250)",
+            );
+        });
     }
 
     // ---------------------------------------------------------------- TIMER
@@ -870,5 +906,24 @@ impl App {
                 self.store_dirty = true;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speed_names_and_steps() {
+        assert_eq!(speed_label(100), "1X");
+        assert_eq!(speed_label(125), "1.25X");
+        assert_eq!(speed_label(50), "0.5X");
+        assert_eq!(speed_label(250), "2.5X");
+        assert_eq!(speed_label(87), "0.87X");
+        // clicking walks up the presets and wraps to the slowest
+        assert_eq!(next_speed(100), 125);
+        assert_eq!(next_speed(87), 100, "a typed speed goes to the next preset up");
+        assert_eq!(next_speed(250), 50);
+        assert!(SPEEDS.windows(2).all(|w| w[0] < w[1]) && SPEEDS.contains(&100));
     }
 }

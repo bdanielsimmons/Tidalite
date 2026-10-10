@@ -1519,7 +1519,7 @@ impl App {
                 self.queue = Arc::new(vec![l.version.to_track()]);
                 self.orig_queue = None;
                 self.shuffle = false;
-                self.speed = if l.speed == 0 { 100 } else { l.speed.clamp(25, 150) };
+                self.speed = if l.speed == 0 { 100 } else { l.speed.clamp(25, 250) };
                 self.practice = true;
                 self.play_index(0);
                 if l.pos > 3.0 {
@@ -1853,7 +1853,7 @@ impl App {
             Knob::Blocks => self.pomo_cycles = u(1.0, 16.0),
             Knob::Loops => self.trainer_n = u(1.0, 99.0),
             Knob::Step => self.trainer_step = u(1.0, 50.0),
-            Knob::Speed => self.apply(Action::Speed(u(25.0, 150.0))),
+            Knob::Speed => self.apply(Action::Speed(u(25.0, 250.0))),
             Knob::LoopA => self.apply(Action::SetAAt(v.max(0.0))),
             Knob::LoopB => self.apply(Action::SetBAt(v.max(0.0))),
             Knob::Bpm => {

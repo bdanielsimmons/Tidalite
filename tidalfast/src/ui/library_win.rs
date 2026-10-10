@@ -384,7 +384,7 @@ impl App {
             }
             if PRACTICE {
                 let tb = icon_btn_w(ui, &IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 38.0)
-                    .tip("Focus timer: work in blocks with rests between");
+                    .tip("Focus timer (pomodoro): work in blocks with short rests between");
                 if tb.clicked() {
                     acts.push(Action::TimerPanel);
                 }
@@ -444,7 +444,8 @@ impl App {
         let loading = self.loading;
         let tab = self.lib_tab;
         let playing_id = self.cur_track().map(|t| t.id);
-        let sounding = self.cur.is_some() && !self.paused && !self.stopped;
+        // how fast a record on the page turns: the playback speed while music plays, else still
+        let sounding = if self.cur.is_some() && !self.paused && !self.stopped { self.speed as f32 / 100.0 } else { 0.0 };
         let (show_log, show_eq, show_cache) = (self.show_log, self.show_eq, self.show_cache);
         let sec = self.sec;
         let sec_i = sec as u8;

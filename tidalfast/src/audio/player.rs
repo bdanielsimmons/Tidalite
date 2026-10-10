@@ -117,7 +117,7 @@ impl Ctl {
 
     /// Playback speed in percent (pitch is preserved).
     pub fn set_speed(&self, pct: u32) {
-        self.speed.store(pct.clamp(25, 150), Ordering::Relaxed);
+        self.speed.store(pct.clamp(25, 250), Ordering::Relaxed);
     }
 
     /// Current position in seconds (of the original recording, regardless of speed).

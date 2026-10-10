@@ -1,6 +1,9 @@
 //! The album view: big tilting cover, the soft visualizer behind it, synced lyrics and its own controls.
 
 use super::*;
+use crate::extras::Knob;
+use crate::tools::F_SPEED;
+use crate::views::label;
 
 impl App {
     pub(crate) fn art_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
@@ -103,7 +106,7 @@ impl App {
             // the record: a soft round shadow, then the disc turning while the music plays
             let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 16.0);
             p.circle_filled(center + off, a * 0.5 + 4.0, Color32::from_black_alpha((60.0 * self.art_op) as u8));
-            let spin = vinyl_angle(ui, active && !self.paused);
+            let spin = vinyl_angle(ui, if active && !self.paused { self.speed as f32 / 100.0 } else { 0.0 });
             // follows the cover opacity setting, and never fully solid, so the visualizer shows through
             paint_vinyl(&p, Rect::from_center_size(center, Vec2::splat(a)), tex, spin, self.art_op.min(0.8));
         } else {
@@ -311,6 +314,43 @@ impl App {
         // ---- buttons
         let row = Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.max.y - 52.0), Vec2::new(full.width() - 56.0, BTN_H));
         tour::mark("ARTBTNS", row);
+        if PRACTICE && self.practice {
+            // practice mode: a small strip of the loop and speed tools, so practicing can go on in here
+            let strip = Rect::from_min_size(Pos2::new(row.min.x, row.min.y - BTN_H - 14.0), Vec2::new(row.width(), BTN_H + 8.0));
+            p.rect_filled(strip, Rounding::same(if style() != 0 { 8.0 } else { 0.0 }), Color32::from_black_alpha(120));
+            tour::mark("ARTPRACTICE", strip);
+            let both = self.loop_a.is_some() && self.loop_b.is_some();
+            let ab = format!(
+                "A {}   B {}",
+                self.loop_a.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()),
+                self.loop_b.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string())
+            );
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(strip.shrink2(Vec2::new(8.0, 4.0))), |ui| {
+                ui.horizontal(|ui| {
+                    if retro_btn_w(ui, "SET A", 64.0, false).tip("Loop start here  ([ key)").clicked() && active {
+                        acts.push(Action::SetAAt(pos));
+                    }
+                    if retro_btn_w(ui, "SET B", 64.0, false).tip("Loop end here  (] key)").clicked() && active {
+                        acts.push(Action::SetBAt(pos));
+                    }
+                    if icon_btn(ui, &IC_REP, self.loop_on && both, pal().ink).tip("Loop on / off  (\\ key)").clicked() {
+                        acts.push(Action::LoopToggle);
+                    }
+                    lcd_box(ui, &ab, 190.0, pal().ink);
+                    ui.add_space(10.0);
+                    label(ui, "SPEED", 56.0);
+                    self.num_step(
+                        ui,
+                        acts,
+                        F_SPEED,
+                        64.0,
+                        Knob::Speed,
+                        format!("{}%", self.speed),
+                        "Slower / faster (Down / Up keys) - or type a percent",
+                    );
+                });
+            });
+        }
         let (gray, lyr, fs) = (self.art_gray, self.show_lyrics, self.fullscreen);
         let cur_t = self.cur_track();
         let liked_now = cur_t.as_ref().map(|t| self.liked.contains(&t.id)).unwrap_or(false);
@@ -390,6 +430,12 @@ impl App {
                 {
                     acts.push(Action::ToggleFullscreen);
                 }
+                let sb = retro_btn(ui, &crate::tools::speed_label(self.speed), self.speed != 100)
+                    .tip("Speed (pitch stays): click for the next one, right-click to pick or type any  (Up / Down keys)");
+                if sb.clicked() {
+                    acts.push(Action::Speed(crate::tools::next_speed(self.speed)));
+                }
+                sb.context_menu(|ui| self.speed_menu(ui, acts));
                 // files and YouTube clips are not on Tidal, so there is nothing to like
                 if icon_btn(ui, &IC_HEART, liked_now, if liked_now { pal().red } else { ink })
                     .tip(if liked_now { "Remove from My Tracks  (H)" } else { "Add to My Tracks  (H)" })
