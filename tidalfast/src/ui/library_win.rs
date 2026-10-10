@@ -371,6 +371,94 @@ impl App {
         }
     }
 
+    /// The skins, one section under another: ORIGINAL (Tidalite's palettes as sleek Winamp-style skins),
+    /// RETRO ORIGINAL (Tidalite's own pixel panels) and WINAMP (the one you wear, the ones worn lately, and the
+    /// way to the browser). The one worn is marked.
+    fn skin_lists(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        let look = crate::gen_look(self.wa_worn.as_ref());
+        let museum = self.wa_worn.clone().filter(|_| look == 0);
+        let cur = SKIN.load(Ordering::Relaxed) % PALS.len();
+        for (title, g) in [("ORIGINAL", 2usize), ("RETRO ORIGINAL", 0)] {
+            ui.add_space(6.0);
+            para(ui, title, pal().ink2);
+            for (n, name) in SKIN_NAMES.iter().enumerate() {
+                let on = n == cur && if g == 0 { self.wa_worn.is_none() } else { look == g };
+                if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name)) {
+                    acts.push(Action::Theme(n, g));
+                }
+            }
+        }
+        ui.add_space(6.0);
+        para(ui, "WINAMP", pal().ink2);
+        // the one worn first, then the ones worn lately (X takes one off the list)
+        let mut list: Vec<(String, String)> = Vec::new();
+        if let Some(w) = &museum {
+            list.push(w.clone());
+        }
+        for r in &self.wa_recent {
+            if !list.iter().any(|l| l.0 == r.0) {
+                list.push(r.clone());
+            }
+        }
+        for (md5, name) in list {
+            let on = museum.as_ref().is_some_and(|w| w.0 == md5);
+            // X first: the name takes the rest of the row
+            ui.horizontal(|ui| {
+                if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
+                    acts.push(Action::WaForget(md5.clone()));
+                }
+                if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name.to_uppercase())) && !on {
+                    acts.push(Action::WaApply(crate::winamp::WaSkin {
+                        md5: md5.clone(),
+                        name: name.clone(),
+                        shot: String::new(),
+                        download: String::new(),
+                    }));
+                }
+            });
+        }
+        if menu_item(ui, "  BROWSE WINAMP SKINS...") {
+            acts.push(Action::WaOpen);
+        }
+    }
+
+    /// The TIDALITE tab: the skins, then everything about the app itself (preferences, help and tours, where
+    /// tracks are stored, the log, your Tidal account).
+    pub(crate) fn tidalite_page(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.add_space(6.0);
+            title_line(ui, "SKINS", 3.0, pal().ink);
+            self.skin_lists(ui, acts);
+            ui.add_space(14.0);
+            title_line(ui, "TIDALITE", 3.0, pal().ink);
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if retro_btn(ui, "PREFERENCES", false).tip("Updates, sound output, the opening sound, size, keys").clicked() {
+                    acts.push(Action::TogglePrefs);
+                }
+                if retro_btn(ui, "HELP AND TOURS", false).tip("Every key and tip, and the guided tours (F1)").clicked() {
+                    acts.push(Action::ToggleHelp);
+                }
+            });
+            ui.add_space(14.0);
+            title_line(ui, "TIDAL ACCOUNT", 3.0, pal().ink);
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if self.offline {
+                    if retro_btn(ui, "LOG IN TO TIDAL", false)
+                        .tip("Add your Tidal account - everything else keeps working")
+                        .clicked()
+                    {
+                        acts.push(Action::Offline(false));
+                    }
+                } else if retro_btn(ui, "LOG OUT", false).clicked() {
+                    acts.push(Action::Logout);
+                }
+            });
+            ui.add_space(20.0);
+        });
+    }
+
     /// Winamp skins from the Skin Museum: search, a grid of screenshots, click one to wear it.
     pub(crate) fn winamp_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         ui.add_space(6.0);
@@ -415,7 +503,7 @@ impl App {
         ui.horizontal(|ui| {
             let go_w = 54.0;
             let w = (ui.available_width() - go_w - 70.0 - 3.0 * ui.spacing().item_spacing.x - 8.0).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = crate::views::field(
                 ui,
                 &mut self.ed,
@@ -534,22 +622,6 @@ impl App {
     }
 
     /// The TIDALITE menu, next to HOME and LIBRARY: skins (and Winamp skins), preferences, help, storage, the log.
-    fn app_menu(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        let pid = ui.make_persistent_id("app_menu");
-        let open = ui.memory(|m| m.is_popup_open(pid));
-        let r =
-            ibtn(ui, &MARK, "TIDALITE", open).tip("Skins (and Winamp skins), preferences, help and tours, storage and the log");
-        tour::mark("APPMENU", r.rect);
-        if r.clicked() {
-            ui.memory_mut(|m| m.toggle_popup(pid));
-        }
-        egui::popup::popup_below_widget(ui, pid, &r, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-            if self.app_menu_items(ui, acts) {
-                ui.memory_mut(|m| m.close_popup());
-            }
-        });
-    }
-
     /// What the TIDALITE menu holds (also opened by a Winamp skin's own options button). True once something
     /// was picked, so the menu can close.
     pub(crate) fn app_menu_items(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) -> bool {
@@ -599,49 +671,53 @@ impl App {
         let lr = ui.min_rect();
         tour::mark("TABS", Rect::from_min_max(Pos2::new(lr.min.x, tabs_top), Pos2::new(lr.max.x, ui.cursor().min.y)));
 
-        // search row
-        if !self.offline {
-            ui.horizontal(|ui| {
+        // back, forward, HOME and the search box: one row
+        let side = self.show_tl || self.show_winamp || self.show_log || self.show_cache;
+        ui.horizontal(|ui| {
+            for back in [true, false] {
+                let ok = self.can_go(back);
+                let col = if ok { pal().ink } else { pal().dim.gamma_multiply(0.6) };
+                let icon: &[&str] = if back { &IC_BACK } else { &IC_FWD };
+                let r = icon_btn_w(ui, icon, false, col, 38.0).tip(if back {
+                    "Back (mouse back button too)"
+                } else {
+                    "Forward (mouse forward button too)"
+                });
+                if r.clicked() && ok {
+                    acts.push(if back { Action::Back } else { Action::Forward });
+                }
+            }
+            // HOME: Tidal home in MUSIC (your files when not signed in), your tunes in PRACTICE
+            if !side {
+                let in_practice = matches!(self.sec, Sec::Tunes | Sec::Diary);
+                let tip = if in_practice {
+                    "Your tunes"
+                } else if self.offline {
+                    "Your files"
+                } else {
+                    "Tidal home"
+                };
+                if ibtn(ui, &IC_HOME, "HOME", false).tip(tip).clicked() {
+                    if in_practice {
+                        acts.push(Action::Section(Sec::Tunes));
+                        acts.push(Action::OpenTune(None));
+                    } else if self.offline {
+                        acts.push(Action::Section(Sec::Files));
+                    } else {
+                        acts.push(Action::Home);
+                    }
+                }
+            }
+            if !self.offline && !side {
                 let go_w = 54.0;
                 let w = (ui.available_width() - go_w - ui.spacing().item_spacing.x).max(80.0);
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
                 self.search_input(ui, rect, acts);
                 if retro_btn_w(ui, "GO", go_w, false).clicked() {
                     acts.push(Action::Search(self.search.clone()));
                 }
-            });
-        }
-
-        // navigation row
-        if self.offline {
-            ui.horizontal(|ui| {
-                if retro_btn(ui, "LOG IN TO TIDAL", false).tip("Add your Tidal account - everything else keeps working").clicked()
-                {
-                    acts.push(Action::Offline(false));
-                }
-                self.app_menu(ui, acts);
-            });
-        } else {
-            ui.horizontal(|ui| {
-                if ibtn(ui, &IC_HOME, "HOME", false).tip("Tidal home").clicked() {
-                    acts.push(Action::Home);
-                }
-                if ibtn(ui, &WIN_LIBRARY, "LIBRARY", false).tip("Your tracks, lists, albums and artists").clicked() {
-                    acts.push(Action::Library);
-                }
-                self.app_menu(ui, acts);
-                if (!self.back.is_empty() || self.show_winamp)
-                    && icon_btn_w(ui, &IC_BACK, false, pal().ink, 38.0).tip("Back").clicked()
-                {
-                    acts.push(Action::Back);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if retro_btn(ui, "LOG OUT", false).clicked() {
-                        acts.push(Action::Logout);
-                    }
-                });
-            });
-        }
+            }
+        });
 
         // library tabs
         let is_lib = self.sec == Sec::Tidal && self.page.as_ref().map(|p| p.library).unwrap_or(false);
@@ -694,6 +770,10 @@ impl App {
             }
             if show_winamp {
                 self.winamp_view(ui, acts);
+                return;
+            }
+            if self.show_tl {
+                self.tidalite_page(ui, acts);
                 return;
             }
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {

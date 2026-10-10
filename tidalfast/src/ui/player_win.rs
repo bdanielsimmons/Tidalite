@@ -694,7 +694,7 @@ impl App {
                 if retro_btn(ui, "CLEAR QUEUE", false).clicked() {
                     acts.push(Action::ClearQueue);
                 }
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width().min(340.0), BTN_H), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width().min(340.0), bh()), Sense::hover());
                 inset(ui.painter(), rect, pal().lcd);
                 let n = queue.len();
                 ptext_fit(

@@ -20,7 +20,7 @@ impl App {
         let bar_h = 96.0;
         // in practice mode the loop and speed tools get their own band along the top; everything else moves down
         let prac = PRACTICE && self.practice;
-        let strip_h = BTN_H + 14.0;
+        let strip_h = bh() + 14.0;
         let top = 28.0 + if prac { strip_h + 10.0 } else { 0.0 };
         let area = Rect::from_min_max(full.min + Vec2::new(28.0, top), Pos2::new(full.max.x - 28.0, full.max.y - bar_h - 12.0));
         let lyrics_on = self.show_lyrics && area.width() > 640.0;
@@ -475,7 +475,7 @@ impl App {
         }
 
         // ---- buttons
-        let row = Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.max.y - 52.0), Vec2::new(full.width() - 56.0, BTN_H));
+        let row = Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.max.y - 52.0), Vec2::new(full.width() - 56.0, bh()));
         tour::mark("ARTBTNS", row);
         if prac {
             // practice mode: the loop tools on the left, the speed on the right, in the band along the top
@@ -530,7 +530,7 @@ impl App {
         let playing = active && !self.paused;
         let ink = pal().ink;
         // three groups: how it looks on the left, playing in the middle, the rest on the right
-        let mid = Rect::from_center_size(row.center(), Vec2::new(6.0 * 44.0 + 5.0 * 8.0, BTN_H));
+        let mid = Rect::from_center_size(row.center(), Vec2::new(6.0 * 44.0 + 5.0 * 8.0, bh()));
         let left = Rect::from_min_max(row.min, Pos2::new(mid.min.x - 24.0, row.max.y));
         let right = Rect::from_min_max(Pos2::new(mid.max.x + 24.0, row.min.y), row.max);
         let roomy = row.width() >= 980.0;
@@ -608,7 +608,7 @@ impl App {
                 ui.add_space(10.0);
                 if roomy {
                     // volume: drag, click or scroll over it
-                    let (sr, vr) = ui.allocate_exact_size(Vec2::new(100.0, BTN_H), Sense::click_and_drag());
+                    let (sr, vr) = ui.allocate_exact_size(Vec2::new(100.0, bh()), Sense::click_and_drag());
                     let vr = vr
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .tip(format!("Volume {}%  (drag, or scroll over it)", (self.volume * 100.0).round()));

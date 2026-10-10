@@ -70,7 +70,7 @@ pub fn parse_time(t: &str) -> Option<f32> {
 
 fn knob_step(k: Knob) -> f32 {
     match k {
-        Knob::Focus | Knob::Speed | Knob::Shift => 5.0,
+        Knob::Focus | Knob::Shift => 5.0,
         Knob::LoopA | Knob::LoopB => 0.2,
         _ => 1.0,
     }
@@ -678,12 +678,15 @@ impl App {
             Msg::YtList(url, r) => {
                 self.yt_busy = false;
                 match r {
-                    Ok(list) => {
-                        self.yt_msg = format!("{} VIDEOS - RIGHT-CLICK ONE TO KEEP IT", list.len());
+                    Ok((name, list)) => {
+                        self.yt_msg.clear();
+                        self.yt_in.clear();
                         for e in &list {
                             self.register(&e.to_version());
                         }
                         self.yt_results = list;
+                        self.yt_title = name;
+                        self.yt_open = false;
                         self.yt_cur = Some(url);
                     }
                     Err(e) => {
@@ -1252,6 +1255,9 @@ impl App {
                         .iter()
                         .find(|(_, u)| *u == url)
                         .map(|(t, _)| t.clone())
+                        .or_else(|| {
+                            (self.yt_cur.as_ref() == Some(&url) && !self.yt_title.is_empty()).then(|| self.yt_title.clone())
+                        })
                         .unwrap_or_else(|| sources::list_name(&url));
                     self.store.lists.push(store::SavedList {
                         kind: (if kind == 0 { "sc" } else { "yt" }).to_string(),
@@ -1601,7 +1607,6 @@ impl App {
                 }
                 self.set_note(if self.focus_mode { "FOCUS: JUST THE PLAYER AND TOOLS" } else { "FULL LAYOUT" });
             }
-            Action::ToggleMore => self.more = !self.more,
             Action::Continue => {
                 let Some(l) = self.store.last.clone() else { return };
                 self.register(&l.version);
@@ -2144,7 +2149,7 @@ mod tests {
     #[test]
     fn knob_steps() {
         assert_eq!(knob_step(Knob::LoopA), 0.2);
-        assert_eq!(knob_step(Knob::Speed), 5.0);
+        assert_eq!(knob_step(Knob::Speed), 1.0);
     }
 }
 

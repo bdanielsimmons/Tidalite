@@ -127,6 +127,9 @@ pub fn draw(p: &egui::Painter, r: Rect, rows: &[&str], col: Color32) -> bool {
     } else if is(&IC_BACK) {
         pen.line(&[(0.86, 0.5), (0.16, 0.5)]);
         pen.line(&[(0.42, 0.24), (0.16, 0.5), (0.42, 0.76)]);
+    } else if is(&IC_FWD) {
+        pen.line(&[(0.14, 0.5), (0.84, 0.5)]);
+        pen.line(&[(0.58, 0.24), (0.84, 0.5), (0.58, 0.76)]);
     } else if is(&IC_SEARCH) {
         pen.circle(0.42, 0.42, 0.28);
         pen.line(&[(0.63, 0.63), (0.9, 0.9)]);

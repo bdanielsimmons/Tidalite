@@ -728,19 +728,27 @@ pub const EQ_FREQS: [f32; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0
 /// Gains (dB per band) and on/off switch, shared between the UI and the audio thread.
 pub struct EqShared {
     gains: Mutex<[f32; 10]>,
+    /// the preamp in dB (as f32 bits): a plain gain before the bands, as in Winamp
+    pre: AtomicU32,
     on: AtomicBool,
     version: AtomicU32,
 }
 
 impl EqShared {
     fn new() -> EqShared {
-        EqShared { gains: Mutex::new([0.0; 10]), on: AtomicBool::new(false), version: AtomicU32::new(1) }
+        EqShared {
+            gains: Mutex::new([0.0; 10]),
+            pre: AtomicU32::new(0f32.to_bits()),
+            on: AtomicBool::new(false),
+            version: AtomicU32::new(1),
+        }
     }
 
-    pub fn set(&self, gains: [f32; 10], on: bool) {
+    pub fn set(&self, gains: [f32; 10], pre: f32, on: bool) {
         if let Ok(mut g) = self.gains.lock() {
             *g = gains;
         }
+        self.pre.store(pre.to_bits(), Ordering::Relaxed);
         self.on.store(on, Ordering::Relaxed);
         self.version.fetch_add(1, Ordering::Relaxed);
     }
@@ -767,6 +775,8 @@ struct Equalizer<S: Source<Item = i16>> {
     ver: u32,
     enabled: bool,
     any: bool,
+    /// the preamp as a multiplier (1 = none)
+    pre_k: f32,
     tick: u32,
     idx: usize,
 }
@@ -786,6 +796,7 @@ impl<S: Source<Item = i16>> Equalizer<S> {
             ver: 0,
             enabled: false,
             any: false,
+            pre_k: 1.0,
             tick: 0,
             idx: 0,
         };
@@ -801,6 +812,8 @@ impl<S: Source<Item = i16>> Equalizer<S> {
         }
         self.ver = v;
         let gains = self.sh.gains.lock().map(|g| *g).unwrap_or([0.0; 10]);
+        let pre = f32::from_bits(self.sh.pre.load(Ordering::Relaxed));
+        self.pre_k = if pre.abs() > 0.05 { 10f32.powf(pre / 20.0) } else { 1.0 };
         for b in 0..10 {
             let f = EQ_FREQS[b];
             let g = gains[b];
@@ -820,7 +833,7 @@ impl<S: Source<Item = i16>> Equalizer<S> {
                 };
             }
         }
-        self.any = self.active.iter().any(|x| *x);
+        self.any = self.active.iter().any(|x| *x) || self.pre_k != 1.0;
     }
 }
 
@@ -839,7 +852,7 @@ impl<S: Source<Item = i16>> Iterator for Equalizer<S> {
         if !self.enabled || !self.any {
             return Some(s);
         }
-        let mut x = s as f32;
+        let mut x = s as f32 * self.pre_k;
         for b in 0..10 {
             if self.active[b] {
                 let k = self.coef[b];

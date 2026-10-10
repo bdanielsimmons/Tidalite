@@ -38,7 +38,7 @@ pub fn fetch() -> Result<PathBuf, String> {
     Ok(f)
 }
 
-/// Where the tour loops it: eight bars in the first chorus.
+/// Where the tour loops it: a short phrase of about six seconds.
 pub fn loop_span() -> (f32, f32) {
-    (32.0, 48.0)
+    (40.0, 46.0)
 }
