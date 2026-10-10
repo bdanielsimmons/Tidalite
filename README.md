@@ -7,6 +7,8 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- **v9.39:** Tempo and key for every track (from Tidal, or estimated from the audio), with Camelot codes for mixing
+- **v9.39:** Right-click any Tidal track: go to its album, its artist or its track radio
 - Library grouped into **MUSIC** (Tidal, SoundCloud, Files, YouTube, Lists) and **PRACTICE** (Tunes, Diary) tabs
 - **Fullscreen button** next to shuffle and repeat; leaving the album view leaves fullscreen too
 - Album view: song title and artist sit on a soft dark plate, readable over the visualizer
