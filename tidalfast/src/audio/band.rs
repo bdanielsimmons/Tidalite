@@ -309,6 +309,8 @@ struct Chord {
 }
 
 fn parse_chord(c: &str) -> Option<Chord> {
+    // typed changes may use iReal's short spelling (D-7, C^7, Bh7, Co7): read them like Dm7, Cmaj7...
+    let c = chart::pretty_chord(c);
     let mut it = c.split('/');
     let main = it.next()?;
     let (root_s, rest) = chart::split_root(main);
@@ -333,6 +335,8 @@ fn parse_chord(c: &str) -> Option<Chord> {
     };
     let seventh = if r.starts_with("dim") && r.contains('7') {
         Some(9)
+    } else if r.contains("69") {
+        Some(9) // a 6/9 chord has the sixth, not a flat seventh
     } else if r.contains("maj") || r.contains('^') || r.contains("ma7") {
         digits.then_some(11)
     } else if r.contains('7') || r.contains('9') || r.contains("11") || r.contains("13") {
@@ -638,4 +642,93 @@ pub fn detect_beats(bytes: Vec<u8>) -> Option<(f32, f32)> {
         p += 0.1;
     }
     Some((period / 200.0, phase / 200.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn notes(c: &str) -> (i32, i32, i32, Option<i32>, Option<i32>, i32) {
+        let ch = parse_chord(c).unwrap_or_else(|| panic!("{} did not parse", c));
+        (ch.root, ch.third, ch.fifth, ch.seventh, ch.ext, ch.bass)
+    }
+
+    #[test]
+    fn chord_spellings() {
+        // root, third, fifth, seventh, colour note, bass (semitones; root and bass as note numbers)
+        assert_eq!(notes("C"), (0, 4, 7, None, None, 0));
+        assert_eq!(notes("Dm7"), (2, 3, 7, Some(10), None, 2));
+        assert_eq!(notes("Cmaj7"), (0, 4, 7, Some(11), None, 0));
+        assert_eq!(notes("Bm7b5"), (11, 3, 6, Some(10), None, 11));
+        assert_eq!(notes("Cdim7"), (0, 3, 6, Some(9), None, 0));
+        assert_eq!(notes("Csus4"), (0, 5, 7, None, None, 0));
+        assert_eq!(notes("Caug"), (0, 4, 8, None, None, 0));
+        assert_eq!(notes("G7b9"), (7, 4, 7, Some(10), Some(13), 7));
+        assert_eq!(notes("F7#11"), (5, 4, 7, Some(10), Some(18), 5));
+        assert_eq!(notes("Cm6"), (0, 3, 7, Some(9), None, 0));
+        assert_eq!(notes("C/E"), (0, 4, 7, None, None, 4));
+        assert!(parse_chord("N.C.").is_none());
+    }
+
+    #[test]
+    fn six_nine_has_no_flat_seven() {
+        assert_eq!(notes("C69"), (0, 4, 7, Some(9), Some(14), 0));
+    }
+
+    #[test]
+    fn typed_ireal_spellings() {
+        assert_eq!(notes("D-7"), notes("Dm7"));
+        assert_eq!(notes("C^7"), notes("Cmaj7"));
+        assert_eq!(notes("Bh7"), notes("Bm7b5"));
+        assert_eq!(notes("Co7"), notes("Cdim7"));
+        assert_eq!(notes("Eb-7/Db"), (3, 3, 7, Some(10), None, 1));
+    }
+
+    #[test]
+    fn voicings_sit_in_the_middle() {
+        for c in ["C", "Dm7", "G7b9", "Cmaj7", "F#m7b5"] {
+            let v = parse_chord(c).unwrap().voicing();
+            assert!(v.iter().all(|m| (55..67).contains(m)), "{} -> {:?}", c, v);
+            assert!(v.windows(2).all(|w| w[0] < w[1]), "sorted, no doubles");
+        }
+        assert_eq!(bass_midi(0), 36);
+        assert!((28..40).contains(&bass_midi(11)));
+    }
+
+    #[test]
+    fn beat_groupings() {
+        assert!(groupings(7).contains(&vec![3, 4]) || groupings(7).contains(&vec![2, 2, 3]));
+        for n in 2..=32 {
+            let g = groupings(n);
+            assert!(!g.is_empty(), "{}", n);
+            for cand in &g {
+                assert_eq!(cand.iter().sum::<u32>(), n, "{:?}", cand);
+                assert!(cand.iter().all(|x| (2..=5).contains(x)), "{} -> {:?}", n, cand);
+            }
+        }
+        assert!(groupings(1).is_empty());
+    }
+
+    #[test]
+    fn metronome_bar_length() {
+        let m = Metro::default();
+        // one 4/4 bar at 120 = 2 seconds
+        let v = click_loop(&m, 120.0);
+        assert!((v.len() as f32 - 2.0 * RATE).abs() < 2.0, "{}", v.len());
+        // 7/8 at 120 (quarter-note bpm): 7 eighths = 1.75 s
+        let m8 = Metro { beats: 7, unit: 8, ..Metro::default() };
+        assert!((click_loop(&m8, 120.0).len() as f32 - 1.75 * RATE).abs() < 2.0);
+        // play 2 bars, rest 1: three bars long
+        let gap = Metro { gap_play: 2, gap_mute: 1, ..Metro::default() };
+        assert!((click_loop(&gap, 120.0).len() as f32 - 6.0 * RATE).abs() < 2.0);
+        assert!(count_in(3, 60.0).len() as f32 > 2.9 * RATE);
+    }
+
+    #[test]
+    fn swing_moves_only_the_offbeat() {
+        assert_eq!(swing(2.0, true), 2.0);
+        assert!((swing(2.5, true) - 2.667).abs() < 0.001);
+        assert_eq!(swing(2.5, false), 2.5);
+        assert!((freq(69) - 440.0).abs() < 0.01 && (freq(57) - 220.0).abs() < 0.01);
+    }
 }

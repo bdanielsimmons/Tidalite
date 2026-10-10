@@ -2010,3 +2010,44 @@ impl App {
         s.yt.iter().chain(&s.sc).chain(&s.files).chain(&s.hearts).find(|e| e.id == id).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_times() {
+        assert_eq!(parse_time("1:23.5"), Some(83.5));
+        assert_eq!(parse_time("83"), Some(83.0));
+        assert_eq!(parse_time(" 0:05 "), Some(5.0));
+        // the box shows its label ("A 1:23.4"): typing over it must not break
+        assert_eq!(parse_time("A 13.3"), Some(13.3));
+        assert_eq!(parse_time("B 2:05"), Some(125.0));
+        assert_eq!(parse_time("13.3"), Some(13.3), "13.3 stays 13.3 (it used to land on 13.4)");
+        for bad in ["", "abc", "-5", "1:xx", ":"] {
+            assert_eq!(parse_time(bad), None, "{:?}", bad);
+        }
+    }
+
+    #[test]
+    fn tune_names() {
+        assert_eq!(tune_name_from("Cherokee (Remastered 2005)"), "Cherokee");
+        assert_eq!(tune_name_from("Giant Steps - Alternate Take"), "Giant Steps");
+        assert_eq!(tune_name_from("So What [Live]"), "So What");
+        assert_eq!(tune_name_from("  Autumn Leaves  "), "Autumn Leaves");
+        assert_eq!(tune_name_from("(Untitled)"), "(Untitled)", "never empty");
+    }
+
+    #[test]
+    fn file_names_are_safe() {
+        assert_eq!(safe_name("AC/DC: Back in Black?"), "AC_DC_ Back in Black_");
+        assert_eq!(safe_name(" a<b>c|d*e \"f\" "), "a_b_c_d_e _f_");
+        assert_eq!(safe_name("ok - name (1s-2s).wav"), "ok - name (1s-2s).wav");
+    }
+
+    #[test]
+    fn knob_steps() {
+        assert_eq!(knob_step(Knob::LoopA), 0.2);
+        assert_eq!(knob_step(Knob::Speed), 5.0);
+    }
+}

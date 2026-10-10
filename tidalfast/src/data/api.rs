@@ -132,6 +132,8 @@ pub struct Page {
     pub rows_first: bool,
     /// The "Your Library" page (shown with MY TRACKS / LISTS / ALBUMS / ARTISTS tabs).
     pub library: bool,
+    /// an artist's page: the picture is shown round
+    pub artist: bool,
     /// Total number of liked songs on Tidal (only set on the library page).
     pub total: usize,
 }
@@ -344,13 +346,15 @@ fn parse_card(v: &Value) -> Option<Card> {
         });
     }
 
-    if v["picture"].is_string() && v["name"].is_string() && v["id"].is_number() {
+    // artists have a name (everything else has a title); many have no photo, only a stand-in album cover
+    if v["name"].is_string() && v["id"].is_number() && v.get("title").is_none() {
+        let pic = v["picture"].as_str().or_else(|| v["selectedAlbumCoverFallback"].as_str()).unwrap_or("");
         return Some(Card {
             kind: Kind::Artist,
             id: v["id"].as_i64()?.to_string(),
             title: s("name"),
             subtitle: "Artist".to_string(),
-            image: image_url(v["picture"].as_str().unwrap_or(""), 320, 320),
+            image: image_url(pic, 320, 320),
         });
     }
     None
@@ -1026,10 +1030,13 @@ impl Api {
                 p.tracks = tracks_from(&items);
             }
             Kind::Artist => {
-                // reached from a track (go to artist), there is no picture yet: ask for the artist itself
+                p.artist = true;
+                // reached from a track (go to artist), there is no picture yet: ask for the artist itself;
+                // an artist without a photo has a stand-in album cover
                 if p.image.is_empty() {
                     if let Ok(a) = self.get(&format!("/artists/{}", c.id), &[]) {
-                        p.image = image_url(a["picture"].as_str().unwrap_or(""), 320, 320);
+                        let pic = a["picture"].as_str().or_else(|| a["selectedAlbumCoverFallback"].as_str()).unwrap_or("");
+                        p.image = image_url(pic, 320, 320);
                         if let Some(name) = a["name"].as_str() {
                             p.title = name.to_string();
                         }
@@ -1039,8 +1046,23 @@ impl Api {
                 p.tracks = tracks_from(arr(&v["items"]));
                 if let Ok(a) = self.get(&format!("/artists/{}/albums", c.id), &[("limit", "30")]) {
                     let cards = cards_from(arr(&a["items"]));
+                    if p.image.is_empty() {
+                        // still no picture: their newest album will do
+                        p.image = cards.first().map(|c| c.image.clone()).unwrap_or_default();
+                    }
                     if !cards.is_empty() {
                         p.rows.push(("Albums".to_string(), cards));
+                    }
+                }
+                // a featured credit often points at a second, empty profile of the same artist: use the real one
+                if p.tracks.is_empty() && p.rows.is_empty() {
+                    if let Some(main) = self.same_name_artist(&p.title, &c.id) {
+                        return self.open(&main);
+                    }
+                }
+                if p.image.is_empty() {
+                    if let Some(main) = self.same_name_artist(&p.title, &c.id) {
+                        p.image = main.image;
                     }
                 }
             }
@@ -1054,6 +1076,14 @@ impl Api {
             }
         }
         Ok(p)
+    }
+
+    /// Another artist profile with exactly this name and a picture (Tidal keeps duplicates for some credits).
+    fn same_name_artist(&self, name: &str, not_id: &str) -> Option<Card> {
+        let v = self.get("/search", &[("query", name), ("limit", "10"), ("types", "ARTISTS")]).ok()?;
+        cards_from(arr(&v["artists"]["items"]))
+            .into_iter()
+            .find(|a| a.kind == Kind::Artist && a.id != not_id && a.title.eq_ignore_ascii_case(name) && !a.image.is_empty())
     }
 
     /// The album, the artist or the radio of a track, from just its id (works for any Tidal track, saved ones too).
@@ -1272,5 +1302,20 @@ mod tests {
         assert!(ar.kind == Kind::Artist && ar.title == "Artist");
         // a track is not a card
         assert!(parse_card(&json!({"id": 11, "title": "t", "cover": "c", "album": {}})).is_none());
+    }
+
+    #[test]
+    fn artists_without_a_photo_still_count() {
+        // only a stand-in album cover: shown with that
+        let a = parse_card(&json!({"id": 12, "name": "No Photo", "picture": null, "selectedAlbumCoverFallback": "f-b"})).unwrap();
+        assert!(a.kind == Kind::Artist && a.title == "No Photo" && a.image.ends_with("f/b/320x320.jpg"));
+        // nothing at all: still listed (the record stands in for the picture)
+        let a = parse_card(&json!({"id": 13, "name": "Nobody Pictured"})).unwrap();
+        assert!(a.kind == Kind::Artist && a.image.is_empty());
+        // a photo wins over the stand-in
+        let a = parse_card(&json!({"id": 14, "name": "X", "picture": "p-1", "selectedAlbumCoverFallback": "f-b"})).unwrap();
+        assert!(a.image.ends_with("p/1/320x320.jpg"));
+        // albums and tracks have titles: never mistaken for artists
+        assert!(parse_card(&json!({"id": 15, "name": "n", "title": "t"})).map_or(true, |c| c.kind != Kind::Artist));
     }
 }

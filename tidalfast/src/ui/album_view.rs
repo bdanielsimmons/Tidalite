@@ -122,6 +122,12 @@ impl App {
             }
             None => {
                 p.add(egui::Shape::convex_polygon(cs.to_vec(), pal().ink2, Stroke::NONE));
+                // no cover (yet): the record, turning while it loads
+                let loading = !url.is_empty() && !self.images.failed(&url);
+                paint_record(&p, Rect::from_center_size(center, Vec2::splat(a)), loading.then(|| ui.input(|i| i.time) as f32));
+                if loading {
+                    ui.ctx().request_repaint();
+                }
             }
         }
 
@@ -286,6 +292,7 @@ impl App {
 
         // ---- buttons
         let row = Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.max.y - 52.0), Vec2::new(full.width() - 56.0, BTN_H));
+        tour::mark("ARTBTNS", row);
         let (gray, lyr, fs) = (self.art_gray, self.show_lyrics, self.fullscreen);
         let cur_t = self.cur_track();
         let liked_now = cur_t.as_ref().map(|t| self.liked.contains(&t.id)).unwrap_or(false);

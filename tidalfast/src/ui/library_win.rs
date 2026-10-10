@@ -306,7 +306,10 @@ impl App {
         ui.add_space(4.0);
 
         // which list: Tidal / my files / YouTube / tunes / diary
+        let tabs_top = ui.cursor().min.y;
         self.section_bar(ui, acts);
+        let lr = ui.min_rect();
+        tour::mark("TABS", Rect::from_min_max(Pos2::new(lr.min.x, tabs_top), Pos2::new(lr.max.x, ui.cursor().min.y)));
 
         // search row
         if !self.offline {
@@ -355,6 +358,7 @@ impl App {
                 "Skin: {}  (click for the next, right-click to pick one)",
                 SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]
             ));
+            tour::mark("SKIN", skin_btn.rect);
             if skin_btn.clicked() {
                 acts.push(Action::Skin);
             }
@@ -378,19 +382,18 @@ impl App {
             if sl_clicked {
                 acts.push(Action::Sleep);
             }
-            if PRACTICE
-                && icon_btn_w(ui, &IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 38.0)
-                    .tip("Focus timer: work in blocks with rests between")
-                    .clicked()
-            {
-                acts.push(Action::TimerPanel);
-            }
-            if PRACTICE
-                && icon_btn_w(ui, &IC_METRO, self.metro_open, ink, 38.0)
-                    .tip("Metronome with beats, subdivisions and a pendulum")
-                    .clicked()
-            {
-                acts.push(Action::MetroPanel);
+            if PRACTICE {
+                let tb = icon_btn_w(ui, &IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 38.0)
+                    .tip("Focus timer: work in blocks with rests between");
+                if tb.clicked() {
+                    acts.push(Action::TimerPanel);
+                }
+                let mb = icon_btn_w(ui, &IC_METRO, self.metro_open, ink, 38.0)
+                    .tip("Metronome with beats, subdivisions and a pendulum");
+                if mb.clicked() {
+                    acts.push(Action::MetroPanel);
+                }
+                tour::mark("TIMEBTNS", tb.rect.union(mb.rect));
             }
             ui.add_space(8.0);
             if icon_btn_w(ui, &IC_DISK, self.show_cache, ink, 38.0).tip("Where tracks are stored on this computer").clicked() {

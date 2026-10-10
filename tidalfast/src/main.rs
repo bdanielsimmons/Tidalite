@@ -76,7 +76,7 @@ use skin::*;
 use sources::Src;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1237,9 +1237,9 @@ fn fmt_time(s: f32) -> String {
 
 /// Time with tenths, for loop points: 1:23.4
 fn fmt_t(s: f32) -> String {
-    let s = s.max(0.0);
-    let m = (s / 60.0) as u32;
-    format!("{}:{:04.1}", m, s - m as f32 * 60.0)
+    // round to tenths first, so 59.96 shows as 1:00.0 and not 0:60.0
+    let tenths = (s.max(0.0) * 10.0).round() as u32;
+    format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
 }
 
 fn fmt_long(s: f32) -> String {
@@ -1326,6 +1326,11 @@ impl Images {
         None
     }
 
+    /// Tried and failed (or no picture at all): nothing is coming.
+    fn failed(&self, url: &str) -> bool {
+        matches!(self.map.get(url), Some((None, _)))
+    }
+
     /// Covers not drawn for two minutes are let go (a big one is ~1.6 MB), so long browsing doesn't keep growing.
     /// They load again if they come back on screen.
     fn trim(&mut self) {
@@ -1371,10 +1376,6 @@ fn spawn_image_pool(api: Api, tx: Sender<Msg>, ctx: egui::Context) -> Sender<Str
     req_tx
 }
 
-fn paint_art(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, round: f32) {
-    paint_art_g(ui, images, url, rect, round, false);
-}
-
 /// Texture for a cover, optionally the black-and-white version (falls back to colour while it loads).
 fn art_tex(images: &mut Images, url: &str, gray: bool) -> Option<egui::TextureId> {
     if gray {
@@ -1390,6 +1391,64 @@ fn paint_art_g(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, round:
     ui.painter().rect_filled(rect, Rounding::same(round), pal().ink2);
     if let Some(id) = art_tex(images, url, gray) {
         egui::Image::new(egui::load::SizedTexture::new(id, rect.size())).rounding(Rounding::same(round)).paint_at(ui, rect);
+    } else {
+        // no cover (yet): the record, turning while it loads
+        let loading = !url.is_empty() && !images.failed(url);
+        paint_record(ui.painter(), rect, loading.then(|| ui.input(|i| i.time) as f32));
+        if loading {
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
+/// A vinyl record with its tonearm: the stand-in for a picture that is loading (`spin` = seconds, it turns)
+/// or that does not exist (`None`, still).
+fn paint_record(p: &egui::Painter, rect: Rect, spin: Option<f32>) {
+    let c = rect.center();
+    let r = rect.width().min(rect.height()) * 0.42;
+    p.circle_filled(c, r, Color32::from_gray(18));
+    for k in 1..=5 {
+        p.circle_stroke(c, r * (0.48 + k as f32 * 0.095), Stroke::new(1.0_f32, Color32::from_gray(38)));
+    }
+    // a sheen sweeping round so the turning shows
+    let a = spin.unwrap_or(0.6) * 2.4;
+    for (da, alpha) in [(0.0f32, 46u8), (0.18, 28), (-0.18, 28)] {
+        let (s, co) = (a + da).sin_cos();
+        p.line_segment(
+            [c + Vec2::new(co, s) * r * 0.5, c + Vec2::new(co, s) * r * 0.96],
+            Stroke::new(2.0_f32, Color32::from_white_alpha(alpha)),
+        );
+    }
+    p.circle_filled(c, r * 0.36, pal().red);
+    let (s, co) = a.sin_cos();
+    p.line_segment(
+        [c + Vec2::new(co, s) * r * 0.12, c + Vec2::new(co, s) * r * 0.3],
+        Stroke::new(1.5_f32, Color32::from_white_alpha(120)),
+    );
+    p.circle_filled(c, r * 0.06, Color32::from_gray(10));
+    // tonearm: pivot top right, resting on the outer grooves
+    let pivot = Pos2::new(rect.max.x - rect.width() * 0.12, rect.min.y + rect.height() * 0.12);
+    let tip = c + Vec2::new(r * 0.52, r * 0.62);
+    p.line_segment([pivot, tip], Stroke::new(3.0_f32, pal().trim));
+    p.circle_filled(pivot, r * 0.12, pal().trim);
+    p.rect_filled(Rect::from_center_size(tip, Vec2::splat(r * 0.16)), Rounding::same(1.0), pal().trim);
+}
+
+/// A page's own picture, round for an artist; a spinning record while it loads, a still one when there is none.
+fn paint_page_art(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, artist: bool) {
+    match images.get(url) {
+        Some(id) => {
+            let round = if artist { rect.width() * 0.5 } else { 0.0 };
+            egui::Image::new(egui::load::SizedTexture::new(id, rect.size())).rounding(Rounding::same(round)).paint_at(ui, rect);
+            if artist {
+                ui.painter().circle_stroke(rect.center(), rect.width() * 0.5, Stroke::new(2.0_f32, pal().trim));
+            }
+        }
+        None if url.is_empty() || images.failed(url) => paint_record(ui.painter(), rect, None),
+        None => {
+            paint_record(ui.painter(), rect, Some(ui.input(|i| i.time) as f32));
+            ui.ctx().request_repaint();
+        }
     }
 }
 
@@ -1415,9 +1474,13 @@ fn table_header(ui: &mut egui::Ui, left: &str, mid: &str, last: &str, numbered: 
 /// (name is always shown).
 static COLS: AtomicU32 = AtomicU32::new(0b1101);
 const COL_NAMES: [&str; 4] = ["ARTIST", "ALBUM", "LENGTH", "KEY / BPM"];
-/// width of the KEY / BPM slot, just left of LENGTH; the BPM sits `KB_GAP` in
-const KB_W: f32 = 104.0;
-const KB_GAP: f32 = 52.0;
+/// width of the KEY / BPM slot, just left of LENGTH; the BPM sits `KB_GAP` in (room for "C#m?")
+const KB_W: f32 = 120.0;
+const KB_GAP: f32 = 64.0;
+/// how the NAME, ARTIST and ALBUM columns share the room (drag the lines between them in the header)
+static COL_W: Mutex<[f32; 3]> = Mutex::new([0.4, 0.3, 0.3]);
+/// the columns were changed (shown, hidden or resized): the settings need saving
+static COLS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// Room kept on the right of a row for LENGTH (and KEY / BPM when shown).
 fn right_w() -> f32 {
@@ -1430,13 +1493,14 @@ fn col_on(i: usize) -> bool {
 
 /// Widths of the NAME, ARTIST and ALBUM cells inside `avail` (0 for hidden ones).
 fn col_widths(avail: f32) -> [f32; 3] {
-    let (a, b) = (col_on(0), col_on(1));
-    match (a, b) {
-        (false, false) => [avail, 0.0, 0.0],
-        (true, false) => [avail * 0.58, avail * 0.42, 0.0],
-        (false, true) => [avail * 0.58, 0.0, avail * 0.42],
-        (true, true) => [avail * 0.4, avail * 0.3, avail * 0.3],
+    let w = *COL_W.lock().unwrap();
+    let on = [true, col_on(0), col_on(1)];
+    let sum: f32 = (0..3).filter(|&i| on[i]).map(|i| w[i]).sum();
+    let mut out = [0.0; 3];
+    for i in (0..3).filter(|&i| on[i]) {
+        out[i] = avail * w[i] / sum.max(1e-6);
     }
+    out
 }
 
 /// Header row over a track list; right-click it to choose the columns.
@@ -1466,11 +1530,34 @@ fn col_header(ui: &mut egui::Ui, numbered: bool) {
     if col_on(2) {
         ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, "LENGTH", 2.0, pal().trim);
     }
+    // drag the line between two columns to share the room differently
+    let vis: Vec<usize> = (0..3).filter(|&i| cw[i] > 0.0).collect();
+    let mut bx = tx;
+    for k in 0..vis.len().saturating_sub(1) {
+        bx += cw[vis[k]];
+        let hit = Rect::from_center_size(Pos2::new(bx - 6.0, cy), Vec2::new(12.0, rect.height()));
+        let r =
+            ui.interact(hit, ui.id().with(("col_split", k)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        if r.hovered() || r.dragged() {
+            fill_rect(ui.painter(), Rect::from_center_size(hit.center(), Vec2::new(2.0, rect.height() - 4.0)), pal().trim);
+        }
+        if r.dragged() {
+            let mut w = COL_W.lock().unwrap();
+            let (a, b) = (vis[k], vis[k + 1]);
+            let sum: f32 = vis.iter().map(|&i| w[i]).sum();
+            let min = 0.1 * sum;
+            let d = (r.drag_delta().x / avail * sum).clamp(min - w[a], w[b] - min);
+            w[a] += d;
+            w[b] -= d;
+            COLS_CHANGED.store(true, Ordering::Relaxed);
+        }
+    }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).tip("Right-click to choose columns").context_menu(|ui| {
         for (i, name) in COL_NAMES.iter().enumerate() {
             let mark = if col_on(i) { "[x] " } else { "[ ] " };
             if menu_item(ui, &format!("{}{}", mark, name)) {
                 COLS.fetch_xor(1 << i, Ordering::Relaxed);
+                COLS_CHANGED.store(true, Ordering::Relaxed);
             }
         }
     });
@@ -1664,8 +1751,10 @@ fn page_view(
     if has_header {
         ui.horizontal(|ui| {
             let (cr, _) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::hover());
-            inset(ui.painter(), cr, pal().edge);
-            paint_art(ui, images, &page.image, cr.shrink(2.0), 0.0);
+            if !page.artist {
+                inset(ui.painter(), cr, pal().edge);
+            }
+            paint_page_art(ui, images, &page.image, cr.shrink(2.0), page.artist);
             ui.vertical(|ui| {
                 title_line(ui, &page.title, 3.0, pal().ink);
                 title_line(ui, &page.subtitle, 2.0, pal().ink2);
@@ -1852,6 +1941,8 @@ struct App {
     bind_note: String,
     /// the running tour: (0 general / 1 practice, step)
     tour: Option<(u8, usize)>,
+    /// what was showing when the tour began (album view, practice mode, MORE and its tab), put back after
+    tour_restore: Option<(bool, bool, bool, u8)>,
     tour_seen: bool,
     help_tab: usize,
     /// (track id, cents from A440, confidence) from the tuning check
@@ -2148,6 +2239,7 @@ impl App {
             rebinding: None,
             bind_note: String::new(),
             tour: None,
+            tour_restore: None,
             tour_seen: false,
             help_tab: 0,
             tuning: None,
@@ -2342,6 +2434,12 @@ impl App {
             let new = if st["cols_v"].as_u64().unwrap_or(1) < 2 { 0b1000 } else { 0 };
             COLS.store(c as u32 | new, Ordering::Relaxed);
         }
+        if let Some(w) = st["col_w"].as_array() {
+            let w: Vec<f32> = w.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect();
+            if w.len() == 3 && w.iter().all(|x| *x > 0.01) {
+                *COL_W.lock().unwrap() = [w[0], w[1], w[2]];
+            }
+        }
         if let Some(b) = st["pomo_sound"].as_bool() {
             app.pomo_sound = b;
         }
@@ -2411,6 +2509,7 @@ impl App {
             "pomo_sound": self.pomo_sound,
             "cols": COLS.load(Ordering::Relaxed),
             "cols_v": 2,
+            "col_w": *COL_W.lock().unwrap(),
             "loops": self.loops.iter().map(|(k, v)| (k.to_string(), serde_json::json!([v.0, v.1]))).collect::<serde_json::Map<String, serde_json::Value>>(),
         });
         let dir = api::config_dir();
@@ -3579,6 +3678,9 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.last_title = title;
         }
+        if COLS_CHANGED.swap(false, Ordering::Relaxed) {
+            self.dirty = true;
+        }
         if self.dirty && self.last_save.elapsed() > Duration::from_secs(1) {
             self.save_settings();
         }
@@ -3884,4 +3986,97 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native("Tidalite", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(id: i64) -> Track {
+        Track { id, title: format!("t{}", id), ..Default::default() }
+    }
+
+    #[test]
+    fn times() {
+        assert_eq!(fmt_time(0.0), "0:00");
+        assert_eq!(fmt_time(83.9), "1:23");
+        assert_eq!(fmt_time(-5.0), "0:00");
+        assert_eq!(fmt_t(83.44), "1:23.4");
+        assert_eq!(fmt_t(5.0), "0:05.0");
+        assert_eq!(fmt_t(59.96), "1:00.0", "tenths round up into the next minute");
+        assert_eq!(fmt_t(-1.0), "0:00.0");
+        assert_eq!(fmt_long(59.0), "0:59");
+        assert_eq!(fmt_long(3725.0), "1:02:05");
+        // what fmt_t shows, the loop-time box reads back
+        for s in [0.0, 1.5, 59.9, 83.4, 600.1] {
+            assert!((crate::extras::parse_time(&fmt_t(s)).unwrap() - s).abs() < 0.051, "{}", s);
+        }
+    }
+
+    #[test]
+    fn shuffle_keeps_the_chosen_track_first() {
+        let list: Vec<Track> = (1..=20).map(track).collect();
+        for first in [0, 7, 19, 99] {
+            let s = shuffled_from(&list, first);
+            assert_eq!(s.len(), 20);
+            assert_eq!(s[0].id, list[first.min(19)].id);
+            let mut ids: Vec<i64> = s.iter().map(|t| t.id).collect();
+            ids.sort();
+            assert_eq!(ids, (1..=20).collect::<Vec<_>>(), "every track exactly once");
+        }
+        assert!(shuffled_from(&[], 0).is_empty());
+    }
+
+    #[test]
+    fn lcd_digits() {
+        // segments a-g; an 8 lights them all, a 1 only the right side
+        assert_eq!(seg_mask(8), [1; 7]);
+        assert_eq!(seg_mask(1), [0, 1, 1, 0, 0, 0, 0]);
+        let lit: Vec<usize> = (0..10).map(|d| seg_mask(d).iter().filter(|&&s| s == 1).count()).collect();
+        assert_eq!(lit, vec![6, 2, 5, 5, 4, 5, 6, 3, 7, 6]);
+    }
+
+    #[test]
+    fn tone_strength() {
+        let rate = 8000.0;
+        let x: Vec<f32> = (0..4000).map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / rate).sin()).collect();
+        assert!((goertzel(&x, 440.0, rate) - 1.0).abs() < 0.05, "a full-scale 440 Hz tone reads about 1");
+        assert!(goertzel(&x, 1000.0, rate) < 0.05, "and nothing at 1 kHz");
+    }
+
+    #[test]
+    fn column_widths_fill_the_space() {
+        let saved = COLS.load(Ordering::Relaxed);
+        for bits in [0b0000, 0b0001, 0b0010, 0b0011] {
+            COLS.store(bits, Ordering::Relaxed);
+            let w = col_widths(600.0);
+            assert!((w.iter().sum::<f32>() - 600.0).abs() < 0.01, "{:b}", bits);
+            assert_eq!(w[1] > 0.0, bits & 1 == 1);
+            assert_eq!(w[2] > 0.0, bits & 2 == 2);
+        }
+        COLS.store(0b1000, Ordering::Relaxed);
+        assert_eq!(right_w(), 80.0 + KB_W, "room for KEY / BPM when shown");
+        COLS.store(saved, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn links_to_share() {
+        assert_eq!(track_link(&track(42), None).as_deref(), Some("https://tidal.com/browse/track/42"));
+        let yt = store::Ext { kind: "yt".into(), src: "dQw4w9WgXcQ".into(), ..Default::default() };
+        assert_eq!(track_link(&track(-1), Some(&yt)).as_deref(), Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+        let sc = store::Ext { kind: "yt".into(), src: "https://soundcloud.com/a/b".into(), ..Default::default() };
+        assert_eq!(track_link(&track(-2), Some(&sc)).as_deref(), Some("https://soundcloud.com/a/b"));
+        let file = store::Ext { kind: "file".into(), src: "C:/a.mp3".into(), ..Default::default() };
+        assert_eq!(track_link(&track(-3), Some(&file)), None);
+        assert_eq!(track_link(&track(-4), None), None);
+    }
+
+    #[test]
+    fn key_and_tempo_cell() {
+        meta::from_tidal(888001, Some(120), Some(12 + 9));
+        assert!(track_cells(888001, "T", "A", "B").ends_with("\tAm|120"));
+        meta::set_detected(888002, meta::Info { bpm: Some(95), key: Some(0), tidal: false });
+        assert!(track_cells(888002, "T", "A", "B").ends_with("\tC?|95"), "detected keys carry a ?");
+        assert!(track_cells(888003, "T", "A", "").ends_with("\t|"), "unknown: empty cell");
+    }
 }

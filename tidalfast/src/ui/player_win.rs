@@ -50,6 +50,9 @@ impl App {
             if chip(ui, r_mini, if self.mini { "FULL" } else { "MINI" }, self.mini, "c_mini").clicked() {
                 acts.push(Action::ToggleMini);
             }
+            if PRACTICE {
+                tour::mark("CHIP", r_prac.union(r_lis));
+            }
             if PRACTICE
                 && chip(ui, r_prac, "PRACTICE", self.practice, "c_prac")
                     .tip("Transcribing: loop a section, slow it down")
@@ -195,6 +198,7 @@ impl App {
 
         // ---- cover art
         let cv = rc(258.0, 34.0, 36.0, 36.0);
+        tour::mark("COVER", cv);
         inset(p, cv, pal().edge);
         if let Some(t) = &track {
             if !t.cover.is_empty() {
@@ -352,6 +356,7 @@ impl App {
 
         // ---- shuffle / repeat: icons, the names show on hover
         let sh = rc(136.0, 102.0, 36.0, 16.0);
+        tour::mark("SHUFFLE", sh.union(rc(220.0, 102.0, 36.0, 16.0)));
         let shr = ui
             .interact(sh, ui.id().with("shuf"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)

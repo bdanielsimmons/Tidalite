@@ -1657,7 +1657,12 @@ impl App {
         }
         ui.add_space(2.0);
 
-        // ---- A / B
+        // ---- A / B  (each block reports where it is, for the practice tour)
+        let row_mark = |ui: &egui::Ui, key: &str, top: f32| {
+            let r = ui.min_rect();
+            crate::tour::mark(key, Rect::from_min_max(Pos2::new(r.min.x, top), Pos2::new(r.max.x, ui.cursor().min.y)));
+        };
+        let ab_top = ui.cursor().min.y;
         let a_txt = format!("A {}", self.loop_a.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()));
         let b_txt = format!("B {}", self.loop_b.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()));
         ui.horizontal_wrapped(|ui| {
@@ -1710,6 +1715,8 @@ impl App {
                 acts.push(Action::ToggleMore);
             }
         });
+        row_mark(ui, "LOOPROW", ab_top);
+        let speed_top = ui.cursor().min.y;
         ui.horizontal_wrapped(|ui| {
             label(ui, "SPEED", 64.0);
             for pct in [50u32, 70, 85, 100] {
@@ -1728,6 +1735,8 @@ impl App {
                 "Slower / faster (Down / Up keys) - or type a percent",
             );
         });
+
+        row_mark(ui, "SPEEDROW", speed_top);
 
         // ---- saved loops for this track
         ui.horizontal_wrapped(|ui| {
@@ -1777,6 +1786,10 @@ impl App {
 
         // ---- MORE: grouped in tabs
         if self.more {
+            // where the MORE panel was last drawn, for the practice tour
+            if let Some(s) = egui::AreaState::load(ui.ctx(), egui::Id::new("more_overlay")) {
+                crate::tour::mark("MOREBOX", s.rect());
+            }
             let more_pos = ui.cursor().min;
             let more_w = ui.available_width();
             egui::Area::new(egui::Id::new("more_overlay")).order(egui::Order::Foreground).fixed_pos(more_pos).show(
