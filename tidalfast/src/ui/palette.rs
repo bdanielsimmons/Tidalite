@@ -218,7 +218,8 @@ impl App {
         let events = ctx.input(|i| i.events.clone());
         for e in events {
             match e {
-                egui::Event::Text(s) if self.frames > self.palette_frame => {
+                // (not in the frame it opened, so the K of Ctrl+K stays out of the box)
+                egui::Event::Text(s) if self.palette_frame != self.frames => {
                     let s: String = s.chars().filter(|c| !c.is_control()).collect();
                     if !s.is_empty() {
                         self.palette_q.push_str(&s);
@@ -243,6 +244,8 @@ impl App {
                 _ => {}
             }
         }
+        // from now on typed text goes in (the frame counter does not advance every frame, so mark it used)
+        self.palette_frame = self.frames.wrapping_add(1);
         if !self.palette_open {
             return;
         }
