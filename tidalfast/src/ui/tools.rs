@@ -52,7 +52,11 @@ pub const F_CHORD: u32 = 52;
 pub const F_INFO_TITLE: u32 = 53;
 pub const F_INFO_ARTIST: u32 = 54;
 pub const F_CL_CHANGES: u32 = 55;
-pub const F_T_INFO: u32 = 56;
+pub const F_T_WRITER: u32 = 56;
+pub const F_T_YEAR: u32 = 59;
+pub const F_T_FROM: u32 = 60;
+pub const F_T_STYLE: u32 = 61;
+pub const F_PROG_NEW: u32 = 62;
 pub const F_INFO_KEY: u32 = 57;
 pub const F_INFO_BPM: u32 = 58;
 
@@ -539,9 +543,14 @@ impl App {
         let playing_title = self.cur_track().filter(|_| !self.stopped).map(|t| t.title.clone());
         // what is on show: a saved tune, or whatever is playing (looked up on its own)
         let (name, key, bpm, info, text, live) = match (ti, playing_title) {
+            // a practice progression from TUNES
+            _ if self.prac_chart.is_some() => {
+                let (title, chart) = self.prac_chart.clone().unwrap_or_default();
+                (title, String::new(), 0, "Practice progression".to_string(), chart, false)
+            }
             (Some(i), _) => {
                 let t = &self.store.tunes[i];
-                (t.name.clone(), t.key.clone(), t.bpm, t.info.clone(), t.chart.clone(), false)
+                (t.name.clone(), t.key.clone(), t.bpm, t.credit_line(), t.chart.clone(), false)
             }
             (None, Some(title)) => {
                 let q = chart::clean_title(&title);
@@ -620,6 +629,10 @@ impl App {
                     if retro_btn(ui, if busy { "LOOKING..." } else { "REFRESH" }, busy).tip("Look the chart up again").clicked() {
                         acts.push(Action::FindChart(i, None));
                     }
+                } else if self.prac_chart.is_some() {
+                    if retro_btn(ui, "CLOSE", false).tip("Back to the tune or the song playing").clicked() {
+                        self.prac_chart = None;
+                    }
                 } else {
                     if has && retro_btn(ui, "SAVE TO TUNES", false).tip("Keep this song as a tune, with its chart").clicked() {
                         acts.push(Action::SaveLive);
@@ -640,6 +653,14 @@ impl App {
                     .clicked()
                 {
                     acts.push(Action::Opt(Opt::Band));
+                }
+                if let Some((a, b)) = self.chart_sel {
+                    if retro_btn(ui, &format!("LOOPING BARS {}-{}  X", a + 1, b + 1), true)
+                        .tip("Drag across bars to loop part of the tune; click to play the whole tune again")
+                        .clicked()
+                    {
+                        self.chart_sel = None;
+                    }
                 }
                 if let Some(i) =
                     dropdown(ui, "band_style", "STYLE", &band::STYLES, self.band_style as usize % band::STYLES.len(), 120.0)
@@ -772,19 +793,21 @@ impl App {
 
     /// The bars of the chart: repeat signs, endings, coda marks, numerals and the band's position.
     fn chart_grid(&mut self, ui: &mut egui::Ui, chart: &chart::Chart, key: &str, ti: Option<usize>) {
+        if self.chart_drag.is_some() && !ui.input(|i| i.pointer.primary_down()) {
+            self.chart_drag = None;
+        }
+        if self.chart_sel.is_some_and(|(_, b)| b >= chart.bars.len()) {
+            self.chart_sel = None;
+        }
         let mut req: Option<(usize, String)> = None;
         let tr = self.chart_tr;
         let tonic = if self.chart_rn { chart::tonic(key, chart) } else { None };
         // which bar the band is on, and which beat
         let (now_bar, now_beat) = if self.band_on {
             ui.ctx().request_repaint();
-            let t = self.band_t0.elapsed().as_secs_f32() - self.band_lead;
-            if t < 0.0 || self.band_order.is_empty() {
-                (None, 0)
-            } else {
-                let b = t / self.band_bar.max(0.1);
-                let k = b.floor() as usize % self.band_order.len();
-                (self.band_order.get(k).copied(), (b.fract() * chart.beats as f32) as usize)
+            match self.band_where() {
+                Some((k, beat)) => (self.band_order.get(k).copied(), beat as usize),
+                None => (None, 0),
             }
         } else {
             (None, 0)
@@ -800,7 +823,8 @@ impl App {
             }
             in_end[i] = open;
         }
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        // dragging across bars picks them, so it must not scroll the sheet
+        egui::ScrollArea::vertical().auto_shrink([false, false]).drag_to_scroll(false).show(ui, |ui| {
             ui.add_space(4.0);
             let w = ui.available_width() - 6.0;
             let per: usize = if w >= 760.0 { 8 } else { 4 };
@@ -818,11 +842,29 @@ impl App {
                         Rect::from_min_size(Pos2::new(rr.min.x + ci as f32 * (cw + gap), rr.min.y + 4.0), Vec2::new(cw, ch));
                     let p = ui.painter();
                     let now = now_bar == Some(idx);
+                    let picked = self.chart_sel.is_some_and(|(a, b)| a <= idx && idx <= b);
                     inset(p, cell, if now { pal().sel } else { pal().lcd });
+                    if picked {
+                        p.rect_filled(cell.shrink(2.0), 2.0, pal().bar_txt.gamma_multiply(0.18));
+                        outline(p, cell, 1.0, pal().bar_txt);
+                    }
+                    // drag across bars to loop just those (as in iReal Pro)
+                    // one response for both: a click edits the bar, a drag picks bars
+                    let drag = ui.interact(cell, ui.id().with(("bar", idx)), Sense::click_and_drag());
+                    if drag.drag_started() {
+                        self.chart_drag = Some(idx);
+                    }
+                    if let Some(start) = self.chart_drag {
+                        let over = ui.input(|i| i.pointer.interact_pos()).is_some_and(|pos| cell.contains(pos));
+                        if over && ui.input(|i| i.pointer.primary_down()) {
+                            let sel = (start.min(idx), start.max(idx));
+                            if self.chart_sel != Some(sel) {
+                                self.chart_sel = Some(sel);
+                            }
+                        }
+                    }
                     if ti.is_some() {
-                        let rsp = ui
-                            .interact(cell, ui.id().with(("bar", idx)), Sense::click())
-                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let rsp = drag.clone().on_hover_cursor(egui::CursorIcon::PointingHand);
                         if rsp.clicked() {
                             self.bar_edit = Some((idx, bar.chords.join(" ")));
                             self.ed.id = F_BAR;
@@ -882,6 +924,14 @@ impl App {
                         for dy in [ch * 0.38, ch * 0.62] {
                             fill_rect(p, Rect::from_min_size(Pos2::new(dx, cell.min.y + dy), Vec2::splat(3.0)), pal().ink);
                         }
+                    }
+                    // a change of meter: the time signature, stacked the way it is printed
+                    if !bar.time.is_empty() {
+                        let (num, den) = chart::meter(&bar.time);
+                        let x = cell.min.x + if bar.start_rep { 22.0 } else { 9.0 };
+                        let y = cell.center().y;
+                        ptext(p, Pos2::new(x, y - 7.0), Align::Center, &num.to_string(), 1.5, pal().ink);
+                        ptext(p, Pos2::new(x, y + 7.0), Align::Center, &den.to_string(), 1.5, pal().ink);
                     }
                     let mut top = 0.0;
                     if !bar.label.is_empty() {
@@ -948,7 +998,7 @@ impl App {
                     if now {
                         outline(p, cell, 2.0, pal().red);
                         // beat pips along the bottom
-                        for b in 0..chart.beats as usize {
+                        for b in 0..chart.bar_len(idx).ceil() as usize {
                             let r = Rect::from_min_size(
                                 Pos2::new(cell.min.x + 12.0 + b as f32 * 8.0, cell.max.y - 8.0),
                                 Vec2::splat(4.0),

@@ -595,8 +595,19 @@ fn urlenc(s: &str) -> String {
     o
 }
 
-/// Who wrote a tune, from MusicBrainz (free, no key). Only called when you ask for it.
-pub fn lookup_composer(name: &str) -> Result<String, String> {
+/// What MusicBrainz knows about a tune: its title, who wrote it, and the year.
+#[derive(Clone, Default, Debug)]
+pub struct Work {
+    pub title: String,
+    /// "Cole Porter" or "Jerome Kern, Oscar Hammerstein II (words)"; empty when none is listed
+    pub writers: String,
+    pub year: String,
+}
+
+/// Who wrote a tune and when, from MusicBrainz (free, no key). With `artist` (someone who recorded it) the song is
+/// found through that recording, so a title other songs share still finds the right one. The year is the one given
+/// for the writing, else that recording's, else the earliest release of a recording with exactly this title.
+pub fn lookup_work(name: &str, artist: Option<&str>) -> Result<Work, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .user_agent("Tidalite/0.7 (personal practice app)")
@@ -612,36 +623,101 @@ pub fn lookup_composer(name: &str) -> Result<String, String> {
             .json::<serde_json::Value>()
             .map_err(|e| e.to_string())
     };
-    let q = format!("work:\"{}\"", name);
-    let v = get(format!("https://musicbrainz.org/ws/2/work/?query={}&fmt=json&limit=5", urlenc(&q)))?;
-    let works = v["works"].as_array().cloned().unwrap_or_default();
     let want = name.to_lowercase();
-    let pick = works
-        .iter()
-        .find(|w| w["title"].as_str().map(|t| t.to_lowercase() == want).unwrap_or(false))
-        .or_else(|| works.first())
-        .ok_or_else(|| "no work found".to_string())?;
-    let id = pick["id"].as_str().ok_or_else(|| "no work id".to_string())?.to_string();
-    std::thread::sleep(Duration::from_millis(1100)); // MusicBrainz asks for at most one request per second
+    let pause = || std::thread::sleep(Duration::from_millis(1100)); // MusicBrainz asks for one request a second
+                                                                    // through a recording by someone who played it: that recording's song
+    let mut via: Option<(String, String)> = None; // (work id, the recording's year)
+    let mut found_rec: Option<String> = None; // the recording was found, with this year, but names no song
+    if let Some(a) = artist.filter(|a| !a.trim().is_empty()) {
+        let q = format!("recording:\"{}\" AND artist:\"{}\"", name, a.trim());
+        let v = get(format!("https://musicbrainz.org/ws/2/recording/?query={}&fmt=json&limit=10", urlenc(&q)))?;
+        let recs = v["recordings"].as_array().cloned().unwrap_or_default();
+        let same: Vec<&serde_json::Value> =
+            recs.iter().filter(|r| r["title"].as_str().is_some_and(|t| t.to_lowercase() == want)).collect();
+        // the year of their earliest release of it (later ones are reissues and compilations)
+        let year = same
+            .iter()
+            .filter_map(|r| r["first-release-date"].as_str().filter(|d| d.len() >= 4).map(|d| d[..4].to_string()))
+            .min()
+            .unwrap_or_default();
+        if let Some(r) = same.first() {
+            if let Some(rid) = r["id"].as_str() {
+                pause();
+                let rv = get(format!("https://musicbrainz.org/ws/2/recording/{}?inc=work-rels&fmt=json", rid))?;
+                let work = rv["relations"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find_map(|x| x["work"]["id"].as_str().map(String::from));
+                match work {
+                    Some(w) => via = Some((w, year)),
+                    None => found_rec = Some(year),
+                }
+            }
+        }
+        pause();
+    }
+    // their recording is there but not linked to a song: better no writer than another song's
+    if let (None, Some(year)) = (&via, found_rec) {
+        return Ok(Work { title: name.to_string(), writers: String::new(), year });
+    }
+    let (id, rec_year) = match via {
+        Some(v) => v,
+        None => {
+            let q = format!("work:\"{}\"", name);
+            let v = get(format!("https://musicbrainz.org/ws/2/work/?query={}&fmt=json&limit=5", urlenc(&q)))?;
+            let works = v["works"].as_array().cloned().unwrap_or_default();
+            let pick = works
+                .iter()
+                .find(|w| w["title"].as_str().map(|t| t.to_lowercase() == want).unwrap_or(false))
+                .ok_or_else(|| "no song with that title".to_string())?;
+            (pick["id"].as_str().ok_or_else(|| "no work id".to_string())?.to_string(), String::new())
+        }
+    };
+    pause();
     let w = get(format!("https://musicbrainz.org/ws/2/work/{}?inc=artist-rels&fmt=json", id))?;
     let mut writers: Vec<String> = Vec::new();
+    let mut years: Vec<String> = Vec::new();
     for r in w["relations"].as_array().cloned().unwrap_or_default() {
         let t = r["type"].as_str().unwrap_or("");
         if t == "composer" || t == "writer" || t == "lyricist" {
             if let Some(n) = r["artist"]["name"].as_str() {
+                // someone who wrote the music and the words is named once
                 let tag = if t == "lyricist" { format!("{} (words)", n) } else { n.to_string() };
-                if !writers.contains(&tag) {
+                let music_too = t == "lyricist" && writers.iter().any(|w| w == n);
+                if !writers.contains(&tag) && !music_too {
+                    if t != "lyricist" {
+                        writers.retain(|w| *w != format!("{} (words)", n));
+                    }
                     writers.push(tag);
+                }
+            }
+            if let Some(y) = r["begin"].as_str().filter(|y| y.len() >= 4) {
+                years.push(y[..4].to_string());
+            }
+        }
+    }
+    let title = w["title"].as_str().unwrap_or(name).to_string();
+    if years.is_empty() && !rec_year.is_empty() {
+        years.push(rec_year);
+    }
+    // no year for the writing: the first release of a recording with this exact title
+    if years.is_empty() {
+        pause();
+        let q = format!("recording:\"{}\"", title);
+        if let Ok(v) = get(format!("https://musicbrainz.org/ws/2/recording/?query={}&fmt=json&limit=100", urlenc(&q))) {
+            let lt = title.to_lowercase();
+            for r in v["recordings"].as_array().cloned().unwrap_or_default() {
+                let same = r["title"].as_str().is_some_and(|t| t.to_lowercase() == lt);
+                if let (true, Some(d)) = (same, r["first-release-date"].as_str().filter(|d| d.len() >= 4)) {
+                    years.push(d[..4].to_string());
                 }
             }
         }
     }
-    let title = pick["title"].as_str().unwrap_or(name);
-    if writers.is_empty() {
-        Ok(format!("{}: no writer listed", title))
-    } else {
-        Ok(format!("{} - written by {}", title, writers.join(", ")))
-    }
+    years.sort();
+    Ok(Work { title, writers: writers.join(", "), year: years.first().cloned().unwrap_or_default() })
 }
 
 /// Chord changes for a tune from the open Jazz Standards data (about 1,300 songs).

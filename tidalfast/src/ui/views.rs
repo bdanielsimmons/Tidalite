@@ -383,7 +383,8 @@ impl App {
     /// Two levels: MUSIC (the sources and your lists) and PRACTICE (tunes, diary) on top, that group's lists under it.
     /// Each group comes back to the list you last had open in it. The plain build has only MUSIC, so only its row shows.
     pub(crate) fn section_bar(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        const PRACTICE_SECS: [(Sec, &str); 3] = [(Sec::Tunes, "TUNES"), (Sec::Diary, "DIARY"), (Sec::Chords, "CHORDS")];
+        const PRACTICE_SECS: [(Sec, &str); 4] =
+            [(Sec::Tunes, "TUNES"), (Sec::Diary, "DIARY"), (Sec::Chords, "CHORDS"), (Sec::Lines, "LINES")];
         // the TIDALITE tab covers its own page and the pages opened from it
         let side = self.show_tl || self.show_winamp || self.show_log || self.show_cache;
         let in_practice = PRACTICE_SECS.iter().any(|s| s.0 == self.sec);
@@ -1124,6 +1125,10 @@ impl App {
                 }
             }
         }
+        if self.pick.is_none() {
+            ui.add_space(10.0);
+            self.progressions_list(ui, acts);
+        }
         ui.add_space(20.0);
     }
 
@@ -1176,17 +1181,34 @@ impl App {
             Some(84.0),
         );
         self.store_dirty |= o.changed;
-        // who wrote it (LOOK UP fills it in; fix it or write your own)
-        let o = field_row(
-            ui,
-            &mut self.ed,
-            crate::tools::F_T_INFO,
-            "ABOUT",
-            &mut self.store.tunes[i].info,
-            "Written by... (album, who played on it)",
-            None,
-        );
-        self.store_dirty |= o.changed;
+        // who wrote it, when, where from: looked up once for you (MusicBrainz), yours to fix
+        {
+            let t = &self.store.tunes[i];
+            if t.written_by.is_empty() || t.year.is_empty() {
+                acts.push(Action::TuneDetails(i));
+            }
+        }
+        for (fid, lab, hint) in [
+            (crate::tools::F_T_WRITER, "WRITTEN BY", "Composer, and lyricist"),
+            (crate::tools::F_T_YEAR, "YEAR", "When it was written or first recorded"),
+            (crate::tools::F_T_FROM, "FROM", "The show, film or album it comes from"),
+            (crate::tools::F_T_STYLE, "STYLE", "Swing, ballad, bossa, waltz..."),
+        ] {
+            let t = &mut self.store.tunes[i];
+            let val = match fid {
+                crate::tools::F_T_WRITER => &mut t.written_by,
+                crate::tools::F_T_YEAR => &mut t.year,
+                crate::tools::F_T_FROM => &mut t.from,
+                _ => &mut t.style,
+            };
+            // a wider label column than the rows above: "WRITTEN BY" needs it
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), bh()), Sense::hover());
+            let lw = (text_w("WRITTEN BY", 2.0) + 14.0).max(76.0);
+            ptext(ui.painter(), Pos2::new(rect.min.x + 4.0, rect.center().y), Align::Min, lab, 2.0, pal().ink2);
+            let fr = Rect::from_min_max(Pos2::new(rect.min.x + lw, rect.min.y), rect.max);
+            let o = field(ui, &mut self.ed, fid, val, fr, hint, false);
+            self.store_dirty |= o.changed;
+        }
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "PLAY ALL", false).clicked() {

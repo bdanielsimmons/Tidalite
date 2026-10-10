@@ -31,6 +31,8 @@ mod cache;
 mod chart;
 #[path = "data/genskin.rs"]
 mod genskin;
+#[path = "data/lines.rs"]
+mod lines;
 #[path = "data/meta.rs"]
 mod meta;
 #[path = "data/sources.rs"]
@@ -60,6 +62,8 @@ mod history;
 mod icons;
 #[path = "ui/library_win.rs"]
 mod library_win;
+#[path = "ui/lines.rs"]
+mod lines_ui;
 #[cfg(target_os = "macos")]
 #[path = "ui/macmenu.rs"]
 mod macmenu;
@@ -158,7 +162,9 @@ enum Msg {
     Wave(i64, Option<Vec<u8>>),
     Exported(Result<String, String>),
     /// LOOK UP result: tune name, who wrote it, other versions found on Tidal
-    Lookup(String, Result<String, String>, Vec<(Track, u32)>),
+    Lookup(String, Result<sources::Work, String>, Vec<(Track, u32)>),
+    /// who wrote a tune and when, looked up on its own when the tune is opened
+    TuneDetails(String, Result<sources::Work, String>),
     Chart(String, Result<(String, String, String), (String, Vec<String>)>),
     Live(String, Result<(String, String, String), (String, Vec<String>)>),
     Beats(i64, Option<(f32, f32)>),
@@ -196,6 +202,7 @@ enum Sec {
     Tunes,
     Diary,
     Chords,
+    Lines,
     Lists,
 }
 
@@ -355,6 +362,8 @@ enum Action {
     AddToTune(usize, Track),
     NewTuneFrom(Track),
     NewTune,
+    /// look up who wrote this tune and when (MusicBrainz only, no Tidal search)
+    TuneDetails(usize),
     OpenTune(Option<usize>),
     RemoveTune(usize),
     Status(usize, u8),
@@ -2348,6 +2357,10 @@ struct App {
     // ---- lead sheet
     rtab: u8,
     chart_tr: i32,
+    /// bars picked on the lead sheet by dragging across them: the band loops just these (first, last)
+    chart_sel: Option<(usize, usize)>,
+    /// the bar a drag across the lead sheet started on
+    chart_drag: Option<usize>,
     chart_edit: bool,
     /// the CHORDS tab: which side (find / name), the chord typed, the notes clicked on the neck and the piano,
     /// and guitar shapes already worked out
@@ -2371,6 +2384,43 @@ struct App {
     vc_type: usize,
     vc_set: usize,
     pass_pair: usize,
+    /// LINES: which tab, the Slonimsky division / kind / pattern / first note / direction / octave up
+    ln_tab: u8,
+    /// SLONIMSKY'S DIARY: the book's pattern open, the note it starts on (0 = C, as written), played backwards
+    ln_at: usize,
+    ln_root: i32,
+    ln_back: bool,
+    /// the ABOUT THIS PATTERN panel open
+    ln_about: bool,
+    /// the HOW THESE PATTERNS WORK panel open
+    ln_how: bool,
+    /// with no pattern book: the octave division, the way notes are added, the pattern
+    sl_div: usize,
+    sl_kind: usize,
+    sl_pat: usize,
+    /// tempo, notes to a beat, round and round, and the line being played (for the diary's count)
+    ln_bpm: u32,
+    ln_sub: u8,
+    ln_loop: bool,
+    ln_playing: String,
+    /// SCALES: family, scale, pattern, octaves, direction, root
+    sc_fam: usize,
+    sc_idx: usize,
+    sc_pat: usize,
+    sc_oct: usize,
+    sc_dir: usize,
+    sc_root: i32,
+    /// the last sequence played, to go round again
+    seq_last: Option<Vec<Vec<i32>>>,
+    /// PRACTICE PROGRESSIONS: which groups are folded open, key, minor, 7th chords, all twelve keys, one being typed
+    prog_shown: Vec<bool>,
+    prog_key: i32,
+    prog_minor: bool,
+    prog_7: bool,
+    prog_all: bool,
+    prog_new: String,
+    /// a practice progression on the lead sheet instead of a tune: (title, chart)
+    prac_chart: Option<(String, String)>,
     /// a chord sequence playing: (started, seconds a chord, which list, chords)
     seq_play: Option<(Instant, f32, String, usize)>,
     /// the song whose info is being edited: its id, the title and the artist as typed
@@ -2428,6 +2478,9 @@ struct App {
     band_t0: Instant,
     band_lead: f32,
     band_bar: f32,
+    /// seconds a beat, and where each bar of band_order starts (in beats, the total last)
+    band_beat: f32,
+    band_starts: Vec<f32>,
     band_order: Vec<usize>,
     band_sig: u64,
     band_chart: String,
@@ -2451,6 +2504,8 @@ struct App {
     ebuf: String,
     ebuf_id: u32,
     chart_tried: std::collections::HashSet<String>,
+    /// tunes whose writer and year were looked up this session
+    details_tried: std::collections::HashSet<String>,
     chart_rn: bool,
     ireal_in: String,
     tunes_ireal: String,
@@ -2738,6 +2793,8 @@ impl App {
             exporting: false,
             rtab: 0,
             chart_tr: 0,
+            chart_sel: None,
+            chart_drag: None,
             chart_edit: false,
             bar_edit: None,
             chords_tab: 0,
@@ -2758,6 +2815,33 @@ impl App {
             vc_type: 0,
             vc_set: 0,
             pass_pair: 0,
+            ln_tab: 0,
+            ln_at: 0,
+            ln_root: 0,
+            ln_back: false,
+            ln_about: false,
+            ln_how: false,
+            sl_div: 0,
+            sl_kind: 0,
+            sl_pat: 0,
+            ln_bpm: 80,
+            ln_sub: 2,
+            ln_loop: true,
+            ln_playing: String::new(),
+            sc_fam: 0,
+            sc_idx: 0,
+            sc_pat: 0,
+            sc_oct: 2,
+            sc_dir: 2,
+            sc_root: 0,
+            seq_last: None,
+            prog_shown: Vec::new(),
+            prog_key: 0,
+            prog_minor: false,
+            prog_7: true,
+            prog_all: false,
+            prog_new: String::new(),
+            prac_chart: None,
             seq_play: None,
             skins_open: [false; 3],
             edit_info: None,
@@ -2804,6 +2888,8 @@ impl App {
             band_t0: Instant::now(),
             band_lead: 0.0,
             band_bar: 2.0,
+            band_beat: 0.5,
+            band_starts: Vec::new(),
             band_order: Vec::new(),
             band_sig: 0,
             band_chart: String::new(),
@@ -2820,6 +2906,7 @@ impl App {
             ebuf: String::new(),
             ebuf_id: 0,
             chart_tried: Default::default(),
+            details_tried: Default::default(),
             chart_rn: true,
             ireal_in: String::new(),
             tunes_ireal: String::new(),
@@ -3753,7 +3840,10 @@ impl App {
             Action::PlaySequenceAt(chords, gap, tag) => {
                 if !chords.is_empty() {
                     self.player.send(Cmd::StopOnce);
-                    self.player.send(Cmd::Once(band::sequence_sound(&chords, gap), 0.9));
+                    // a single-note line is played short and clean; chords ring into each other
+                    let pcm = if tag == "line" { band::line_sound(&chords, gap) } else { band::sequence_sound(&chords, gap) };
+                    self.player.send(Cmd::Once(pcm, 0.9));
+                    self.seq_last = Some(chords.clone());
                     self.seq_play = Some((Instant::now(), gap, tag, chords.len()));
                 }
             }

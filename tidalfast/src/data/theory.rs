@@ -386,8 +386,10 @@ pub fn guitar_shapes(c: &ChordNotes, tuning: &[i32; 6]) -> Vec<[Option<u8>; 6]> 
                 continue;
             }
             let notes: Vec<i32> = played.iter().map(|(i, f)| (tuning[*i] + *f as i32).rem_euclid(12)).collect();
-            // the lowest sounding note is the chord's bass
-            if notes[0] != c.bass {
+            // the lowest sounding note (not just the lowest string: an open string can sound under a fretted one)
+            // is the chord's bass
+            let low = played.iter().map(|(i, f)| tuning[*i] + *f as i32).min().unwrap_or(0);
+            if low.rem_euclid(12) != c.bass {
                 continue;
             }
             let missing: Vec<i32> = needed.iter().copied().filter(|n| !notes.contains(n)).collect();
@@ -398,6 +400,10 @@ pub fn guitar_shapes(c: &ChordNotes, tuning: &[i32; 6]) -> Vec<[Option<u8>; 6]> 
             let fretted: Vec<u8> = played.iter().map(|p| p.1).filter(|f| *f > 0).collect();
             let (lo, hi) = (fretted.iter().min().copied().unwrap_or(0), fretted.iter().max().copied().unwrap_or(0));
             if hi.saturating_sub(lo) > 3 {
+                continue;
+            }
+            // open strings only in shapes near the nut, where the hand can reach both
+            if played.iter().any(|p| p.1 == 0) && lo > 4 {
                 continue;
             }
             // strings not played in between the played ones are hard to mute
@@ -955,6 +961,20 @@ mod tests {
         assert!(src.contains(&(0, 6, 3)) && src.contains(&(1, 5, 5)), "{:?}", src);
         // and D Locrian Nat 9 offers the semitone Eb-D? no: its semitones are C-Db? check it has some
         assert!(!mode_clusters(&PARENT_MODES[1].1, 5, 2, 1).is_empty());
+    }
+
+    #[test]
+    fn grips_have_their_bass_lowest() {
+        for name in ["Dm7", "Cmaj7", "G7", "Am7", "Bbmaj7", "F#m7b5"] {
+            let c = chord_notes(name).unwrap();
+            for s in guitar_shapes(&c, &STANDARD) {
+                let played: Vec<(usize, u8)> = s.iter().enumerate().filter_map(|(i, f)| f.map(|f| (i, f))).collect();
+                let low = played.iter().map(|(i, f)| STANDARD[*i] + *f as i32).min().unwrap();
+                assert_eq!(low.rem_euclid(12), c.bass, "{} {:?}", name, s);
+                let lo = played.iter().map(|p| p.1).filter(|f| *f > 0).min().unwrap_or(0);
+                assert!(!(played.iter().any(|p| p.1 == 0) && lo > 4), "{} {:?}", name, s);
+            }
+        }
     }
 
     #[test]

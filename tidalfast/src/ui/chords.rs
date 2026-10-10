@@ -143,17 +143,20 @@ pub(crate) fn chord_box_coloured(
 ) {
     let fretted: Vec<u8> = shape.iter().flatten().filter(|f| **f > 0).copied().collect();
     let lo = fretted.iter().min().copied().unwrap_or(1);
-    let start = if fretted.iter().max().copied().unwrap_or(0) <= 4 { 1 } else { lo };
+    let hi = fretted.iter().max().copied().unwrap_or(0);
+    let start = if hi <= 4 { 1 } else { lo };
+    // five frets, or more for a wide grip, so every dot sits inside the box
+    let rows = (hi.saturating_sub(start) as usize + 1).max(5);
     let top = rect.min.y + 14.0;
     let grid = Rect::from_min_max(Pos2::new(rect.min.x + 14.0, top), Pos2::new(rect.max.x - 6.0, rect.max.y - 4.0));
     let sx = grid.width() / 5.0;
-    let fy = grid.height() / 5.0;
+    let fy = grid.height() / rows as f32;
     let line = Stroke::new(1.0_f32, pal().ink2);
     for s in 0..6 {
         let x = grid.min.x + s as f32 * sx;
         p.line_segment([Pos2::new(x, grid.min.y), Pos2::new(x, grid.max.y)], line);
     }
-    for f in 0..=5 {
+    for f in 0..=rows {
         let y = grid.min.y + f as f32 * fy;
         let w: f32 = if f == 0 && start == 1 { 3.0 } else { 1.0 };
         p.line_segment([Pos2::new(grid.min.x, y), Pos2::new(grid.max.x, y)], Stroke::new(w, pal().ink2));
@@ -172,10 +175,11 @@ pub(crate) fn chord_box_coloured(
                 if txt.is_empty() {
                     p.circle_stroke(Pos2::new(x, rect.min.y + 7.0), 3.0, Stroke::new(1.0_f32, pal().ink));
                 } else {
-                    // an open string: a ring with its degree above the nut
-                    p.circle_filled(Pos2::new(x, rect.min.y + 6.0), 7.0, fill);
-                    p.circle_stroke(Pos2::new(x, rect.min.y + 6.0), 7.0, Stroke::new(1.0_f32, Color32::from_gray(60)));
-                    ptext(p, Pos2::new(x, rect.min.y + 6.0), Align::Center, &txt, 1.0, Color32::from_gray(10));
+                    // an open string: a hollow ring above the nut (not a dot - nothing is fretted), its degree inside
+                    // (a coloured note - a cluster's red or blue - keeps its colour on the ring)
+                    let ring = if fill == Color32::from_gray(245) { pal().ink } else { fill };
+                    p.circle_stroke(Pos2::new(x, rect.min.y + 6.0), 7.0, Stroke::new(1.5_f32, ring));
+                    ptext(p, Pos2::new(x, rect.min.y + 6.0), Align::Center, &txt, 1.0, ring);
                 }
             }
             Some(f) => {
@@ -349,14 +353,8 @@ pub(crate) fn neck_alpha(
 impl App {
     /// The CHORDS tab.
     pub(crate) fn chords_view(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        // a sequence playing: keep redrawing so the chord sounding now lights up, and forget it once it is over
-        if let Some((t0, gap, _, len)) = &self.seq_play {
-            if t0.elapsed().as_secs_f32() > gap * *len as f32 + 0.5 {
-                self.seq_play = None;
-            } else {
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
-            }
-        }
+        // a sequence playing: keep redrawing so the chord sounding now lights up
+        self.seq_tick(ui.ctx());
         ui.add_space(6.0);
         if let Some(t) =
             tab_row(ui, &["FIND A CHORD", "CHORD ANALYZER", "CLUSTERS", "VOICINGS", "PASSING CHORDS"], self.chords_tab as usize)
@@ -720,7 +718,7 @@ impl App {
     }
 
     /// A row of the twelve notes to pick from.
-    fn note_row(ui: &mut egui::Ui, label: &str, cur: i32, sharps: bool) -> Option<i32> {
+    pub(crate) fn note_row(ui: &mut egui::Ui, label: &str, cur: i32, sharps: bool) -> Option<i32> {
         let mut out = None;
         ui.horizontal_wrapped(|ui| {
             crate::views::label(ui, label, 100.0);
@@ -1078,7 +1076,7 @@ impl App {
     }
 
     /// Which chord of a played sequence is sounding now (for the one started with this tag).
-    fn seq_now(&self, tag: &str) -> Option<usize> {
+    pub(crate) fn seq_now(&self, tag: &str) -> Option<usize> {
         let (t0, gap, tg, len) = self.seq_play.as_ref()?;
         if tg != tag {
             return None;
@@ -1088,7 +1086,7 @@ impl App {
     }
 
     /// A play button for a sequence that turns into STOP while it plays.
-    fn seq_button(
+    pub(crate) fn seq_button(
         &self,
         ui: &mut egui::Ui,
         acts: &mut Vec<Action>,
@@ -1261,9 +1259,26 @@ impl App {
             crate::views::dim_line(ui, "CLICK A GRIP TO HEAR IT.  NUMBERS ARE CHORD DEGREES", 1.0, pal().dim);
         });
         ui.horizontal_wrapped(|ui| {
-            for (label, g) in &grips {
+            for (gi, (label, g)) in grips.iter().enumerate() {
+                // a thin line between grips
+                if gi > 0 {
+                    let (d, _) = ui.allocate_exact_size(Vec2::new(9.0, 170.0), Sense::hover());
+                    ui.painter().line_segment(
+                        [Pos2::new(d.center().x, d.min.y + 4.0), Pos2::new(d.center().x, d.max.y - 4.0)],
+                        Stroke::new(1.0_f32, pal().dim),
+                    );
+                }
                 ui.vertical(|ui| {
-                    crate::views::label(ui, label, 116.0);
+                    // what is on the bottom and on top, one above the other with a small rule between
+                    let (lr, _) = ui.allocate_exact_size(Vec2::new(112.0, 32.0), Sense::hover());
+                    let (bass, top) = label.split_once("  ").unwrap_or((label.as_str(), ""));
+                    let p = ui.painter();
+                    ptext(p, Pos2::new(lr.center().x, lr.min.y + 8.0), Align::Center, top, 2.0, pal().ink);
+                    p.line_segment(
+                        [Pos2::new(lr.center().x - 22.0, lr.min.y + 16.0), Pos2::new(lr.center().x + 22.0, lr.min.y + 16.0)],
+                        Stroke::new(1.0_f32, pal().dim),
+                    );
+                    ptext(p, Pos2::new(lr.center().x, lr.min.y + 24.0), Align::Center, bass, 2.0, pal().ink2);
                     let (r, resp) = ui.allocate_exact_size(Vec2::new(112.0, 132.0), Sense::click());
                     match g {
                         Some(g) => {
@@ -1281,7 +1296,6 @@ impl App {
                         }
                     }
                 });
-                ui.add_space(6.0);
             }
         });
         // the drill: these voicings through a tune, each chord the closest grip to the one before
@@ -1376,8 +1390,8 @@ impl App {
             let third = chord.get(1).copied().unwrap_or(4);
             let seventh = chord.get(3).copied().filter(|s| *s < 12).unwrap_or(chord.get(2).copied().unwrap_or(7));
             return vec![
-                ("R 3 7".to_string(), theory::fit_on(&[0, third, seventh], root, strings, &theory::STANDARD, reach)),
-                ("R 7 3".to_string(), theory::fit_on(&[0, seventh, third + 12], root, strings, &theory::STANDARD, reach)),
+                ("R BASS  7 TOP".to_string(), theory::fit_on(&[0, third, seventh], root, strings, &theory::STANDARD, reach)),
+                ("R BASS  3 TOP".to_string(), theory::fit_on(&[0, seventh, third + 12], root, strings, &theory::STANDARD, reach)),
             ];
         }
         let n = strings.len().min(chord.len());
@@ -1409,16 +1423,11 @@ impl App {
         if !self.band_on || self.band_order.is_empty() {
             return;
         }
-        let t = self.band_t0.elapsed().as_secs_f32() - self.band_lead;
-        if t < 0.0 {
-            return;
-        }
-        let b = t / self.band_bar.max(0.1);
-        let Some(bar) = self.band_order.get(b.floor() as usize % self.band_order.len()).and_then(|i| chart.bars.get(*i)) else {
-            return;
-        };
+        let Some((at, beat)) = self.band_where() else { return };
+        let Some(bar_ix) = self.band_order.get(at).copied() else { return };
+        let Some(bar) = chart.bars.get(bar_ix) else { return };
         let n = bar.chords.len().max(1);
-        let k = ((b.fract() * n as f32) as usize).min(n - 1);
+        let k = ((beat / chart.bar_len(bar_ix) * n as f32) as usize).min(n - 1);
         let Some(name) = bar.chords.get(k).cloned() else { return };
         let name = crate::chart::transpose(&name, self.chart_tr);
         let Some(c) = theory::chord_notes(&name) else { return };

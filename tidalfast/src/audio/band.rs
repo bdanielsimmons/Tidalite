@@ -442,7 +442,10 @@ pub fn mix_parts(parts: &[Vec<f32>; 3], lv: [f32; 3]) -> Vec<i16> {
 fn render_raw(chart: &Chart, order: &[usize], bpm: f32, style: u8, lv: [f32; 3], ending: bool) -> Vec<f32> {
     let nb = chart.beats.clamp(2, 7) as usize;
     let tail = if ending { nb * 2 } else { 0 };
-    let mut mix = Mix::new((order.len() * nb + tail) as f32, bpm);
+    // bars can change meter: each starts where the one before ends
+    let starts = chart.starts(order);
+    let total = starts.last().copied().unwrap_or(0.0);
+    let mut mix = Mix::new(total + tail as f32, bpm);
     mix.lv = lv;
     let parts = [lv[0] > 0.0, lv[1] > 0.0, lv[2] > 0.0];
     let chords_of = |bar: usize| -> Vec<Option<Chord>> { chart.bars[bar].chords.iter().map(|c| parse_chord(c)).collect() };
@@ -452,15 +455,17 @@ fn render_raw(chart: &Chart, order: &[usize], bpm: f32, style: u8, lv: [f32; 3],
         let cs = chords_of(*bar_ix);
         let next_cs = chords_of(order[(oi + 1) % order.len()]);
         let n = cs.len().max(1);
-        let base = (oi * nb) as f32;
+        let base = starts[oi];
+        // the beats of this bar (a part beat at the end counts as one: 5/8 in a 4/4 tune is 2.5 beats, played as 3)
+        let nbb = chart.bar_len(*bar_ix).ceil().max(1.0) as usize;
         // chord at a beat, where that chord starts and how long it lasts (in beats)
         let span = |k: usize| -> (usize, usize) {
-            let a = (k * nb + n - 1) / n;
-            let b = (((k + 1) * nb + n - 1) / n).max(a + 1).min(nb);
+            let a = (k * nbb + n - 1) / n;
+            let b = (((k + 1) * nbb + n - 1) / n).max(a + 1).min(nbb);
             (a, b)
         };
         let idx_at = |b: usize| (0..n).find(|k| span(*k).0 <= b && b < span(*k).1).unwrap_or(n - 1);
-        for b in 0..nb {
+        for b in 0..nbb {
             let k = idx_at(b);
             let (a, e) = span(k);
             let t = base + b as f32;
@@ -731,7 +736,7 @@ fn render_raw(chart: &Chart, order: &[usize], bpm: f32, style: u8, lv: [f32; 3],
         }
     }
     if ending {
-        let t = (order.len() * nb) as f32;
+        let t = total;
         if let Some(Some(ch)) = order.first().map(|b| chart.bars[*b].chords.first().and_then(|c| parse_chord(c))) {
             if parts[0] {
                 mix.bass(t, (nb * 2) as f32, bass_midi(ch.bass), 1.0);
@@ -771,6 +776,15 @@ pub fn sequence_sound(chords: &[Vec<i32>], gap: f32) -> Vec<i16> {
             let at = k as f32 * gap + 0.02 + j as f32 * 0.03;
             mix.stab(at, gap + 0.6, &[*m], 0.9, 1.6);
         }
+    }
+    mix.finish()
+}
+
+/// A single-note line, `gap` seconds a note, each note short and clean so fast lines stay clear.
+pub fn line_sound(notes: &[Vec<i32>], gap: f32) -> Vec<i16> {
+    let mut mix = Mix::new(notes.len() as f32 * gap + 1.5, 60.0);
+    for (k, n) in notes.iter().enumerate() {
+        mix.stab(k as f32 * gap + 0.02, gap * 1.4 + 0.12, n, 0.95, 2.2);
     }
     mix.finish()
 }

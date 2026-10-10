@@ -712,7 +712,7 @@ impl App {
             }
             // HOME: Tidal home in MUSIC (your files when not signed in), your tunes in PRACTICE
             if !side {
-                let in_practice = matches!(self.sec, Sec::Tunes | Sec::Diary | Sec::Chords);
+                let in_practice = matches!(self.sec, Sec::Tunes | Sec::Diary | Sec::Chords | Sec::Lines);
                 let tip = if in_practice {
                     "Your tunes"
                 } else if self.offline {
@@ -824,6 +824,7 @@ impl App {
                     Sec::Tunes => self.tunes_view(ui, acts),
                     Sec::Diary => self.diary_view(ui, acts),
                     Sec::Chords => self.chords_view(ui, acts),
+                    Sec::Lines => self.lines_view(ui, acts),
                     Sec::Lists => self.playlists_view(ui, acts),
                 });
             });

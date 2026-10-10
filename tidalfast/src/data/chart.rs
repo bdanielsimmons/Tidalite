@@ -12,6 +12,8 @@ pub struct Measure {
     pub label: String,
     /// repeat signs, endings, coda / segno / D.C. marks (see `friendly_marks`)
     pub marks: Vec<String>,
+    /// a time signature that starts at this bar (iReal's code: "44", "58", "12" = 12/8 ...)
+    pub time: String,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -126,6 +128,8 @@ struct P {
     pending: Vec<String>,
     last_chord: Option<String>,
     time: Option<String>,
+    /// a time signature met after the first bar: it starts at the next bar written
+    time_next: Option<String>,
 }
 
 impl P {
@@ -147,14 +151,22 @@ impl P {
     fn put(&mut self, chord: Option<String>) {
         let sec = std::mem::take(&mut self.section);
         let pend = std::mem::take(&mut self.pending);
+        let mut time = self.time_next.take();
         let m = self.cur();
         if m.chords.is_empty() {
             if !sec.is_empty() {
                 m.label = sec;
             }
             m.marks.extend(pend);
+            if let Some(t) = time.take() {
+                m.time = t;
+            }
         }
         m.chords.push(chord);
+        // a meter change met inside a bar's chords belongs to the next bar
+        if time.is_some() {
+            self.time_next = time;
+        }
     }
 
     /// A mark that belongs to the bar just written (end repeat, D.C., Fine ...).
@@ -193,7 +205,7 @@ pub fn parse_music(raw: &str) -> (Vec<Measure>, Option<String>) {
         }
     }
     let c: Vec<char> = clean.trim().chars().collect();
-    let mut p = P { m: Vec::new(), section: String::new(), pending: Vec::new(), last_chord: None, time: None };
+    let mut p = P { m: Vec::new(), section: String::new(), pending: Vec::new(), last_chord: None, time: None, time_next: None };
     let mut i = 0;
     while i < c.len() {
         if c[i].is_whitespace() {
@@ -228,7 +240,12 @@ pub fn parse_music(raw: &str) -> (Vec<Measure>, Option<String>) {
                 d.push(c[j]);
                 j += 1;
             }
-            p.time = Some(d);
+            // the first one is the tune's; later ones change the meter from the next bar on
+            if p.m.iter().all(|m| m.chords.is_empty()) {
+                p.time = Some(d);
+            } else {
+                p.time_next = Some(d);
+            }
             i = j;
         } else if ch == 'x' {
             let n = p.m.len();
@@ -369,6 +386,11 @@ pub fn to_friendly(measures: &[Measure], time: &str) -> String {
         s.push(' ');
     }
     for m in measures {
+        if !m.time.is_empty() {
+            s.push('T');
+            s.push_str(&m.time);
+            s.push(' ');
+        }
         if !m.label.is_empty() {
             s.push('*');
             s.push_str(&m.label);
@@ -406,6 +428,10 @@ pub struct Bar {
     pub ending: String,
     /// text marks shown above the bar: SEGNO, CODA, FINE, D.C. AL CODA ...
     pub marks: Vec<String>,
+    /// a time signature that starts at this bar ("58", "74", "12" = 12/8), written over it
+    pub time: String,
+    /// this bar's length in the chart's beats when its meter differs from the tune's (0 = the tune's)
+    pub len: f32,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -415,11 +441,31 @@ pub struct Chart {
     pub beats: u32,
 }
 
+/// A time signature code as (beats, note value): "44" = 4/4, "58" = 5/8, "12" = 12/8 (iReal's way), "128" too.
+pub fn meter(code: &str) -> (u32, u32) {
+    match code {
+        "12" | "128" => (12, 8),
+        "" => (4, 4),
+        c => {
+            let (num, den) = c.split_at(c.len() - 1);
+            let den: u32 = den.parse().unwrap_or(4);
+            let num: u32 = num.parse().unwrap_or(4);
+            (num.max(1), if den == 0 { 4 } else { den })
+        }
+    }
+}
+
+/// A bar of this meter, in quarter notes (5/8 = 2.5).
+fn quarters(code: &str) -> f32 {
+    let (n, d) = meter(code);
+    n as f32 * 4.0 / d as f32
+}
+
 fn beats_for(time: &str) -> u32 {
     match time {
         "68" => 2,
         "98" => 3,
-        "128" => 4,
+        "128" | "12" => 4,
         "" => 4,
         t => t.chars().next().and_then(|c| c.to_digit(10)).unwrap_or(4).max(1),
     }
@@ -446,6 +492,10 @@ pub fn parse_friendly(text: &str) -> Chart {
     let mut chart = Chart { bars: Vec::new(), beats: 4 };
     let mut cur = Bar::default();
     let mut label = String::new();
+    // the tune's meter, and the one bars are in now (they differ after a change)
+    let mut base = String::from("44");
+    let mut now_len = 0.0_f32;
+    let mut time_next: Option<String> = None;
     let started = |b: &Bar| !b.chords.is_empty() || b.start_rep || !b.ending.is_empty() || !b.marks.is_empty();
     for tok in spaced.split_whitespace() {
         if tok == "|" {
@@ -481,17 +531,39 @@ pub fn parse_friendly(text: &str) -> Chart {
         } else if tok.len() >= 2 && tok.starts_with('*') {
             label = tok[1..].to_string();
         } else if tok.len() >= 3 && tok.starts_with('T') && tok[1..].chars().all(|c| c.is_ascii_digit()) {
-            chart.beats = beats_for(&tok[1..]);
+            let code = &tok[1..];
+            if chart.bars.is_empty() && cur.chords.is_empty() {
+                // before the first bar: the tune's own meter
+                chart.beats = beats_for(code);
+                base = code.to_string();
+                now_len = 0.0;
+            } else {
+                // a change: from the next bar on, measured in the tune's beats
+                let unit = quarters(&base) / chart.beats.max(1) as f32;
+                let len = quarters(code) / unit;
+                now_len = if code == base || (len - chart.beats as f32).abs() < 0.001 { 0.0 } else { len };
+                time_next = Some(code.to_string());
+            }
         } else if tok == "%" {
             if cur.chords.is_empty() {
                 if let Some(prev) = chart.bars.last() {
                     cur.chords = prev.chords.clone();
                     cur.repeat = true;
+                    cur.len = now_len;
+                    if let Some(t) = time_next.take() {
+                        cur.time = t;
+                    }
                 }
             }
         } else {
             if cur.chords.is_empty() && !label.is_empty() {
                 cur.label = std::mem::take(&mut label);
+            }
+            if cur.chords.is_empty() {
+                cur.len = now_len;
+                if let Some(t) = time_next.take() {
+                    cur.time = t;
+                }
             }
             let t = if tok.eq_ignore_ascii_case("nc") || tok.eq_ignore_ascii_case("n.c.") { "N.C." } else { tok };
             if cur.chords.last().map(String::as_str) != Some(t) {
@@ -506,7 +578,7 @@ pub fn parse_friendly(text: &str) -> Chart {
     for i in 1..chart.bars.len() {
         let same = chart.bars[i].chords == chart.bars[i - 1].chords;
         let b = &mut chart.bars[i];
-        if same && b.label.is_empty() && !b.start_rep && b.ending.is_empty() && b.marks.is_empty() {
+        if same && b.label.is_empty() && !b.start_rep && b.ending.is_empty() && b.marks.is_empty() && b.time.is_empty() {
             b.repeat = true;
         }
     }
@@ -514,6 +586,26 @@ pub fn parse_friendly(text: &str) -> Chart {
 }
 
 impl Chart {
+    /// How many of the chart's beats bar `i` lasts.
+    pub fn bar_len(&self, i: usize) -> f32 {
+        match self.bars.get(i) {
+            Some(b) if b.len > 0.0 => b.len,
+            _ => self.beats.max(1) as f32,
+        }
+    }
+
+    /// Where each bar of `order` starts, in beats from the top, and one more entry: the total.
+    pub fn starts(&self, order: &[usize]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(order.len() + 1);
+        let mut at = 0.0;
+        for b in order {
+            out.push(at);
+            at += self.bar_len(*b);
+        }
+        out.push(at);
+        out
+    }
+
     /// The bars in the order they are played: repeats, 1st / 2nd endings, D.C. / D.S., coda, fine.
     pub fn play_order(&self) -> Vec<usize> {
         let n = self.bars.len();
@@ -611,6 +703,9 @@ impl Chart {
             }
             if !b.ending.is_empty() {
                 s.push_str(&format!("[{} ", b.ending.trim_end_matches('.')));
+            }
+            if !b.time.is_empty() {
+                s.push_str(&format!("T{} ", b.time));
             }
             if b.start_rep {
                 s.push_str("{ ");
@@ -992,6 +1087,32 @@ pub fn clean_title(t: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meters_can_change_bar_by_bar() {
+        // First Circle style: 6/8 and 5/8 in turn, in a 6/8 tune (two dotted-quarter beats a bar)
+        let c = parse_friendly("T68 | Dm7 | T58 Gm7 | T68 Am7 | T58 Bb |");
+        assert_eq!(c.beats, 2);
+        assert_eq!(c.bars[1].time, "58");
+        assert!((c.bar_len(0) - 2.0).abs() < 0.001);
+        assert!((c.bar_len(1) - 5.0 / 3.0).abs() < 0.001);
+        assert!((c.bar_len(2) - 2.0).abs() < 0.001 && c.bars[2].time == "68");
+        let s = c.starts(&[0, 1, 2, 3]);
+        assert!((s[4] - (4.0 + 10.0 / 3.0)).abs() < 0.001);
+        // written back the same way
+        let again = parse_friendly(&c.to_text());
+        assert_eq!(again.bars[1].time, "58");
+        // a 7/8 bar in 4/4 is three and a half beats; iReal's "12" is 12/8
+        let d = parse_friendly("T44 | C | T78 F | T44 G |");
+        assert!((d.bar_len(1) - 3.5).abs() < 0.001 && (d.bar_len(2) - 4.0).abs() < 0.001);
+        assert_eq!(meter("12"), (12, 8));
+        // from iReal: a time signature after the first bar changes the meter from that bar on
+        let (ms, time) = parse_music("[T68D-7 |T58G-7 |T68A-7 |T58Bb Z");
+        assert_eq!(time.as_deref(), Some("68"));
+        assert_eq!(ms[1].time, "58");
+        let c = parse_friendly(&to_friendly(&ms, "68"));
+        assert_eq!((c.beats, c.bars[1].time.as_str(), c.bars[3].time.as_str()), (2, "58", "58"));
+    }
 
     fn order(t: &str) -> Vec<usize> {
         parse_friendly(t).play_order()

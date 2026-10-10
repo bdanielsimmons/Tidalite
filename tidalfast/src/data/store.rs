@@ -65,9 +65,47 @@ pub struct Tune {
     pub notes: String,
     /// lead sheet as plain text, e.g. `T44 *A | Dm7 G7 | Cmaj7 | ...`
     pub chart: String,
-    /// who wrote it etc. (filled by LOOK UP, kept so it is only searched once)
+    /// older versions kept "X - written by Y" here; moved into `written_by` when loaded
+    #[serde(skip_serializing)]
     pub info: String,
+    /// who wrote it (looked up for you; yours to fix)
+    pub written_by: String,
+    /// the year it was written or first recorded
+    pub year: String,
+    /// the show, film or album it comes from
+    pub from: String,
+    /// swing, ballad, bossa...
+    pub style: String,
     pub versions: Vec<Version>,
+}
+
+impl Tune {
+    /// The writer out of an old "Night and Day - written by Cole Porter" line.
+    pub fn take_old_info(&mut self) {
+        let info = std::mem::take(&mut self.info);
+        if !self.written_by.is_empty() {
+            return;
+        }
+        let lower = info.to_lowercase();
+        if let Some(at) = lower.find("written by ") {
+            self.written_by = info[at + 11..].lines().next().unwrap_or("").trim().to_string();
+        }
+    }
+
+    /// Who wrote it, when and where from, in one line ("Cole Porter, 1932, from Gay Divorce").
+    pub fn credit_line(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if !self.written_by.is_empty() {
+            parts.push(format!("Written by {}", self.written_by));
+        }
+        if !self.year.is_empty() {
+            parts.push(self.year.clone());
+        }
+        if !self.from.is_empty() {
+            parts.push(format!("from {}", self.from));
+        }
+        parts.join(", ")
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -167,6 +205,13 @@ pub struct Store {
     /// tempo and key found by listening to the audio (see meta.rs)
     pub meta: HashMap<i64, crate::meta::Info>,
     pub last: Option<Last>,
+    /// LINES: how many times each line has been played through, and your favorites
+    pub lines_done: HashMap<String, u32>,
+    pub lines_stars: Vec<String>,
+    /// practice progressions you typed in (Roman numerals)
+    pub my_progs: Vec<String>,
+    /// lines you typed in from a book: (label, notes)
+    pub my_lines: Vec<(String, String)>,
 }
 
 fn path() -> PathBuf {
@@ -175,7 +220,11 @@ fn path() -> PathBuf {
 
 impl Store {
     pub fn load() -> Store {
-        std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        let mut s: Store = std::fs::read_to_string(path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        for t in &mut s.tunes {
+            t.take_old_info();
+        }
+        s
     }
 
     pub fn save(&self) {
@@ -345,6 +394,16 @@ pub fn hash_id(s: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_writer_lines_move_over() {
+        let mut t = Tune { info: "Night and Day - written by Cole Porter".into(), ..Default::default() };
+        t.take_old_info();
+        assert_eq!(t.written_by, "Cole Porter");
+        t.year = "1932".into();
+        t.from = "Gay Divorce".into();
+        assert_eq!(t.credit_line(), "Written by Cole Porter, 1932, from Gay Divorce");
+    }
 
     #[test]
     fn calendar_round_trip() {

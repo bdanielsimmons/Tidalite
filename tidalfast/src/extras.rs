@@ -224,7 +224,7 @@ impl App {
     /// The tune the lead sheet follows: the one you opened, or the playing track's tune. None = a
     /// track that is in no tune (its chart is looked up on its own).
     pub(crate) fn chart_tune(&self) -> Option<usize> {
-        if self.chart_live {
+        if self.chart_live || self.prac_chart.is_some() {
             return None;
         }
         self.chart_pick.filter(|i| *i < self.store.tunes.len()).or_else(|| self.cur_tune())
@@ -232,6 +232,9 @@ impl App {
 
     /// Chart text on show right now.
     pub(crate) fn chart_text(&self) -> Option<String> {
+        if let Some((_, c)) = &self.prac_chart {
+            return Some(c.clone());
+        }
         match self.chart_tune() {
             Some(i) => Some(self.store.tunes[i].chart.clone()),
             None => self.live.as_ref().map(|l| l.0.clone()),
@@ -430,7 +433,18 @@ impl App {
     fn band_sig_now(&self) -> u64 {
         let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as u64;
         let lv: u64 = self.band_levels().iter().enumerate().map(|(i, l)| ((l * 10.0).round() as u64) << (i * 5)).sum();
-        bpm ^ (self.band_style as u64) << 12 ^ lv << 20 ^ (self.band_loops as u64) << 40
+        // picking other bars to loop changes what the band plays
+        let sel = self.chart_sel.map_or(0, |(a, b)| 1 + a as u64 * 997 + b as u64) << 48;
+        bpm ^ (self.band_style as u64) << 12 ^ lv << 20 ^ (self.band_loops as u64) << 40 ^ sel
+    }
+
+    /// The bars the band plays: the ones dragged across on the lead sheet (in a loop), else the whole tune with its
+    /// repeats and endings.
+    pub(crate) fn band_bars(&self, chart: &crate::chart::Chart) -> Vec<usize> {
+        match self.chart_sel {
+            Some((a, b)) if a <= b && b < chart.bars.len() => (a..=b).collect(),
+            _ => chart.play_order(),
+        }
     }
 
     /// A song's new title and artist (files, YouTube, SoundCloud): everywhere Tidalite keeps it (your lists,
@@ -508,7 +522,7 @@ impl App {
         if chart.bars.is_empty() {
             return;
         }
-        let once = chart.play_order();
+        let once = self.band_bars(&chart);
         let order: Vec<usize> = (0..self.band_loops.max(1)).flat_map(|_| once.iter().copied()).collect();
         let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32;
         let (style, lv, beats) = (self.band_style, self.band_levels(), chart.beats);
@@ -547,13 +561,13 @@ impl App {
         if chart.bars.is_empty() {
             return;
         }
-        let order = chart.play_order();
+        let order = self.band_bars(&chart);
         let bpm = (if self.bpm > 0 { self.bpm } else { self.mt_bpm }) as f32;
-        // the parts are rendered again only when the chart, tempo or style changed; levels just remix them
+        // the parts are rendered again only when the chart, bars, tempo or style changed; levels just remix them
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            (&text, bpm.to_bits(), self.band_style).hash(&mut h);
+            (&text, &order, bpm.to_bits(), self.band_style).hash(&mut h);
             h.finish()
         };
         let stems = match &self.band_stems {
@@ -566,10 +580,12 @@ impl App {
         };
         let mut body = band::mix_parts(&stems, self.band_levels());
         let bar = chart.beats as f32 * 60.0 / bpm;
+        let starts = chart.starts(&order);
+        let chorus_secs = starts.last().copied().unwrap_or(0.0) * 60.0 / bpm;
         // already playing: carry on from the same spot in the chart (no count-in, no jump back to the top)
         let resume = if self.band_on && self.band_order.len() == order.len() && !body.is_empty() {
             let t = self.band_t0.elapsed().as_secs_f32() - self.band_lead;
-            let old_chorus = self.band_order.len() as f32 * self.band_bar;
+            let old_chorus = self.band_secs();
             (t > 0.0 && old_chorus > 0.0).then(|| {
                 let passes = (t / old_chorus).floor();
                 let frac = (t / old_chorus).fract();
@@ -582,7 +598,7 @@ impl App {
             Some((passes, frac)) => {
                 let at = ((frac * body.len() as f32) as usize).min(body.len() - 1);
                 body.rotate_left(at);
-                let chorus = order.len() as f32 * bar;
+                let chorus = chorus_secs;
                 // keep the clock in step: as if it had started that long ago at the new tempo
                 self.band_t0 = Instant::now() - Duration::from_secs_f32(bar + (passes + frac) * chorus);
                 Vec::new()
@@ -593,6 +609,8 @@ impl App {
             }
         };
         self.band_bar = bar;
+        self.band_beat = 60.0 / bpm.max(1.0);
+        self.band_starts = starts;
         self.band_lead = bar;
         self.band_order = order;
         self.band_on = true;
@@ -608,13 +626,30 @@ impl App {
         }
     }
 
+    /// How long the band takes to play its bars once through, in seconds.
+    pub(crate) fn band_secs(&self) -> f32 {
+        self.band_starts.last().copied().unwrap_or(0.0) * self.band_beat
+    }
+
+    /// Where the band is now: (position in its bar order, beats into that bar). None before it starts.
+    pub(crate) fn band_where(&self) -> Option<(usize, f32)> {
+        let t = self.band_t0.elapsed().as_secs_f32() - self.band_lead;
+        let total = self.band_starts.last().copied().unwrap_or(0.0);
+        if t < 0.0 || self.band_order.is_empty() || total <= 0.0 {
+            return None;
+        }
+        let beat = (t / self.band_beat.max(0.01)) % total;
+        let k = self.band_starts.windows(2).position(|w| beat >= w[0] && beat < w[1]).unwrap_or(0);
+        Some((k, beat - self.band_starts[k]))
+    }
+
     /// Restart the band when its tempo, style or parts changed; stop it after its LOOPS times through.
     fn band_tick(&mut self) {
         if self.band_on && self.band_sig != self.band_sig_now() {
             self.band_start();
         }
         if self.band_on && self.band_loops > 0 {
-            let chorus = self.band_order.len() as f32 * self.band_bar;
+            let chorus = self.band_secs();
             let done = self.band_lead + chorus * self.band_loops as f32;
             if self.band_t0.elapsed().as_secs_f32() >= done {
                 self.band_stop();
@@ -951,16 +986,21 @@ impl App {
             Msg::Lookup(name, info, tracks) => {
                 self.look_busy = false;
                 match info {
-                    Ok(text) => {
-                        if let Some(i) = self.find_tune(&name) {
-                            self.store.tunes[i].info = text;
-                            self.store_dirty = true;
+                    Ok(w) => {
+                        if w.writers.is_empty() {
+                            self.set_note(&format!("NO WRITER LISTED FOR {}", w.title.to_uppercase()));
                         }
+                        self.fill_details(&name, &w);
                     }
                     Err(e) => self.set_note(&format!("NO WRITER INFO FOUND ({})", e)),
                 }
                 self.look_for = name;
                 self.look_tracks = tracks;
+            }
+            Msg::TuneDetails(name, r) => {
+                if let Ok(w) = r {
+                    self.fill_details(&name, &w);
+                }
             }
             Msg::Chart(name, r) => {
                 self.chart_busy = false;
@@ -972,8 +1012,8 @@ impl App {
                         if t.key.is_empty() {
                             t.key = key;
                         }
-                        if t.info.is_empty() && !composer.is_empty() {
-                            t.info = format!("{} - written by {}", name, composer);
+                        if t.written_by.is_empty() && !composer.is_empty() {
+                            t.written_by = composer;
                         }
                         self.chart_sugg.clear();
                         self.store_dirty = true;
@@ -1143,6 +1183,20 @@ impl App {
         self.set_note(&format!("ADDED TO {}", n.to_uppercase()));
     }
 
+    /// Who wrote a tune and when, into the tune's empty fields (what you typed is kept).
+    fn fill_details(&mut self, name: &str, w: &sources::Work) {
+        let Some(i) = self.find_tune(name) else { return };
+        let t = &mut self.store.tunes[i];
+        if t.written_by.is_empty() && !w.writers.is_empty() {
+            t.written_by = w.writers.clone();
+            self.store_dirty = true;
+        }
+        if t.year.is_empty() && !w.year.is_empty() {
+            t.year = w.year.clone();
+            self.store_dirty = true;
+        }
+    }
+
     fn new_tune_named(&mut self, name: &str) -> usize {
         if let Some(i) = self.find_tune(name) {
             return i;
@@ -1155,7 +1209,7 @@ impl App {
     pub(crate) fn apply_extra(&mut self, a: Action) {
         match a {
             Action::Section(s) => {
-                if matches!(s, Sec::Tunes | Sec::Diary | Sec::Chords) {
+                if matches!(s, Sec::Tunes | Sec::Diary | Sec::Chords | Sec::Lines) {
                     self.last_practice = s;
                 } else {
                     self.last_music = s;
@@ -1515,6 +1569,19 @@ impl App {
                 self.sec = Sec::Tunes;
                 self.serial += 1;
             }
+            Action::TuneDetails(i) => {
+                let Some(name) = self.store.tunes.get(i).map(|t| t.name.trim().to_string()) else { return };
+                let artist = self.store.tunes[i].versions.first().map(|v| v.artist.clone());
+                if name.is_empty() || !self.details_tried.insert(name.to_lowercase()) {
+                    return;
+                }
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let w = sources::lookup_work(&name, artist.as_deref());
+                    let _ = tx.send(Msg::TuneDetails(name, w));
+                    ctx.request_repaint();
+                });
+            }
             Action::NewTune => {
                 let name = self.new_tune.trim().to_string();
                 if name.is_empty() {
@@ -1534,6 +1601,11 @@ impl App {
             }
             Action::OpenTune(i) => {
                 self.tune_open = i;
+                // a tune opened: the lead sheet is its again, the whole of it
+                self.chart_sel = None;
+                if i.is_some() {
+                    self.prac_chart = None;
+                }
                 // the tune's own tempo for the metronome and the band (kept with it from now on)
                 if let Some(b) = i.and_then(|i| self.tune_bpm(i)) {
                     self.mt_bpm = b;
@@ -1646,8 +1718,8 @@ impl App {
                 let tu = &mut self.store.tunes[i];
                 tu.chart = chart;
                 tu.key = key;
-                if !composer.is_empty() {
-                    tu.info = format!("{} - written by {}", name, composer);
+                if tu.written_by.is_empty() && !composer.is_empty() {
+                    tu.written_by = composer;
                 }
                 self.chart_live = false;
                 self.chart_pick = Some(i);
@@ -1709,9 +1781,15 @@ impl App {
                 // something typed beside LOOK UP is searched instead of the tune's own name
                 let typed = self.look_q.trim().to_string();
                 let tune_name = name.clone();
+                // someone who recorded it, so a title other songs share finds the right one
+                let artist = if typed.is_empty() {
+                    self.store.tunes.get(i).and_then(|t| t.versions.first()).map(|v| v.artist.clone())
+                } else {
+                    None
+                };
                 let name = if typed.is_empty() { name } else { typed };
                 std::thread::spawn(move || {
-                    let info = sources::lookup_composer(&name);
+                    let info = sources::lookup_work(&name, artist.as_deref());
                     // a tune in the jazz standards list is jazz (and that list knows who wrote it)
                     let listed = sources::find_chart(&name).ok().map(|c| c.2);
                     let style = match want_style {
@@ -1720,8 +1798,8 @@ impl App {
                         2 => 2,
                         _ => 0,
                     };
-                    let composer = listed.unwrap_or_else(|| info.as_ref().map(|s| s.to_string()).unwrap_or_default());
-                    let composer = composer.split(|c| c == ',' || c == '\n').next().unwrap_or("").replace("Written by", "");
+                    let composer = listed.unwrap_or_else(|| info.as_ref().map(|w| w.writers.clone()).unwrap_or_default());
+                    let composer = composer.split(|c| c == ',' || c == '\n').next().unwrap_or("").replace(" (words)", "");
                     let tracks = api.popular(&name, &known, style, composer.trim()).unwrap_or_default();
                     let _ = tx.send(Msg::Lookup(tune_name, info, tracks));
                     ctx.request_repaint();
@@ -2009,8 +2087,11 @@ impl App {
                             if tune.bpm == 0 {
                                 tune.bpm = s.bpm;
                             }
-                            if tune.info.is_empty() && !s.composer.is_empty() {
-                                tune.info = format!("Written by {}", s.composer);
+                            if tune.written_by.is_empty() && !s.composer.is_empty() {
+                                tune.written_by = s.composer.clone();
+                            }
+                            if tune.style.is_empty() && !s.style.is_empty() {
+                                tune.style = s.style.clone();
                             }
                             last = Some(idx);
                             count += 1;
