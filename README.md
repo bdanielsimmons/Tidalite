@@ -7,14 +7,14 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- **v9.46:** Winamp skins drawn from their own art: the player, equalizer and playlist windows, window frames, tabs and buttons, with every button working
+- **v9.46:** Browse 90,000+ classic skins from the Winamp Skin Museum and wear one with a click
+- **v9.46:** Pick the sound output (speakers, headphones, Bluetooth) from its own button
+- **v9.46:** Visualizer settings panel with a live preview
 - **v9.44:** Playback speed for everyone, 0.25x to 2.5x with the pitch kept: presets or any speed typed in, and records spin to match
 - **v9.44:** Practice in the album view: loop and speed tools come along when you open it in practice mode
 - **v9.43:** Click any cover (album or artist page, or the big album view) to put it on a spinning record
 - **v9.40:** Credits for any Tidal track: producer, writers, players and engineers (right-click, Show credits)
-- **v9.40:** Mouse back / forward buttons walk the page history (back also closes the album view)
-- **v9.39:** Tempo and key for every track (from Tidal, or estimated from the audio), with Camelot codes for mixing
-- **v9.39:** Right-click any Tidal track: go to its album, its artist or its track radio
-- Library grouped into **MUSIC** (Tidal, SoundCloud, Files, YouTube, Lists) and **PRACTICE** (Tunes, Diary) tabs
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
