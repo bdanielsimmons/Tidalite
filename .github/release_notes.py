@@ -43,7 +43,7 @@ if new:
 out += ["## Changes", *(changes or ["- Rebuild, no code changes"]), ""]
 out += [
     "## Downloads",
-    "- **Windows:** `tidalite-practice.exe` (everything) or `tidalite-simple.exe` (no practice tools)",
+    "- **Windows:** `backline-practice.exe` (everything) or `backline-simple.exe` (no practice tools)",
     "- **Mac** (Apple Silicon and Intel): the `.tar.gz` files. Unpack, then right-click the app and choose Open"
     " the first time (it isn't signed).",
 ]

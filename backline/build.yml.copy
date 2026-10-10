@@ -2,6 +2,8 @@ name: build
 on:
   push:
     branches: ['**']
+    # docs-only pushes (README etc.) and release-notes tweaks don't build or release
+    paths-ignore: ['**.md', '.github/release_notes.py']
   workflow_dispatch:
 jobs:
   build:
@@ -59,11 +61,16 @@ jobs:
   # After every successful build of all four, publish them as a public Release (no tagging needed).
   release:
     needs: build
-    if: github.event_name != 'pull_request'
+    # releases come only from main; put [no release] in a commit message to build without publishing
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[no release]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # full history + tags, so the notes can list every commit since the last release
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v6
         with:
           path: dist
@@ -73,5 +80,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v9.${{ github.run_number }}"
+          prev=$(git tag --list 'v9.*' --sort=-v:refname | head -1)
+          python3 .github/release_notes.py "$tag" "$prev" "$RUNNER_TEMP/notes.md"
           gh release create "$tag" dist/* --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "Backline $tag" --notes "Automatic build of commit ${GITHUB_SHA::7}. Windows: backline-practice.exe (everything) or backline-simple.exe (no practice tools). Mac: the .tar.gz files." --latest
+            --title "Backline $tag" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          # a "New:" line in a commit added to the README's What's new: save it (README-only, so no rebuild)
+          if ! git diff --quiet README.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+            git commit -qm "README: what's new in $tag [no release]" README.md
+            git push origin HEAD:main || echo "README not updated: main moved on meanwhile"
+          fi

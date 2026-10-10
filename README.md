@@ -1,4 +1,4 @@
-# Tidalite
+# Backline
 
 A retro, Winamp-flavoured desktop player for Tidal. Native Rust (egui), no browser engine, no API keys:
 you log in with the normal "approve in your browser" flow. Needs an active Tidal subscription.
@@ -27,10 +27,10 @@ Every release lists its full changes on the [Releases page](../../releases).
    if hidden folders get dropped, create that file in the GitHub web UI and paste in `build.yml.copy`).
 2. Actions tab -> the `build` run -> wait ~5-10 min.
 3. Each run makes four downloads (Artifacts, bottom of the run page):
-   - `tidalite-windows-practice` / `tidalite-mac-practice`: the full app with the practice studio
-   - `tidalite-windows-simple` / `tidalite-mac-simple`: just the Tidal player, none of the practice tools
+   - `backline-windows-practice` / `backline-mac-practice`: the full app with the practice studio
+   - `backline-windows-simple` / `backline-mac-simple`: just the Tidal player, none of the practice tools
    Windows: unzip and run the `.exe`. Mac (Apple Silicon and Intel in one): unzip, then `tar -xzf` the archive, and the first
-   time right-click `tidalite` -> Open (or run `xattr -dr com.apple.quarantine tidalite`) because it is not signed.
+   time right-click `backline` -> Open (or run `xattr -dr com.apple.quarantine backline`) because it is not signed.
    Stem separation is Windows-only for now; everything else works on both.
 
 ## v9.1: what changed in the last round
@@ -91,7 +91,7 @@ The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
 - **SAVE LOOP** keeps named A-B loops per track (chips below; click to go, right-click to delete).
 - **MORE** opens: speed **TRAIN** (set how many loops to play, and how many percent faster after them),
   **PITCH** transpose without changing speed, **EAR** modes (left, right, mono, no-center, bass only),
-  **EXPORT WAV** of the loop (Music/Tidalite loops), **COUNT** in (2 or 4 clicks before each loop pass), a METRONOME button,
+  **EXPORT WAV** of the loop (Music/Backline loops), **COUNT** in (2 or 4 clicks before each loop pass), a METRONOME button,
 
 - **STEMS**: GET STEMS TOOL downloads (once, ~170 MB) the ONNX Runtime library and the HT-Demucs model from
   Hugging Face / GitHub. Then SPLIT THIS TRACK separates a stored track into drums, bass, other (guitar, keys, horns)
@@ -104,7 +104,7 @@ The library now has five lists: **TIDAL | FILES | YT | TUNES | DIARY**.
 - **FOCUS** (chip on the player, or in MORE) hides the lists: just the player, your tools and the chart.
 
 ### Lead sheet
-The changes are found for you: open a tune's CHART tab and Tidalite fetches them from the free Jazz Standards chart list
+The changes are found for you: open a tune's CHART tab and Backline fetches them from the free Jazz Standards chart list
 (about 1,300 tunes, downloaded once), plus key and composer. **I-IV-V** shows roman numerals under each chord. Tunes that aren't
 in the list (gospel, say) can still be typed in or imported from an iReal Pro link with EDIT.
 
@@ -113,7 +113,7 @@ CONCERT / Bb / Eb / F transposition. EDIT lets you type changes (`T44 *A | Dm7 G
 iReal Pro `irealb://` link (fills changes, key, tempo, composer; playlist links import every song).
 It is a visual reference only: it does not follow the recording.
 
-Data lives in `%APPDATA%\tidalite\library.json`.
+Data lives in `%APPDATA%\backline\library.json`.
 
 ## Controls
 
@@ -133,7 +133,7 @@ Data lives in `%APPDATA%\tidalite\library.json`.
 | ,  . | practice: back 2 seconds, restart loop / track |
 | Up / Down | practice: speed +5% / -5% |
 
-Media keys (play/pause, next, previous, stop) work even when Tidalite is in the background (Windows).
+Media keys (play/pause, next, previous, stop) work even when Backline is in the background (Windows).
 Right-click a song: play next / add to queue / add to or remove from My Tracks.
 Right-click a row in the queue: play now / remove / like. Drag queue rows to reorder them.
 
@@ -141,7 +141,7 @@ Right-click a row in the queue: play now / remove / like. Drag queue rows to reo
 
 The LIBRARY window has tabs: MY TRACKS (your liked songs, loaded in the background, with PLAY and SHUFFLE),
 LISTS, ALBUMS, ARTISTS. HOME shows Tidal's home feed.
-The TIDALITE menu (top of the library) holds the skins, preferences, help and tours, where tracks are stored, and the log.
+The BACKLINE menu (top of the library) holds the skins, preferences, help and tours, where tracks are stored, and the log.
 The player has the EQ (10-band equalizer) and the sleep timer (the moon; it fades out over 20 s). In practice mode the
 pomodoro timer and the metronome sit in the practice panel. Settings are remembered between runs.
 
@@ -157,16 +157,13 @@ no loop, normal speed. In PRACTICE mode a PRACTICE window opens under the player
 - **Loops are remembered per track.** Come back next week and your loop is still there.
 - BACK 2S and RESTART for the "play that bit again" reflex.
 
-Looping, slow-down and seeking all happen locally on the stored copy of the song. Tidalite never reports plays
+Looping, slow-down and seeking all happen locally, on the song held in memory. Backline never reports plays
 to Tidal, so none of this touches your listening statistics.
 
 ## Where are my tracks?
 
-Every track you play is saved to `%APPDATA%\tidalite\cache\<trackid>.m4a` (or `.flac`). The strip at the bottom
-of the player always says what is going on: `DOWNLOADING TO: ...`, `STORED ON THIS PC: <file>` or `NOT STORED YET`
-(click it to open the folder). A check mark in any list or in the queue marks songs that are stored; those start
-instantly and play offline. DISK in the library window shows the folder, how many songs and how much space they
-use, lets you switch saving off, open the folder, or clear it.
+Tracks are streamed and held in memory while they play; nothing is kept afterwards. DISK in the library window
+shows the folder Backline keeps its data in, and has a SAVING switch (off unless you turn it on) and CLEAR.
 
 ## Shuffle and the queue
 
@@ -184,7 +181,7 @@ FULLSCREEN fills the screen. LIKE hearts the song.
 ## Diagnostics
 
 LOG in the library window shows what the app is doing; COPY LOG puts it on the clipboard.
-Everything is also saved in `%APPDATA%\tidalite\log.txt`. Your login lives in `%APPDATA%\tidalite\session.json`
+Everything is also saved in `%APPDATA%\backline\log.txt`. Your login lives in `%APPDATA%\backline\session.json`
 (migrated automatically from the old `tidalfast` folder).
 
 ## Build it yourself
@@ -192,7 +189,7 @@ Everything is also saved in `%APPDATA%\tidalite\log.txt`. Your login lives in `%
 ```
 winget install Rustlang.Rustup
 cargo build --release
-target\release\tidalite.exe
+target\release\backline.exe
 ```
 If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_CHECK_REVOKE=false`.
 
@@ -266,7 +263,7 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - LISTS tab: your own playlists mixing any source; right-click a song > Add to a playlist; SAVE QUEUE AS PLAYLIST.
 - v9.29: main.rs split: skin.rs (palettes, colour helpers), viz.rs (visualizer), icons.rs (pixel icons); one shared skin menu. Behaviour unchanged.
 - Simple build now includes Files and YouTube (only practice tools are left out). Every green build publishes a Release (build-N).
-- Self-update (update.rs): checks GitHub Releases, downloads the new build in the background, installs on next start or on click. Needs a public repo; builds from the workflow carry TIDALITE_BUILD.
+- Self-update (update.rs): checks GitHub Releases, downloads the new build in the background, installs on next start or on click. Needs a public repo; builds from the workflow carry BACKLINE_BUILD.
 - Pitch is now in cents: -10c / +10c fine-tune buttons next to the semitone +/- (for records not tuned to A440).
 - FIND TUNING (tuning.rs): measures how many cents a track is from A440 and offers TUNE TO A440. Unit-tested on synthetic chords (+-3 cents).
 - icon.ico + build.rs embed the logo in the Windows exe (taskbar / pinned shortcuts).
@@ -280,7 +277,7 @@ If cargo hits an SSL/revocation error behind a corporate proxy: `set CARGO_HTTP_
 - **Keyboard shortcuts:** every key is rebindable (click a key, press the new one; ESC cancels; a key taken from another action unbinds that one). ESC, F1, F11, TAB and ENTER stay reserved. Reset-to-default button included. The Help KEYS tab reflects your bindings.
 
 ## Build speed
-CI caches compiled dependencies (Swatinem/rust-cache), and the release profile uses thin LTO with 8 codegen units. The first build after this change is as slow as before (it fills the cache); later ones only recompile Tidalite itself.
+CI caches compiled dependencies (Swatinem/rust-cache), and the release profile uses thin LTO with 8 codegen units. The first build after this change is as slow as before (it fills the cache); later ones only recompile Backline itself.
 
 ## Where things are
 - `src/main.rs` - the app window, state, and the main update loop
@@ -291,7 +288,7 @@ CI caches compiled dependencies (Swatinem/rust-cache), and the release profile u
 (Modules keep short names like `crate::player`; the folders just group the files.)
 
 ## Mac menu bar, fullscreen, softer album view
-- macOS gets a real menu bar (Tidalite / File / Playback / View / Window / Help) via the `muda` crate (`src/ui/macmenu.rs`). Shortcuts use Cmd, never bare letters. Cmd+, opens Preferences, Ctrl+Cmd+F toggles full screen.
+- macOS gets a real menu bar (Backline / File / Playback / View / Window / Help) via the `muda` crate (`src/ui/macmenu.rs`). Shortcuts use Cmd, never bare letters. Cmd+, opens Preferences, Ctrl+Cmd+F toggles full screen.
 - Fullscreen (F, or F11) now works from any view, and the app follows the window when it goes fullscreen by itself (green Mac button), so it can't get stuck.
 - Album view, modern skins: bars are a soft gradient and neighbours are blended; the waveform is smoothed. The right-click menu on the spectrum icon has a new COVER setting (cover opacity, 50-100%, default 90%) so the visualizer shows faintly through the cover.
 

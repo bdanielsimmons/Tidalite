@@ -31,7 +31,7 @@ jobs:
         shell: bash
         env:
           # lets the app know which build it is, so it can find newer releases
-          TIDALITE_BUILD: ${{ github.run_number }}
+          BACKLINE_BUILD: ${{ github.run_number }}
         run: |
           manifest=$(find . -name Cargo.toml -not -path '*/target/*' | head -1)
           if [ -z "$manifest" ]; then
@@ -44,18 +44,22 @@ jobs:
           mkdir -p "$out"
           if [ "${{ matrix.os_name }}" = "windows" ]; then
             cargo build --release ${{ matrix.flags }}
-            cp target/release/tidalite.exe "$out/tidalite-${{ matrix.flavor }}.exe"
+            cp target/release/backline.exe "$out/backline-${{ matrix.flavor }}.exe"
+            # the app used to be called Tidalite: older copies update from files with the old name
+            cp target/release/backline.exe "$out/tidalite-${{ matrix.flavor }}.exe"
           else
             # one app that runs on both Apple Silicon and Intel Macs
             cargo build --release ${{ matrix.flags }} --target aarch64-apple-darwin
             cargo build --release ${{ matrix.flags }} --target x86_64-apple-darwin
-            lipo -create -output "$out/tidalite" target/aarch64-apple-darwin/release/tidalite target/x86_64-apple-darwin/release/tidalite
-            chmod +x "$out/tidalite"
-            (cd "$out" && tar -czf "tidalite-${{ matrix.flavor }}-mac.tar.gz" tidalite && rm tidalite)
+            lipo -create -output "$out/backline" target/aarch64-apple-darwin/release/backline target/x86_64-apple-darwin/release/backline
+            chmod +x "$out/backline"
+            (cd "$out" && tar -czf "backline-${{ matrix.flavor }}-mac.tar.gz" backline)
+            # older copies (when it was called Tidalite) look for this file holding a program named tidalite
+            (cd "$out" && mv backline tidalite && tar -czf "tidalite-${{ matrix.flavor }}-mac.tar.gz" tidalite && rm tidalite)
           fi
       - uses: actions/upload-artifact@v6
         with:
-          name: tidalite-${{ matrix.os_name }}-${{ matrix.flavor }}
+          name: backline-${{ matrix.os_name }}-${{ matrix.flavor }}
           path: out/*
 
   # After every successful build of all four, publish them as a public Release (no tagging needed).
@@ -83,7 +87,7 @@ jobs:
           prev=$(git tag --list 'v9.*' --sort=-v:refname | head -1)
           python3 .github/release_notes.py "$tag" "$prev" "$RUNNER_TEMP/notes.md"
           gh release create "$tag" dist/* --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "Tidalite $tag" --notes-file "$RUNNER_TEMP/notes.md" --latest
+            --title "Backline $tag" --notes-file "$RUNNER_TEMP/notes.md" --latest
           # a "New:" line in a commit added to the README's What's new: save it (README-only, so no rebuild)
           if ! git diff --quiet README.md; then
             git config user.name "github-actions[bot]"
