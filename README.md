@@ -7,6 +7,8 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- Tidalite is now called Backline - your library, login, skins and settings move across by themselves
+- Tracks stream without being saved to disk; switch SAVING on under DISK to keep them
 - LINES under PRACTICE - Slonimsky's Diary (lines from Slonimsky's system, or a pattern book you add) and scales in intervals, in notation and tab, looped, counted
 - Practice progressions under TUNES - fold open a group, pick a key, hear it, or send it to the lead sheet for the band
 - Drag across bars on the lead sheet to loop just those
@@ -15,8 +17,6 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 - Set your own key and BPM for any song (right-click > Key and BPM...), kept on this computer
 - A new tune opens straight to its lead sheet, ready to fill in
 - Write who wrote a tune in its ABOUT line
-- CHORDS tab under PRACTICE - find any chord (notes, grips, scales) or click notes on a neck to name them
-- CLUSTERS trainer - semitone and tone clusters through the parent scales, fixed cluster / fixed bass, and in a tune
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
