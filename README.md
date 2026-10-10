@@ -7,6 +7,9 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- High contrast skins (dark and light), plus colour-blind safe loops and reduce motion in Preferences > ACCESSIBILITY
+- Sleek skins and tooltips use Chakra Petch, a retro font that isn't pixel text
+- HIFI / 320K sits on the player's title bar with every skin; Winamp skins show the key and BPM in the scrolling title
 - Winamp skins: thousands of classic ones from the Winamp Skin Museum, or Tidalite's own palettes as sleek Winamp-style skins (ORIGINAL) or the classic pixel look (RETRO ORIGINAL)
 - Three tabs - MUSIC, PRACTICE and TIDALITE - with one back / forward history (the mouse's side buttons too)
 - Practice panel: A-B loops you can save, speed from 25% to 250% in 1% steps, a speed trainer, pitch and ear tools, and stems
@@ -14,8 +17,6 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 - Equalizer with presets and a preamp; Winamp skins show volume, balance and seek readouts and a repeat-one badge
 - YouTube playlists load in full and fold into one card; your Tidal library opens instantly (REFRESH to reload it)
 - Click any album or artist picture to see it big
-- An opening sound: Tidalite's chime or a file of yours
-- Accessibility: high-contrast skins, colour-blind safe loops, reduce motion, and a size setting for everything
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
