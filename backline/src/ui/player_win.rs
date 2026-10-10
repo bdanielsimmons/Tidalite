@@ -498,6 +498,7 @@ impl App {
         if self.rtab == 0 && self.wa_art.as_ref().is_some_and(|t| t.sheets.contains_key("pledit")) {
             let inner = ui.max_rect();
             let outer = Rect::from_min_max(inner.min - Vec2::new(14.0, 30.0), inner.max + Vec2::new(14.0, 14.0));
+            crate::tour::note("QUEUE", outer);
             self.winamp_playlist(ui, outer, acts);
             return;
         }

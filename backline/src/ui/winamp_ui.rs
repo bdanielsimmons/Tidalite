@@ -329,6 +329,9 @@ impl App {
         let pl = Place::fit(skin_area);
         let right = pl.o.x + 275.0 * pl.s;
         let cover = Rect::from_center_size(Pos2::new((right + area.max.x) / 2.0, area.center().y), Vec2::splat(side));
+        // the tour points at the skinned player and its cover too
+        crate::tour::note("PLAYER", Rect::from_min_size(pl.o, Vec2::new(275.0 * pl.s, 116.0 * pl.s)));
+        crate::tour::mark("COVER", cover);
         if let Some(tr) = self.cur_track() {
             let url = cover_url(&tr.cover, 320);
             // framed in the skin's colours

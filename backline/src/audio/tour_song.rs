@@ -7,6 +7,9 @@ use std::path::PathBuf;
 const URL: &str = "https://raw.githubusercontent.com/bdanielsimmons/Backline/main/backline/assets/tour.mp3";
 
 /// The credit the licence asks for, shown in the tour.
+/// Its cover: original pixel art made for Backline (a sky at sunset, for a weather report).
+pub const COVER: &str = "https://raw.githubusercontent.com/bdanielsimmons/Backline/main/backline/assets/tour_cover.png";
+
 pub const CREDIT: &str =
     "\"Local Forecast - Elevator\" Kevin MacLeod (incompetech.com). Licensed under Creative Commons: By Attribution 4.0.";
 

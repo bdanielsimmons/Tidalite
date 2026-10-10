@@ -225,6 +225,8 @@ pub(crate) struct TourPlay {
     lp: (Option<f32>, Option<f32>, bool),
     eq: ([f32; 10], bool, bool),
     last: Option<crate::store::Last>,
+    /// repeat as it was (the tour plays its song on repeat one)
+    repeat: crate::Repeat,
     /// the tour's song, once it is the one playing
     song: Option<i64>,
 }
@@ -257,6 +259,7 @@ impl App {
             lp: (self.loop_a, self.loop_b, self.loop_on),
             eq: (self.eq_gains, self.eq_on, self.show_eq),
             last: self.store.last.clone(),
+            repeat: self.repeat,
             song: None,
         };
         self.tour_play = Some(snap);
@@ -278,7 +281,9 @@ impl App {
         if self.tour.is_none() || self.tour_play.as_ref().map_or(true, |s| s.song.is_some()) {
             return;
         }
-        let track = crate::sources::ext_for_file(&path).to_track();
+        let mut track = crate::sources::ext_for_file(&path).to_track();
+        // its own cover, drawn for Backline
+        track.cover = crate::tour_song::COVER.to_string();
         if let Some(s) = self.tour_play.as_mut() {
             s.song = Some(track.id);
         }
@@ -286,6 +291,8 @@ impl App {
         self.queue = std::sync::Arc::new(vec![track]);
         self.orig_queue = None;
         self.shuffle = false;
+        // round and round, so it never runs out mid-tour
+        self.repeat = crate::Repeat::One;
         self.loop_a = None;
         self.loop_b = None;
         self.loop_on = false;
@@ -345,6 +352,7 @@ impl App {
         self.queue = s.queue;
         self.orig_queue = s.orig_queue;
         self.shuffle = s.shuffle;
+        self.repeat = s.repeat;
         (self.eq_gains, self.eq_on, self.show_eq) = s.eq;
         self.apply_eq();
         self.store.last = s.last;
