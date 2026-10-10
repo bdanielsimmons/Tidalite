@@ -7,16 +7,16 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- CHORDS tab under PRACTICE - find any chord (notes, grips, scales) or click notes on a neck to name them
+- CLUSTERS trainer - semitone and tone clusters through the parent scales, fixed cluster / fixed bass, and in a tune
+- VOICINGS trainer - triads, shells, close, drop 2, drop 3 and drop 2&4 on every string set, walked through a tune's changes
+- PASSING CHORDS - V7, ii-V, tritone sub, diminished, half-step and backdoor approaches, in the voicing and strings you pick
+- The band loops, keeps each part's level, and can export a WAV
+- Edit the title and artist of your own files (written into the file's tags)
 - High contrast skins (dark and light), plus colour-blind safe loops and reduce motion in Preferences > ACCESSIBILITY
 - Sleek skins and tooltips use Chakra Petch, a retro font that isn't pixel text
 - HIFI / 320K sits on the player's title bar with every skin; Winamp skins show the key and BPM in the scrolling title
 - Winamp skins: thousands of classic ones from the Winamp Skin Museum, or Tidalite's own palettes as sleek Winamp-style skins (ORIGINAL) or the classic pixel look (RETRO ORIGINAL)
-- Three tabs - MUSIC, PRACTICE and TIDALITE - with one back / forward history (the mouse's side buttons too)
-- Practice panel: A-B loops you can save, speed from 25% to 250% in 1% steps, a speed trainer, pitch and ear tools, and stems
-- A guided tour that plays a song and shows each feature working, then puts everything back the way you had it
-- Equalizer with presets and a preamp; Winamp skins show volume, balance and seek readouts and a repeat-one badge
-- YouTube playlists load in full and fold into one card; your Tidal library opens instantly (REFRESH to reload it)
-- Click any album or artist picture to see it big
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
