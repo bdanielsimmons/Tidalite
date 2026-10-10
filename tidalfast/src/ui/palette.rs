@@ -324,10 +324,24 @@ mod tests {
 
     #[test]
     fn every_palette_entry_runs_something() {
-        // each name must be known to run_named, or picking it would do nothing
+        // a name must be a keyboard command or have its own case in run_named, or picking it does nothing.
+        // The Mac menu bar sends the same names, so its items are checked too (that code only builds on a Mac).
+        let src = include_str!("palette.rs");
+        let body = &src[src.find("fn run_named").unwrap()..];
+        let handled = |id: &str| {
+            CMDS.iter().any(|c| c.id == id)
+                || body.contains(&format!("\"{}\" =>", id))
+                || body.contains(&format!("\"{}\" if", id))
+        };
         let names: Vec<&str> = ITEMS.iter().map(|i| i.1).collect();
         for (i, n) in names.iter().enumerate() {
-            assert!(!n.is_empty() && !names[..i].contains(n), "duplicate or empty: {}", n);
+            assert!(!names[..i].contains(n), "duplicate: {}", n);
+            assert!(handled(n), "palette entry {} does nothing", n);
+        }
+        let mac = include_str!("macmenu.rs");
+        for part in mac.split("it(\"").skip(1) {
+            let id = &part[..part.find('"').unwrap()];
+            assert!(handled(id), "Mac menu item {} does nothing", id);
         }
     }
 }
