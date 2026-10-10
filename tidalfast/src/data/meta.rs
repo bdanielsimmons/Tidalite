@@ -15,6 +15,8 @@ pub struct Info {
     /// came from Tidal (not saved: Tidal sends it again), rather than detected here
     #[serde(skip)]
     pub tidal: bool,
+    /// set by you (Key and BPM...): wins over Tidal and detection, kept on this computer only
+    pub mine: bool,
 }
 
 static TABLE: LazyLock<Mutex<HashMap<i64, Info>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -30,6 +32,9 @@ pub fn get(id: i64) -> Option<Info> {
 pub fn from_tidal(id: i64, bpm: Option<u16>, key: Option<u8>) {
     let mut t = TABLE.lock().unwrap();
     let e = t.entry(id).or_default();
+    if e.mine {
+        return;
+    }
     e.bpm = bpm.or(e.bpm);
     e.key = key.or(e.key);
     e.tidal = true;
@@ -43,6 +48,27 @@ pub fn set_detected(id: i64, found: Info) {
     e.key = e.key.or(found.key);
 }
 
+/// Your own key and tempo for a track (None for both = forget yours).
+pub fn set_mine(id: i64, bpm: Option<u16>, key: Option<u8>) {
+    let mut t = TABLE.lock().unwrap();
+    if bpm.is_none() && key.is_none() {
+        t.remove(&id);
+        TRIED.lock().unwrap().remove(&id);
+    } else {
+        t.insert(id, Info { bpm, key, tidal: false, mine: true });
+    }
+}
+
+/// A key typed by hand: "A", "F#m", "Eb minor", "Bb major".
+pub fn parse_typed_key(s: &str) -> Option<u8> {
+    let s = s.trim();
+    let lower = s.to_ascii_lowercase();
+    let minor = lower.contains("min") || (s.ends_with('m') && !lower.ends_with("maj"));
+    let two = s.chars().nth(1).is_some_and(|c| c == '#' || c == 'b');
+    let root: String = s.chars().take(if two { 2 } else { 1 }).collect();
+    parse_key(&root, if minor { "MINOR" } else { "MAJOR" })
+}
+
 /// Start of the session: the detected values saved last time.
 pub fn load(saved: &HashMap<i64, Info>) {
     TABLE.lock().unwrap().extend(saved.iter().map(|(k, v)| (*k, *v)));
@@ -50,7 +76,7 @@ pub fn load(saved: &HashMap<i64, Info>) {
 
 /// The detected values, for library.json.
 pub fn saved() -> HashMap<i64, Info> {
-    TABLE.lock().unwrap().iter().filter(|(_, v)| !v.tidal).map(|(k, v)| (*k, *v)).collect()
+    TABLE.lock().unwrap().iter().filter(|(_, v)| !v.tidal || v.mine).map(|(k, v)| (*k, *v)).collect()
 }
 
 /// Claim the analyzer for this track, if it still lacks tempo or key and nothing else is being analyzed.
@@ -73,7 +99,7 @@ pub fn detect(id: i64, bytes: Vec<u8>) -> Info {
         TRIED.lock().unwrap().insert(id);
     }
     BUSY.store(false, Ordering::Release);
-    Info { bpm, key, tidal: false }
+    Info { bpm, key, tidal: false, mine: false }
 }
 
 const MAJOR: [&str; 12] = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -90,7 +116,7 @@ pub fn key_short(k: u8) -> &'static str {
 
 /// What a list or the player shows: Tidal's key as is, a detected one with a "?" (it is an estimate).
 pub fn key_text(i: &Info) -> String {
-    i.key.map_or(String::new(), |k| format!("{}{}", key_short(k), if i.tidal { "" } else { "?" }))
+    i.key.map_or(String::new(), |k| format!("{}{}", key_short(k), if i.tidal || i.mine { "" } else { "?" }))
 }
 
 /// Long name with the Camelot code DJs mix by: "A minor (8A)".
@@ -138,6 +164,15 @@ pub fn parse_key(key: &str, scale: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_keys() {
+        assert_eq!(parse_typed_key("A"), Some(9));
+        assert_eq!(parse_typed_key("F#m"), Some(18));
+        assert_eq!(parse_typed_key("Eb minor"), Some(15));
+        assert_eq!(parse_typed_key("Bb major"), Some(10));
+        assert_eq!(parse_typed_key("x"), None);
+    }
 
     #[test]
     fn names_and_camelot() {

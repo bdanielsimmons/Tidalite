@@ -321,7 +321,9 @@ pub(crate) fn parse_chord(c: &str) -> Option<Chord> {
     let r = rest;
     let minor = (r.starts_with('m') && !r.starts_with("maj")) || r.starts_with("dim");
     let digits = r.chars().any(|c| c.is_ascii_digit());
-    let third = if r.contains("sus") {
+    let third = if r.contains("sus2") {
+        2
+    } else if r.contains("sus") {
         5
     } else if minor {
         3
@@ -339,7 +341,10 @@ pub(crate) fn parse_chord(c: &str) -> Option<Chord> {
         Some(9)
     } else if r.contains("69") {
         Some(9) // a 6/9 chord has the sixth, not a flat seventh
-    } else if r.contains("maj") || r.contains('^') || r.contains("ma7") {
+    } else if r.contains("add") && !r.contains('7') {
+        // an added note is only that: Gadd9 is G B D A, no seventh
+        r.contains('6').then_some(9)
+    } else if r.contains("maj") || r.contains("Maj") || r.contains('^') || r.contains("ma7") {
         digits.then_some(11)
     } else if r.contains('7') || r.contains('9') || r.contains("11") || r.contains("13") {
         Some(10)

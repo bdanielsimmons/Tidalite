@@ -1510,6 +1510,8 @@ impl App {
                 self.add_version(i, v);
                 self.pick = None;
                 self.tune_open = Some(i);
+                self.chart_pick = Some(i);
+                self.chart_live = false;
                 self.sec = Sec::Tunes;
                 self.serial += 1;
             }
@@ -1525,6 +1527,9 @@ impl App {
                     self.add_version(i, v);
                 }
                 self.tune_open = Some(i);
+                // the lead sheet shows the new tune (blank until its changes are found or typed)
+                self.chart_pick = Some(i);
+                self.chart_live = false;
                 self.serial += 1;
             }
             Action::OpenTune(i) => {

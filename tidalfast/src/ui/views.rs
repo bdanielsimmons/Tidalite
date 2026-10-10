@@ -1176,11 +1176,17 @@ impl App {
             Some(84.0),
         );
         self.store_dirty |= o.changed;
-        let info = self.store.tunes[i].info.clone();
-        if !info.is_empty() {
-            ui.add_space(2.0);
-            para(ui, &info, pal().ink2);
-        }
+        // who wrote it (LOOK UP fills it in; fix it or write your own)
+        let o = field_row(
+            ui,
+            &mut self.ed,
+            crate::tools::F_T_INFO,
+            "ABOUT",
+            &mut self.store.tunes[i].info,
+            "Written by... (album, who played on it)",
+            None,
+        );
+        self.store_dirty |= o.changed;
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             if retro_btn(ui, "PLAY ALL", false).clicked() {

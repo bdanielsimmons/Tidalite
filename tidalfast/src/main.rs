@@ -1169,12 +1169,13 @@ fn list_row(
 /// "Go to album / artist / track radio" and the credits, for a Tidal track (files, YouTube and SoundCloud have none).
 /// A track with several artists gets one entry per artist, so you pick which one.
 fn goto_items(ui: &mut egui::Ui, acts: &mut Vec<Action>, t: &Track, tidal: bool) {
+    // your files, YouTube and SoundCloud songs can be renamed; a Tidal song's names are Tidal's, but its key and
+    // tempo can be set (kept on this computer)
+    if menu_item(ui, if tidal { "Key and BPM..." } else { "Edit info..." }) {
+        acts.push(Action::EditInfo(t.id, t.title.clone(), t.artist.clone()));
+        ui.close_menu();
+    }
     if !tidal {
-        // your files, YouTube and SoundCloud songs can be renamed (Tidal's come from Tidal)
-        if menu_item(ui, "Edit info...") {
-            acts.push(Action::EditInfo(t.id, t.title.clone(), t.artist.clone()));
-            ui.close_menu();
-        }
         return;
     }
     let mut go = |ui: &mut egui::Ui, label: &str, a: Action| {
@@ -2374,6 +2375,8 @@ struct App {
     seq_play: Option<(Instant, f32, String, usize)>,
     /// the song whose info is being edited: its id, the title and the artist as typed
     edit_info: Option<(i64, String, String)>,
+    /// key and BPM being typed in the edit info panel
+    edit_kb: (String, String),
     /// which skin groups are open on the TIDALITE page (ORIGINAL, RETRO ORIGINAL, WINAMP)
     skins_open: [bool; 3],
     neck_zoom: f32,
@@ -2758,6 +2761,7 @@ impl App {
             seq_play: None,
             skins_open: [false; 3],
             edit_info: None,
+            edit_kb: (String::new(), String::new()),
             neck_zoom: 1.0,
             ghost_alpha: 0.7,
             an_pick: None,
@@ -3732,6 +3736,11 @@ impl App {
             // one history for the whole library: every tab, page, tune and side page (history.rs)
             Action::Back => self.hist_go(true),
             Action::EditInfo(id, title, artist) => {
+                let m = meta::get(id).unwrap_or_default();
+                self.edit_kb = (
+                    m.key.map_or(String::new(), |k| meta::key_short(k).to_string()),
+                    m.bpm.map_or(String::new(), |b| b.to_string()),
+                );
                 self.edit_info = Some((id, title, artist));
                 self.ed.id = 0;
             }
@@ -4923,7 +4932,7 @@ mod tests {
     fn key_and_tempo_cell() {
         meta::from_tidal(888001, Some(120), Some(12 + 9));
         assert!(track_cells(888001, "T", "A", "B").ends_with("\tAm|120"));
-        meta::set_detected(888002, meta::Info { bpm: Some(95), key: Some(0), tidal: false });
+        meta::set_detected(888002, meta::Info { bpm: Some(95), key: Some(0), ..Default::default() });
         assert!(track_cells(888002, "T", "A", "B").ends_with("\tC?|95"), "detected keys carry a ?");
         assert!(track_cells(888003, "T", "A", "").ends_with("\t|"), "unknown: empty cell");
     }

@@ -325,20 +325,31 @@ impl App {
         ctx.request_repaint();
     }
 
-    /// Edit a song's title and artist (your files, YouTube and SoundCloud songs).
+    /// Edit a song's title and artist (your files, YouTube and SoundCloud songs) and its key and tempo; for a Tidal
+    /// song only the key and tempo, kept on this computer.
     pub(crate) fn edit_info_panel(&mut self, ctx: &egui::Context) {
         let Some((id, _, _)) = self.edit_info.clone() else { return };
         let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let mut save = false;
         let is_file = self.store.files.iter().any(|e| e.id == id);
+        let tidal = self.ext_of(id).is_none() && !is_file;
         panel(ctx, "edit_info", 520.0, |ui| {
-            title_line(ui, "EDIT INFO", 3.0, pal().ink);
+            title_line(ui, if tidal { "KEY AND BPM" } else { "EDIT INFO" }, 3.0, pal().ink);
             ui.add_space(6.0);
             let Some((_, title, artist)) = self.edit_info.as_mut() else { return };
-            for (lab, fid, val, hint) in [
-                ("TITLE", crate::tools::F_INFO_TITLE, title, "Song title"),
-                ("ARTIST", crate::tools::F_INFO_ARTIST, artist, "Artist"),
-            ] {
+            if tidal {
+                para(ui, &format!("{} - {}", artist, title), pal().ink);
+            }
+            let (key, bpm) = (&mut self.edit_kb.0, &mut self.edit_kb.1);
+            let mut rows = vec![
+                ("KEY", crate::tools::F_INFO_KEY, key, "e.g. Dm, F#, Eb major"),
+                ("BPM", crate::tools::F_INFO_BPM, bpm, "e.g. 120"),
+            ];
+            if !tidal {
+                rows.insert(0, ("ARTIST", crate::tools::F_INFO_ARTIST, artist, "Artist"));
+                rows.insert(0, ("TITLE", crate::tools::F_INFO_TITLE, title, "Song title"));
+            }
+            for (lab, fid, val, hint) in rows {
                 ui.horizontal(|ui| {
                     crate::views::label(ui, lab, 80.0);
                     let w = ui.available_width() - 6.0;
@@ -351,10 +362,12 @@ impl App {
             }
             para(
                 ui,
-                if is_file {
-                    "Renamed everywhere in Tidalite, and written into the file itself so other players see it too."
+                if tidal {
+                    "Only for you, on this computer: Tidal's own info stays as it is. Empty both to go back to Tidal's."
+                } else if is_file {
+                    "Renamed everywhere in Tidalite, and written into the file itself so other players see it too. Key and BPM stay in Tidalite."
                 } else {
-                    "Renamed everywhere in Tidalite (your lists, playlists, tunes and the queue)."
+                    "Renamed in your lists, playlists, tunes and the queue. Tidal's own album and search pages keep Tidal's names."
                 },
                 pal().ink2,
             );
@@ -369,7 +382,18 @@ impl App {
         });
         if save {
             if let Some((id, title, artist)) = self.edit_info.take() {
-                self.apply(Action::SaveInfo(id, title, artist));
+                // key and tempo: yours win; both empty hands them back to Tidal or detection
+                let key = crate::meta::parse_typed_key(&self.edit_kb.0);
+                let bpm = self.edit_kb.1.trim().parse::<u16>().ok().filter(|b| (20..=400).contains(b));
+                let before = crate::meta::get(id).unwrap_or_default();
+                if key != before.key || bpm != before.bpm {
+                    crate::meta::set_mine(id, bpm, key);
+                    self.store.meta = crate::meta::saved();
+                    self.store_dirty = true;
+                }
+                if !tidal {
+                    self.apply(Action::SaveInfo(id, title, artist));
+                }
             }
             self.ed.id = 0;
         } else if close {

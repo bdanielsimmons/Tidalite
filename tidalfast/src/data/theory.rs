@@ -1005,3 +1005,17 @@ mod tests {
         assert_eq!(scales_for(&chord_notes("Bm7b5").unwrap())[0].0, "Locrian");
     }
 }
+
+#[cfg(test)]
+mod chord_spellings {
+    #[test]
+    fn added_notes_and_suspensions() {
+        // an add9 has no seventh; sus2 has the 2nd; every chord of a real chart reads
+        assert_eq!(super::chord_notes("Gadd9/A").unwrap().pcs, vec![7, 11, 2, 9]);
+        assert_eq!(super::chord_notes("Dsus2").unwrap().pcs, vec![2, 4, 9]);
+        assert_eq!(super::chord_notes("CmMaj7").unwrap().pcs, vec![0, 3, 7, 11]);
+        for c in "Em11 Fm7/Bb Em7/A Fadd9/G Asus4 A7#5 Bb/C Dm9 F/Bb Dm/A C7sus4 G6/A".split(' ') {
+            assert!(super::chord_notes(c).is_some(), "{}", c);
+        }
+    }
+}

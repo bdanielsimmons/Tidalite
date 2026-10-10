@@ -52,6 +52,9 @@ pub const F_CHORD: u32 = 52;
 pub const F_INFO_TITLE: u32 = 53;
 pub const F_INFO_ARTIST: u32 = 54;
 pub const F_CL_CHANGES: u32 = 55;
+pub const F_T_INFO: u32 = 56;
+pub const F_INFO_KEY: u32 = 57;
+pub const F_INFO_BPM: u32 = 58;
 
 impl App {
     /// A box you can type into. Shows `shown`; returns the typed text when you press Enter or click away.
