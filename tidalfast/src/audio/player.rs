@@ -26,6 +26,8 @@ pub enum Cmd {
     /// short three-note chime (focus timer, only when you switch it on)
     Chime,
     Stop,
+    /// play through this output (None = the system's default). What was playing stops; the app plays it again.
+    Device(Option<String>),
 }
 
 #[derive(Default)]
@@ -66,6 +68,8 @@ pub struct Ctl {
     /// transpose in cents (100 = one semitone)
     semis: AtomicI32,
     chan: AtomicU32,
+    /// left / right balance, -100 (left only) to 100 (right only)
+    balance: AtomicI32,
     wraps: AtomicU32,
     count_in: AtomicU32,
     bpm10: AtomicU32,
@@ -82,6 +86,7 @@ impl Ctl {
             rate: AtomicU32::new(44100),
             semis: AtomicI32::new(0),
             chan: AtomicU32::new(0),
+            balance: AtomicI32::new(0),
             wraps: AtomicU32::new(0),
             count_in: AtomicU32::new(0),
             bpm10: AtomicU32::new(0),
@@ -96,6 +101,11 @@ impl Ctl {
     /// 0 stereo, 1 left, 2 right, 3 mono, 4 center-cancel, 5 bass only
     pub fn set_chan(&self, m: u32) {
         self.chan.store(m, Ordering::Relaxed);
+    }
+
+    /// Left / right balance, -100 to 100 (0 = as recorded).
+    pub fn set_balance(&self, b: i32) {
+        self.balance.store(b.clamp(-100, 100), Ordering::Relaxed);
     }
 
     /// Clicks before each loop pass (0 = off) at this tempo (of the original recording).
@@ -587,6 +597,7 @@ struct Chan<S: Source<Item = i16>> {
     ctl: Arc<Ctl>,
     ch: usize,
     mode: u32,
+    bal: i32,
     tick: u32,
     pend: Option<i16>,
     lp: [Biquad; 2],
@@ -610,7 +621,8 @@ impl<S: Source<Item = i16>> Chan<S> {
             a1: -2.0 * cw / a0,
             a2: (1.0 - alpha) / a0,
         };
-        Chan { inner, ctl, ch, mode: 0, tick: 0, pend: None, lp: [bq, bq], z: [[0.0; 2]; 2] }
+        let (mode, bal) = (ctl.chan.load(Ordering::Relaxed), ctl.balance.load(Ordering::Relaxed));
+        Chan { inner, ctl, ch, mode, bal, tick: 0, pend: None, lp: [bq, bq], z: [[0.0; 2]; 2] }
     }
 
     fn filt(&mut self, x: f32) -> f32 {
@@ -637,8 +649,9 @@ impl<S: Source<Item = i16>> Iterator for Chan<S> {
         self.tick = self.tick.wrapping_add(1);
         if self.tick % 256 == 0 {
             self.mode = self.ctl.chan.load(Ordering::Relaxed);
+            self.bal = self.ctl.balance.load(Ordering::Relaxed);
         }
-        if self.mode == 0 || self.ch != 2 {
+        if (self.mode == 0 && self.bal == 0) || self.ch != 2 {
             return self.inner.next();
         }
         let l = self.inner.next()? as f32;
@@ -660,6 +673,9 @@ impl<S: Source<Item = i16>> Iterator for Chan<S> {
             }
             _ => (l, r),
         };
+        // balance: turn down the side you pan away from
+        let b = self.bal as f32 / 100.0;
+        let (ol, or) = (ol * (1.0 - b.max(0.0)), or * (1.0 + b.min(0.0)));
         self.pend = Some(or.clamp(-32768.0, 32767.0) as i16);
         Some(ol.clamp(-32768.0, 32767.0) as i16)
     }
@@ -946,6 +962,42 @@ fn play_clicks(handle: &OutputStreamHandle, beats: u32, interval: f32, vol: f32)
 }
 
 /// Open the default output device; if that fails, try every device the system lists.
+/// The sound outputs this computer has (speakers, headphones, paired Bluetooth devices...), by name.
+pub fn output_devices() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Ok(devs) = rodio::cpal::default_host().output_devices() {
+        for d in devs {
+            if let Ok(n) = d.name() {
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Open the output with this name; if it is gone (unplugged, Bluetooth off), the default one.
+fn open_named(name: Option<&str>) -> Result<(OutputStream, OutputStreamHandle), String> {
+    if let Some(want) = name {
+        if let Ok(devs) = rodio::cpal::default_host().output_devices() {
+            for d in devs {
+                if d.name().ok().as_deref() == Some(want) {
+                    match OutputStream::try_from_device(&d) {
+                        Ok(x) => {
+                            log(&format!("audio: opened chosen device '{}'", want));
+                            return Ok(x);
+                        }
+                        Err(e) => log(&format!("audio: chosen device '{}' failed: {}", want, e)),
+                    }
+                }
+            }
+        }
+        log(&format!("audio: '{}' not available, using the default", want));
+    }
+    open_output()
+}
+
 fn open_output() -> Result<(OutputStream, OutputStreamHandle), String> {
     let why = match OutputStream::try_default() {
         Ok(x) => {
@@ -984,7 +1036,7 @@ impl Player {
         let ctl_t = ctl.clone();
 
         std::thread::spawn(move || {
-            let (_stream, handle) = match open_output() {
+            let (mut _stream, mut handle) = match open_output() {
                 Ok(x) => x,
                 Err(e) => {
                     let msg = format!("NO AUDIO OUTPUT: {}", e);
@@ -1080,6 +1132,26 @@ impl Player {
                             }
                         }
                     }
+                    Ok(Cmd::Device(name)) => match open_named(name.as_deref()) {
+                        Ok((s, h)) => {
+                            // nothing can move to the new output: stop it all, the app starts the song again there
+                            if let Some(old) = sink.take() {
+                                old.stop();
+                            }
+                            for slot in slots.iter_mut() {
+                                if let Some((m, _)) = slot.take() {
+                                    m.stop();
+                                }
+                            }
+                            _stream = s;
+                            handle = h;
+                        }
+                        Err(e) => {
+                            let m = format!("Audio device error: {}", e);
+                            log(&m);
+                            sh.lock().unwrap().error = Some(m);
+                        }
+                    },
                     Ok(Cmd::Pause) => {
                         user_paused = true;
                         if let Some(s) = &sink {
@@ -1191,5 +1263,27 @@ impl Player {
 
     pub fn send(&self, c: Cmd) {
         let _ = self.tx.send(c);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stereo(b: i32) -> Vec<i16> {
+        let ctl = Arc::new(Ctl::new());
+        ctl.set_balance(b);
+        let src = rodio::buffer::SamplesBuffer::new(2, 44100, vec![1000i16; 2000]);
+        Chan::new(src, ctl).collect()
+    }
+
+    #[test]
+    fn balance_pans() {
+        let mid = stereo(0);
+        assert!(mid.iter().all(|&s| s == 1000), "centre: as recorded");
+        let right = stereo(100);
+        assert!(right.chunks(2).all(|f| f[0] == 0 && f[1] == 1000), "full right: the left side is silent");
+        let left = stereo(-50);
+        assert!(left.chunks(2).all(|f| f[0] == 1000 && f[1] == 500), "half left: the right side at half");
     }
 }

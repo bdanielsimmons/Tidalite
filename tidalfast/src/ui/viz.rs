@@ -94,6 +94,16 @@ pub(crate) fn smooth(src: &[f32], passes: usize, half: usize) -> Vec<f32> {
     cur
 }
 
+thread_local! {
+    /// fade the drawing out toward its left and right ends (the album view's SOFT EDGES frame)
+    static EDGE_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Switch the soft fade at the ends on or off for the drawings that follow.
+pub(crate) fn set_edge_fade(on: bool) {
+    EDGE_FADE.with(|c| c.set(on));
+}
+
 /// Bars and/or waveform inside `r`. `art` = soft white overlay (album view); otherwise the skin's own colours.
 pub(crate) fn viz_draw(
     p: &egui::Painter,
@@ -152,6 +162,15 @@ pub(crate) fn viz_draw(
     } else {
         (pal().ink, pal().ink2, pal().ink)
     };
+    // full strength in the middle, easing to nothing over the outer 15% each side
+    let fading = EDGE_FADE.with(|c| c.get());
+    let edge = |x: f32| -> f32 {
+        if !fading {
+            return 1.0;
+        }
+        let d = ((x - r.min.x).min(r.max.x - x) / (r.width() * 0.15).max(1.0)).clamp(0.0, 1.0);
+        d * d * (3.0 - 2.0 * d)
+    };
     if mode == 0 || mode == 2 {
         let slot = r.width() / nb as f32;
         let bw = (slot * wfrac).max(1.5);
@@ -165,6 +184,8 @@ pub(crate) fn viz_draw(
         let mut soft_mesh = egui::Mesh::default();
         for i in 0..nb.min(peaks.len()) {
             let x = r.min.x + i as f32 * slot + (slot - bw) / 2.0;
+            let f = edge(x + bw / 2.0);
+            let (body, cap) = (body.gamma_multiply(f), cap.gamma_multiply(f));
             let mut h = bands[i] * r.height();
             let mut ph = peaks[i] * r.height();
             if q > 0.0 {
@@ -222,22 +243,35 @@ pub(crate) fn viz_draw(
             let uv = egui::epaint::WHITE_UV;
             let (ft, fb) = (body.linear_multiply(0.5), body.linear_multiply(0.08));
             for pt in &pts {
-                mesh.vertices.push(egui::epaint::Vertex { pos: *pt, uv, color: ft });
-                mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(pt.x, r.max.y), uv, color: fb });
+                let f = edge(pt.x);
+                mesh.vertices.push(egui::epaint::Vertex { pos: *pt, uv, color: ft.gamma_multiply(f) });
+                mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(pt.x, r.max.y), uv, color: fb.gamma_multiply(f) });
             }
             for k in 0..(pts.len() as u32 - 1) {
                 let b = k * 2;
                 mesh.indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
             }
             p.add(egui::Shape::mesh(mesh));
-            if style() == 1 || art {
-                // soft glow under the line
-                p.add(egui::Shape::line(
-                    pts.clone(),
-                    Stroke::new(w * 3.0, Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), 36)),
-                ));
+            if fading {
+                // piece by piece, so the line fades out at the ends with everything else
+                for seg in pts.windows(2) {
+                    let f = edge((seg[0].x + seg[1].x) / 2.0);
+                    p.line_segment(
+                        [seg[0], seg[1]],
+                        Stroke::new(w * 3.0, Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), 36).gamma_multiply(f)),
+                    );
+                    p.line_segment([seg[0], seg[1]], Stroke::new(w, line.gamma_multiply(f)));
+                }
+            } else {
+                if style() == 1 || art {
+                    // soft glow under the line
+                    p.add(egui::Shape::line(
+                        pts.clone(),
+                        Stroke::new(w * 3.0, Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), 36)),
+                    ));
+                }
+                p.add(egui::Shape::line(pts, Stroke::new(w, line)));
             }
-            p.add(egui::Shape::line(pts, Stroke::new(w, line)));
         } else {
             // pixel scope: 2-dot columns, joined vertically
             let step = if art { 6.0 } else { 2.0 };
@@ -252,7 +286,9 @@ pub(crate) fn viz_draw(
                     Some(pv) => (pv.min(y), pv.max(y)),
                     None => (y, y),
                 };
-                let col = Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), line.a());
+                let f = edge(r.min.x + c as f32 * step);
+                let col = Color32::from_rgba_unmultiplied(line.r(), line.g(), line.b(), line.a()).gamma_multiply(f);
+                let body = body.gamma_multiply(f);
                 let top = y + step.min(3.0);
                 if r.max.y > top {
                     fill_rect(

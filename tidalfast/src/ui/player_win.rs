@@ -68,7 +68,13 @@ impl App {
                 acts.push(Action::TogglePractice);
             }
         }
-        let p = ui.painter();
+        // a worn Winamp skin draws the whole player from its own pictures
+        if self.wa_art.is_some() {
+            self.winamp_main(ui, inner, acts);
+            return;
+        }
+        let painter = ui.painter().clone();
+        let p = &painter;
 
         // ---- LCD time
         let lcd = rc(6.0, 6.0, 100.0, 40.0);
@@ -111,12 +117,14 @@ impl App {
         let spr = ui
             .interact(sp, ui.id().with("spectrum"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .tip("Click: bars / waveform / both.  Right-click: width and sensitivity");
+            .tip("Click: bars / waveform / both.  Right-click: all its settings, with a preview");
         if spr.clicked() {
             self.viz[0].mode = (self.viz[0].mode + 1) % 3;
             self.dirty = true;
         }
-        spr.context_menu(|ui| self.viz_menu(ui, 0));
+        if spr.secondary_clicked() {
+            self.viz_panel = Some(0);
+        }
 
         // ---- title + status
         let tb = rc(112.0, 6.0, 182.0, 14.0);
@@ -202,7 +210,7 @@ impl App {
         inset(p, cv, pal().edge);
         if let Some(t) = &track {
             if !t.cover.is_empty() {
-                paint_art_g(ui, &mut self.images, &cover_url(&t.cover, 160), cv.shrink(2.0), 0.0, self.art_gray);
+                paint_held(ui, &mut self.images, "player", &cover_url(&t.cover, 160), cv.shrink(2.0), self.art_gray);
             }
         }
         let cvr = ui.interact(cv, ui.id().with("cover"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -245,7 +253,9 @@ impl App {
         fill_rect(p, Rect::from_min_max(vg.min + Vec2::new(1.5, 1.5), Pos2::new(vx + thumb_v / 2.0, vg.max.y - 1.0)), pal().ink2);
         let vthumb = Rect::from_min_size(Pos2::new(vx, oy + 50.0 * s), Vec2::new(thumb_v, 15.0 * s));
         raised(p, vthumb, false);
-        let vr = ui.interact(rc(112.0, 48.0, 138.0, 18.0), ui.id().with("vol"), Sense::click_and_drag());
+        let vr = ui
+            .interact(rc(112.0, 48.0, 138.0, 18.0), ui.id().with("vol"), Sense::click_and_drag())
+            .tip(format!("Volume {}%", (self.volume * 100.0).round() as u32));
         if vr.dragged() || vr.clicked() {
             if let Some(pp) = vr.interact_pointer_pos() {
                 let v = ((pp.x - vg.min.x - thumb_v / 2.0) / (vg.width() - thumb_v)).clamp(0.0, 1.0);
@@ -288,14 +298,32 @@ impl App {
             acts.push(Action::Speed(crate::tools::next_speed(self.speed)));
         }
         spr.context_menu(|ui| self.speed_menu(ui, acts));
-        ptext(
-            p,
-            Pos2::new(ox + 250.0 * s, oy + 71.0 * s),
-            Align::Max,
-            &format!("{}%", (self.volume * 100.0).round() as u32),
-            px_sm,
-            pal().ink2,
-        );
+        // sleep timer: a moon, or the minutes left while it runs
+        let slp = rc(178.0, 67.0, 40.0, 12.0);
+        let sleeping = self.sleep_at.map(|t| t.saturating_duration_since(Instant::now()).as_secs().div_ceil(60));
+        let slr = ui
+            .interact(slp, ui.id().with("sleep"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip("Sleep timer: click for 15 / 30 / 45 / 60 / 90 minutes or off (it fades out at the end)");
+        raised_h(p, slp, sleeping.is_some() || slr.is_pointer_button_down_on(), slr.hovered());
+        match sleeping {
+            Some(m) => {
+                ptext_fit(p, slp.center(), Align::Center, &format!("{}M", m), px_sm, slp.width() - 4.0, pal().ink);
+            }
+            None => icon_in(p, slp, &IC_MOON, pal().ink),
+        }
+        if slr.clicked() {
+            acts.push(Action::Sleep);
+        }
+        // where the sound goes: a speaker button with the list of outputs
+        let ob = rc(224.0, 67.0, 26.0, 12.0);
+        let obr = ui
+            .interact(ob, ui.id().with("outputs"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip("Sound output: speakers, headphones, Bluetooth...");
+        raised_h(p, ob, self.out_device.is_some() || obr.is_pointer_button_down_on(), obr.hovered());
+        icon_in(p, ob, &IC_OUT, pal().ink);
+        self.output_popup(ui, &obr, acts);
 
         // ---- seek bar
         let sk = rc(6.0, 84.0, 288.0, 9.0);
@@ -368,8 +396,8 @@ impl App {
         }
 
         // ---- shuffle / repeat: icons, the names show on hover
-        let sh = rc(136.0, 102.0, 36.0, 16.0);
-        tour::mark("SHUFFLE", sh.union(rc(220.0, 102.0, 36.0, 16.0)));
+        let sh = rc(140.0, 103.0, 30.0, 14.0);
+        tour::mark("SHUFFLE", sh.union(rc(248.0, 103.0, 30.0, 14.0)));
         let shr = ui
             .interact(sh, ui.id().with("shuf"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -379,7 +407,7 @@ impl App {
         if shr.clicked() {
             acts.push(Action::Shuffle);
         }
-        let rp = rc(178.0, 102.0, 36.0, 16.0);
+        let rp = rc(176.0, 103.0, 30.0, 14.0);
         let rep_tip = match self.repeat {
             Repeat::Off => "Repeat: off",
             Repeat::All => "Repeat: all",
@@ -399,7 +427,7 @@ impl App {
             acts.push(Action::Repeat);
         }
         if !self.mini {
-            let fb = rc(220.0, 102.0, 36.0, 16.0);
+            let fb = rc(212.0, 103.0, 30.0, 14.0);
             let fs = self.fullscreen;
             let fbr = ui.interact(fb, ui.id().with("full"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).tip(
                 format!(
@@ -412,6 +440,19 @@ impl App {
             icon_in(p, fb, if fs { &IC_WIN } else { &IC_FULL }, pal().ink);
             if fbr.clicked() {
                 acts.push(Action::ToggleFullscreen);
+            }
+        }
+        // the equalizer, next to fullscreen
+        if !self.mini {
+            let eb = rc(248.0, 103.0, 30.0, 14.0);
+            let er = ui
+                .interact(eb, ui.id().with("eq"), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .tip("Equalizer");
+            raised_h(p, eb, self.show_eq || er.is_pointer_button_down_on(), er.hovered() && !self.show_eq);
+            icon_in(p, eb, &IC_EQ, pal().ink);
+            if er.clicked() {
+                acts.push(Action::ToggleEq);
             }
         }
 
@@ -448,6 +489,13 @@ impl App {
     /// Full-window cover viewer: tilts toward the mouse, optional B&W, lyrics, fullscreen.
 
     pub(crate) fn playlist_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        // a worn Winamp skin draws the queue as its own playlist window
+        if self.rtab == 0 && self.wa_art.as_ref().is_some_and(|t| t.sheets.contains_key("pledit")) {
+            let inner = ui.max_rect();
+            let outer = Rect::from_min_max(inner.min - Vec2::new(14.0, 30.0), inner.max + Vec2::new(14.0, 14.0));
+            self.winamp_playlist(ui, outer, acts);
+            return;
+        }
         let title = if self.rtab == 1 {
             "LEAD SHEET"
         } else if self.shuffle {
@@ -637,11 +685,8 @@ impl App {
         let foot = Rect::from_min_max(Pos2::new(full.min.x, full.max.y - foot_h + 8.0), full.max);
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(foot), |ui| {
             ui.horizontal(|ui| {
-                if retro_btn(ui, "CLEAR", false).clicked() {
+                if retro_btn(ui, "CLEAR QUEUE", false).clicked() {
                     acts.push(Action::ClearQueue);
-                }
-                if retro_btn(ui, "ART", false).clicked() {
-                    acts.push(Action::ToggleArt);
                 }
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width().min(340.0), BTN_H), Sense::hover());
                 inset(ui.painter(), rect, pal().lcd);

@@ -96,7 +96,7 @@ const BASIC: &[Step] = &[
         key: "ARTBTNS",
         scene: Scene::Album,
         title: "THE ALBUM VIEW",
-        text: "A big cover, lyrics you can scroll and click to jump, and the visualizer behind it. Click the cover to put it on a spinning record (it turns with the speed). These buttons switch lyrics, the spectrum, black-and-white art, fullscreen, the skin and the speed, with the volume on the right. CLOSE or ESC takes you back.",
+        text: "A big cover, lyrics you can scroll and click to jump, and the visualizer behind it. Click the cover to put it on a spinning record. Playing is in the middle; on the left, how it looks (lyrics, the visualizer - right-click it for its style and size - black and white, fullscreen); on the right, the speed, practice tools, the queue and the volume. CLOSE or ESC takes you back.",
     },
     Step {
         key: "QUEUE",
@@ -107,8 +107,8 @@ const BASIC: &[Step] = &[
     Step {
         key: "SHUFFLE",
         scene: Scene::Normal,
-        title: "SHUFFLE, REPEAT, FULLSCREEN",
-        text: "Shuffle, repeat (all or one song) and fullscreen sit together on the player.",
+        title: "SHUFFLE, REPEAT, FULLSCREEN, EQ",
+        text: "Shuffle, repeat (all or one song), fullscreen and the equalizer sit together on the player. The moon next to the speed is the sleep timer.",
     },
     Step {
         key: "LIBRARY",
@@ -117,10 +117,10 @@ const BASIC: &[Step] = &[
         text: "Go to its album, its artist or its radio, see the credits, add it to a playlist (your own LISTS mix any sources) or copy its link. The mouse's back and forward buttons step through the pages you opened.",
     },
     Step {
-        key: "SKIN",
+        key: "APPMENU",
         scene: Scene::Normal,
-        title: "MAKE IT LOOK RIGHT",
-        text: "This button changes the skin: click for the next one, right-click to pick. There are retro skins, a glassy one and sleek ones.",
+        title: "THE TIDALITE MENU",
+        text: "Skins (retro ones, a glassy one and sleek ones), preferences, help and these tours, where tracks are stored, and the log, all in one place.",
     },
     Step {
         key: "",
@@ -177,7 +177,7 @@ const PRACTICE_TOUR: &[Step] = &[
         key: "TIMEBTNS",
         scene: Scene::Practice,
         title: "6. KEEP TIME",
-        text: "The metronome has a count-in and can lock to the track's own beat. The focus timer is a pomodoro: work blocks with short rests between them.",
+        text: "These two, next to MORE: the metronome (count-in, and it can lock to the track's own beat) and the focus timer, a pomodoro: work blocks with short rests between them.",
     },
     Step {
         key: "ARTPRACTICE",
@@ -255,6 +255,8 @@ impl App {
         let screen = ctx.screen_rect();
         let target = if step.key.is_empty() { None } else { find(step.key) };
         // dim everything except the highlighted window
+        // the tour has the floor: only its card takes clicks until it is done
+        crate::credits::block_behind(ctx, "tour");
         let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("tour_dim")));
         let dim = Color32::from_black_alpha(165);
         match target {

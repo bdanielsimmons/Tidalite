@@ -292,8 +292,24 @@ pub(crate) static PALS: [Pal; 11] = [
 
 pub(crate) static SKIN: AtomicUsize = AtomicUsize::new(0);
 
+/// A palette made from a Winamp skin (winamp.rs), worn instead of the built-in ones while set. Each one is
+/// leaked on purpose (a few bytes per skin picked), so `pal()` can hand out a plain reference.
+static CUSTOM: std::sync::atomic::AtomicPtr<Pal> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+pub(crate) fn set_custom(p: Option<Pal>) {
+    let ptr = p.map_or(std::ptr::null_mut(), |p| Box::into_raw(Box::new(p)));
+    CUSTOM.store(ptr, Ordering::Release);
+}
+
+pub(crate) fn custom_on() -> bool {
+    !CUSTOM.load(Ordering::Acquire).is_null()
+}
+
 /// Look of the skin: 0 retro pixel, 1 aero glass, 2 sleek.
 pub(crate) fn style() -> u8 {
+    if custom_on() {
+        return 0; // Winamp skins are drawn the retro way
+    }
     match SKIN.load(Ordering::Relaxed) % PALS.len() {
         8 => 1,
         9 | 10 => 2,
@@ -359,5 +375,10 @@ pub(crate) fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color32 {
 }
 
 pub(crate) fn pal() -> &'static Pal {
+    let c = CUSTOM.load(Ordering::Acquire);
+    if !c.is_null() {
+        // SAFETY: set_custom only stores pointers from Box::into_raw that are never freed
+        return unsafe { &*c };
+    }
     &PALS[SKIN.load(Ordering::Relaxed) % PALS.len()]
 }

@@ -432,6 +432,14 @@ impl App {
     /// A new track is about to start: restore its loop and tempo, reset per-track practice state.
     pub(crate) fn on_track_change(&mut self, t: &Track) {
         self.flush_practice();
+        // equalizer AUTO: this song's own EQ, if one was kept
+        if self.eq_auto {
+            if let Some(g) = self.eq_songs.get(&t.id).copied() {
+                self.eq_gains = g;
+                self.eq_on = true;
+                self.apply_eq();
+            }
+        }
         match self.loops.get(&t.id).copied() {
             Some((a, b)) => {
                 self.loop_a = Some(a);
@@ -815,6 +823,41 @@ impl App {
                     c.1 = Some(r);
                 }
             }
+            Msg::WaList(r, more) => {
+                self.wa_busy = false;
+                match r {
+                    Ok(list) => {
+                        self.wa_end = list.len() < 30;
+                        if more {
+                            self.wa_list.extend(list);
+                        } else {
+                            self.wa_list = list;
+                        }
+                    }
+                    Err(e) => self.set_err(format!("WINAMP SKINS: {}", e)),
+                }
+            }
+            Msg::WaSkin(r) => match r {
+                Ok((s, p, art)) => {
+                    crate::skin::set_custom(Some(p));
+                    self.wa_art = Some(crate::winamp_ui::WaTex::new(&self.ctx, art));
+                    crate::winamp_ui::set_chrome(self.wa_art.as_ref());
+                    self.apply_pl_font();
+                    crate::setup_style(&self.ctx);
+                    self.set_note(&format!("WINAMP SKIN: {}", s.name.to_uppercase()));
+                    self.wa_worn = Some((s.md5, s.name));
+                    self.dirty = true;
+                }
+                Err(e) => self.set_err(format!("WINAMP SKIN: {}", e)),
+            },
+            Msg::FontReady(choice, r) => match r {
+                Ok(b) if choice == self.pl_font => {
+                    crate::winamp_ui::set_playlist_font(&self.ctx, Some(b), choice);
+                    self.set_note("FONT READY");
+                }
+                Ok(_) => {}
+                Err(e) => self.set_err(format!("FONT: {}", e)),
+            },
             Msg::Meta(id, found) => {
                 crate::meta::set_detected(id, found);
                 self.store.meta = crate::meta::saved();
@@ -1155,6 +1198,7 @@ impl App {
                 self.rebinding = None;
                 if self.show_prefs {
                     self.show_help = false;
+                    self.out_list = crate::player::output_devices();
                 }
             }
             Action::ApplyUpdate => {

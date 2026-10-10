@@ -198,6 +198,15 @@ pub fn draw(p: &egui::Painter, r: Rect, rows: &[&str], col: Color32) -> bool {
         pen.dot(0.5, 0.5, 0.14);
     } else if is(&MARK) {
         gem(p, r, col, pal().ink2);
+    } else if is(&IC_OUT) {
+        pen.frame(0.24, 0.04, 0.76, 0.96, 0.08);
+        pen.dot(0.5, 0.24, 0.06);
+        pen.circle(0.5, 0.62, 0.17);
+        pen.dot(0.5, 0.62, 0.05);
+    } else if is(&IC_MENU) {
+        for y in [0.18, 0.44, 0.7] {
+            pen.rect(0.1, y, 0.9, y + 0.12, 0.06);
+        }
     } else if is(&DROP) {
         pen.poly(&[(0.08, 0.3), (0.92, 0.3), (0.5, 0.78)]);
     } else {

@@ -35,7 +35,11 @@ impl App {
 
         // ---- background: the cover's average colour as a soft gradient (never a stretched picture)
         let url = track.as_ref().map(|t| cover_url(&t.cover, 640)).unwrap_or_default();
-        let tex = art_tex(&mut self.images, &url, self.art_gray);
+        // the cover on show stays up while the next one loads, then the new one fades in
+        let (tex, prev, fade) = self.images.held("album", &url, self.art_gray, ui.input(|i| i.time));
+        if fade < 1.0 {
+            ui.ctx().request_repaint();
+        }
         let avg = self
             .images
             .avg
@@ -43,20 +47,61 @@ impl App {
             .filter(|_| self.art_gray)
             .or_else(|| self.images.avg.get(&url))
             .copied();
-        if let Some([top, bot]) = avg {
-            let shade = |c: Color32, k: f32| {
-                Color32::from_rgb((c.r() as f32 * k) as u8, (c.g() as f32 * k) as u8, (c.b() as f32 * k) as u8)
+        // ease from the old cover's colours to the new one's instead of jumping
+        if let Some(tg) = avg {
+            let k = 1.0 - (-dt * 4.0).exp();
+            let mix = |a: Color32, b: Color32| {
+                let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
+                Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
             };
-            let (ct, cb) = (shade(top, 0.62), shade(bot, 0.2));
+            let base = pal().app_bg;
+            let c = self.bg_now.unwrap_or([base, base]);
+            let now = [mix(c[0], tg[0]), mix(c[1], tg[1])];
+            if now != tg {
+                ui.ctx().request_repaint();
+            }
+            self.bg_now = Some(now);
+        }
+        if let Some([top, bot]) = self.bg_now {
+            // dark and deep, whatever the cover: keep its hue, cap how bright it gets, fall to near-black at the
+            // bottom, and darken the edges so the cover and the visualizer stand out
+            let deep = |c: Color32, cap: f32| {
+                let mut h = egui::ecolor::Hsva::from(c);
+                h.s = (h.s * 1.15).min(0.8);
+                h.v = (h.v * 0.45).min(cap);
+                Color32::from(h)
+            };
+            let (tl, tr, bl, br) = (deep(top, 0.26), deep(top, 0.18), deep(bot, 0.08), deep(bot, 0.05));
             let mut mesh = egui::Mesh::default();
             let uv = egui::epaint::WHITE_UV;
             for (pos, color) in
-                [(full.left_top(), ct), (full.right_top(), ct), (full.right_bottom(), cb), (full.left_bottom(), cb)]
+                [(full.left_top(), tl), (full.right_top(), tr), (full.right_bottom(), br), (full.left_bottom(), bl)]
             {
                 mesh.vertices.push(egui::epaint::Vertex { pos, uv, color });
             }
             mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
             p.add(egui::Shape::mesh(mesh));
+            // vignette: clear in the middle, shading to dark at the edges
+            let inner = full.shrink(full.width().min(full.height()) * 0.22);
+            let (o, i) = (Color32::from_black_alpha(150), Color32::TRANSPARENT);
+            let mut v = egui::Mesh::default();
+            for (pos, color) in [
+                (full.left_top(), o),
+                (full.right_top(), o),
+                (full.right_bottom(), o),
+                (full.left_bottom(), o),
+                (inner.left_top(), i),
+                (inner.right_top(), i),
+                (inner.right_bottom(), i),
+                (inner.left_bottom(), i),
+            ] {
+                v.vertices.push(egui::epaint::Vertex { pos, uv, color });
+            }
+            for k in 0..4u32 {
+                let n = (k + 1) % 4;
+                v.indices.extend_from_slice(&[k, n, 4 + n, k, 4 + n, 4 + k]);
+            }
+            p.add(egui::Shape::mesh(v));
         }
 
         // ---- visualizer, soft and behind everything (only under the cover when lyrics split the view)
@@ -69,8 +114,13 @@ impl App {
                 Pos2::new((mid - half).max(zone.min.x + 6.0), zone.max.y - zone.height() * self.spec_h),
                 Pos2::new((mid + half).min(zone.max.x - 6.0), zone.max.y),
             );
+            // SOFT EDGES: it fades out at both ends, so it finishes cleanly at any width
             let (vb, vp, vw) = self.viz_data(1);
+            let soft = self.spec_frame == 1;
+            let r = if soft { Rect::from_min_max(r.min, r.max - Vec2::new(0.0, 12.0)) } else { r };
+            crate::viz::set_edge_fade(soft);
             viz_draw(&p, r, &vb, &vp, &vw, self.viz[1].mode, self.viz[1].w, true, self.spec_op, self.viz_tint(self.viz[1].color));
+            crate::viz::set_edge_fade(false);
             if self.cur.is_some() && !self.paused && !self.stopped {
                 ui.ctx().request_repaint();
             }
@@ -87,70 +137,100 @@ impl App {
         let k = 1.0 - (-dt * 9.0).exp();
         self.art_tilt += (target - self.art_tilt) * k;
         let tilt = self.art_tilt;
-        let (sth, cth) = (tilt.x * 0.33).sin_cos();
-        let (sph, cph) = (-tilt.y * 0.33).sin_cos();
-        let dist = a * 3.2;
+        // a rigid card in 3D, gently pushed by the mouse: the corner nearest it sinks back, the far one comes
+        // forward. Small angles and a far-off eye, so it tilts without warping; it also drifts a touch away
+        let (ky, kx) = (-tilt.x * 0.28, -tilt.y * 0.28);
+        let (cy, cx) = (ky.cos(), kx.cos());
+        let dist = a * 4.0;
+        let push = Vec2::new(-tilt.x, -tilt.y) * 6.0;
         let xf = move |x: f32, y: f32| -> Pos2 {
-            let x1 = x * cth;
-            let z1 = -x * sth;
-            let y1 = y * cph - z1 * sph;
-            let z2 = y * sph + z1 * cph;
-            let sc = dist / (dist - z2);
-            Pos2::new(center.x + x1 * sc, center.y + y1 * sc)
+            let z = x * ky.sin() + y * kx.sin();
+            let sc = dist / (dist - z);
+            Pos2::new(center.x + push.x + x * cy * sc, center.y + push.y + y * cx * sc)
         };
         let corners = |h: f32| [xf(-h, -h), xf(h, -h), xf(h, h), xf(-h, h)];
         let h = a / 2.0;
 
-        // click the cover to put it on a record (and back)
-        let cover_hit = ui.interact(Rect::from_center_size(center, Vec2::splat(a)), ui.id().with("cover_vinyl"), Sense::click());
-        if cover_hit.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            acts.push(Action::ToggleVinyl);
-        }
-        if VINYL.load(Ordering::Relaxed) && tex.is_some() {
-            // the record: a soft round shadow, then the disc turning while the music plays
-            let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 16.0);
-            p.circle_filled(center + off, a * 0.5 + 4.0, Color32::from_black_alpha((60.0 * self.art_op) as u8));
-            let spin = vinyl_angle(ui, if active && !self.paused { self.speed as f32 / 100.0 } else { 0.0 });
-            // follows the cover opacity setting, and never fully solid, so the visualizer shows through
-            paint_vinyl(&p, Rect::from_center_size(center, Vec2::splat(a)), tex, spin, self.art_op.min(0.8));
-        } else {
-            // shadow, frame, cover
-            let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 20.0);
-            let shadow: Vec<Pos2> = corners(h + 6.0).iter().map(|c| *c + off).collect();
-            let see = self.art_op < 0.99;
-            p.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(if see { 50 } else { 120 }), Stroke::NONE));
-            // when the cover is see-through the frame is only an outline, so the visualizer behind it stays visible
-            p.add(egui::Shape::convex_polygon(
-                corners(h + 9.0).to_vec(),
-                if see { Color32::TRANSPARENT } else { Color32::BLACK },
-                Stroke::new(2.0_f32, pal().trim),
-            ));
-            let cs = corners(h);
-            match tex {
-                Some(id) => {
-                    let mut mesh = egui::Mesh::with_texture(id);
-                    let uvs = [Pos2::new(0.0, 0.0), Pos2::new(1.0, 0.0), Pos2::new(1.0, 1.0), Pos2::new(0.0, 1.0)];
-                    for (c, uv) in cs.iter().zip(uvs.iter()) {
-                        mesh.vertices.push(egui::epaint::Vertex {
-                            pos: *c,
-                            uv: *uv,
-                            color: Color32::from_white_alpha((self.art_op * 255.0) as u8),
-                        });
+        {
+            // click the cover to put it on a record (and back)
+            let cover_hit =
+                ui.interact(Rect::from_center_size(center, Vec2::splat(a)), ui.id().with("cover_vinyl"), Sense::click());
+            let cover_hit = cover_hit.on_hover_cursor(egui::CursorIcon::PointingHand);
+            if cover_hit.clicked() {
+                acts.push(Action::ToggleVinyl);
+            }
+            // right-click: the cover's border
+            cover_hit.context_menu(|ui| {
+                for (i, name) in ["NONE", "SUBTLE", "SKIN COLOUR"].iter().enumerate() {
+                    let mark = if self.art_border as usize == i { "> " } else { "   " };
+                    if menu_item(ui, &format!("{}BORDER: {}", mark, name)) {
+                        self.art_border = i as u8;
+                        self.dirty = true;
+                        ui.close_menu();
                     }
-                    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
-                    p.add(egui::Shape::mesh(mesh));
                 }
-                None => {
-                    p.add(egui::Shape::convex_polygon(cs.to_vec(), pal().ink2, Stroke::NONE));
-                    // no cover (yet): the record, turning while it loads
-                    let loading = !url.is_empty() && !self.images.failed(&url);
-                    paint_record(
-                        &p,
-                        Rect::from_center_size(center, Vec2::splat(a)),
-                        loading.then(|| ui.input(|i| i.time) as f32),
-                    );
-                    if loading {
-                        ui.ctx().request_repaint();
+            });
+            if VINYL.load(Ordering::Relaxed) && tex.is_some() {
+                // the record: a soft round shadow, then the disc turning while the music plays
+                let off = Vec2::new(-tilt.x * 22.0, -tilt.y * 12.0 + 16.0);
+                p.circle_filled(center + off, a * 0.5 + 4.0, Color32::from_black_alpha((60.0 * self.art_op) as u8));
+                let spin = vinyl_angle(ui, if active && !self.paused { self.speed as f32 / 100.0 } else { 0.0 });
+                // follows the cover opacity setting, and never fully solid, so the visualizer shows through
+                paint_vinyl(&p, Rect::from_center_size(center, Vec2::splat(a)), tex, spin, self.art_op.min(0.8));
+            } else {
+                // a soft shadow in a few faint layers (lighter when the cover is see-through), no heavy frame
+                let off = Vec2::new(-tilt.x * 14.0, -tilt.y * 8.0 + 14.0);
+                let see = self.art_op < 0.99;
+                for (grow, al) in [(16.0, 14u8), (10.0, 22), (5.0, 34)] {
+                    let sh: Vec<Pos2> = corners(h + grow).iter().map(|c| *c + off).collect();
+                    p.add(egui::Shape::convex_polygon(
+                        sh,
+                        Color32::from_black_alpha(if see { al / 2 } else { al }),
+                        Stroke::NONE,
+                    ));
+                }
+                let cs = corners(h);
+                match tex {
+                    Some(id) => {
+                        // the old cover underneath, the new one fading in on top
+                        if let Some(old) = prev {
+                            cover_grid(&p, &xf, h, old, self.art_op);
+                        }
+                        if prev.is_none() && fade < 1.0 {
+                            p.add(egui::Shape::convex_polygon(
+                                cs.to_vec(),
+                                Color32::from_black_alpha((70.0 * (1.0 - fade)) as u8),
+                                Stroke::NONE,
+                            ));
+                        }
+                        cover_grid(&p, &xf, h, id, self.art_op * fade);
+                        // a faint edge, just enough to finish it
+                        // the border sits right on the cover's edge
+                        let edge = match self.art_border {
+                            1 => Some(Stroke::new(1.0_f32, Color32::from_white_alpha(30))),
+                            2 => Some(Stroke::new(2.0_f32, pal().trim.gamma_multiply(self.art_op))),
+                            _ => None,
+                        };
+                        if let Some(s) = edge {
+                            p.add(egui::Shape::closed_line(cs.to_vec(), s));
+                        }
+                    }
+                    None => {
+                        // no cover yet: a quiet dark slot it will fade into; the record only if it is slow to come
+                        // (or there is none at all)
+                        p.add(egui::Shape::convex_polygon(cs.to_vec(), Color32::from_black_alpha(70), Stroke::NONE));
+                        let loading = !url.is_empty() && !self.images.failed(&url);
+                        let now = ui.input(|i| i.time);
+                        let since_id = egui::Id::new(("cover_wait", url.as_str()));
+                        let since: f64 = ui.ctx().data_mut(|d| *d.get_temp_mut_or_insert_with(since_id, || now));
+                        let slow = now - since > 1.5;
+                        if !loading || slow {
+                            let spin = (loading && slow).then(|| now as f32);
+                            paint_record(&p, Rect::from_center_size(center, Vec2::splat(a)), spin);
+                        }
+                        if loading {
+                            ui.ctx().request_repaint();
+                        }
                     }
                 }
             }
@@ -315,6 +395,62 @@ impl App {
         ptext(&p, Pos2::new(sb.min.x, sb.max.y + 14.0), Align::Min, &fmt_time(if active { pos } else { 0.0 }), 2.0, pal().trim);
         ptext(&p, Pos2::new(sb.max.x, sb.max.y + 14.0), Align::Max, &fmt_time(dur), 2.0, pal().trim);
 
+        // ---- the queue, as a panel on the right (the three-lines button)
+        if self.art_queue {
+            let w = (full.width() * 0.4).min(380.0);
+            let panel =
+                Rect::from_min_max(Pos2::new(full.max.x - 28.0 - w, area.min.y), Pos2::new(full.max.x - 28.0, area.max.y));
+            let queue = self.queue.clone();
+            let cur = self.cur;
+            let mut close = false;
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(panel), |ui| {
+                egui::Frame::none()
+                    .fill(pal().app_bg.gamma_multiply(0.92))
+                    .stroke(Stroke::new(1.5_f32, pal().edge))
+                    .rounding(if style() != 0 { 8.0 } else { 0.0 })
+                    .inner_margin(10.0)
+                    .show(ui, |ui| {
+                        ui.set_min_size(panel.size() - Vec2::splat(20.0));
+                        ui.horizontal(|ui| {
+                            title_line(ui, &format!("QUEUE  {}", queue.len()), 2.5, pal().ink);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if icon_btn(ui, &IC_X, false, pal().ink).tip("Close the queue").clicked() {
+                                    close = true;
+                                }
+                            });
+                        });
+                        if queue.is_empty() {
+                            para(ui, "Nothing queued. Play a song or right-click one: Add to queue.", pal().ink2);
+                        }
+                        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                            for (i, t) in queue.iter().enumerate() {
+                                let state = match cur {
+                                    Some(c) if c == i => RowState::Playing,
+                                    Some(c) if i < c => RowState::Played,
+                                    _ => RowState::Normal,
+                                };
+                                let r = list_row(
+                                    ui,
+                                    i,
+                                    Some(i + 1),
+                                    || format!("{} - {}", t.artists_text(), t.title),
+                                    || fmt_time(t.duration),
+                                    state,
+                                    false,
+                                    cache::has(t.id),
+                                );
+                                if r.is_some_and(|r| r.clicked()) {
+                                    acts.push(Action::PlayIndex(i));
+                                }
+                            }
+                        });
+                    });
+            });
+            if close {
+                self.art_queue = false;
+            }
+        }
+
         // ---- buttons
         let row = Rect::from_min_size(Pos2::new(full.min.x + 28.0, full.max.y - 52.0), Vec2::new(full.width() - 56.0, BTN_H));
         tour::mark("ARTBTNS", row);
@@ -369,9 +505,51 @@ impl App {
         let cur_t = self.cur_track();
         let liked_now = cur_t.as_ref().map(|t| self.liked.contains(&t.id)).unwrap_or(false);
         let playing = active && !self.paused;
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(row), |ui| {
+        let ink = pal().ink;
+        // three groups: how it looks on the left, playing in the middle, the rest on the right
+        let mid = Rect::from_center_size(row.center(), Vec2::new(6.0 * 44.0 + 5.0 * 8.0, BTN_H));
+        let left = Rect::from_min_max(row.min, Pos2::new(mid.min.x - 24.0, row.max.y));
+        let right = Rect::from_min_max(Pos2::new(mid.max.x + 24.0, row.min.y), row.max);
+        let roomy = row.width() >= 980.0;
+
+        // ---- how it looks
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left), |ui| {
             ui.horizontal(|ui| {
-                let ink = pal().ink;
+                if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
+                    acts.push(Action::ToggleLyrics);
+                }
+                let sp = icon_btn(ui, &IC_SPEC, self.show_spec, ink)
+                    .tip("Visualizer behind the cover  (right-click: its settings, with a preview)");
+                if sp.clicked() {
+                    acts.push(Action::ToggleSpec);
+                }
+                if sp.secondary_clicked() {
+                    self.viz_panel = Some(1);
+                }
+                if icon_btn(ui, &IC_BW, gray, ink)
+                    .tip(if gray { "Back to colour art  (G)" } else { "Black and white art  (G)" })
+                    .clicked()
+                {
+                    acts.push(Action::ToggleGray);
+                }
+                if icon_btn(ui, if fs { &IC_WIN } else { &IC_FULL }, false, ink)
+                    .tip(if fs { "Leave fullscreen  (F)" } else { "Fullscreen  (F)" })
+                    .clicked()
+                {
+                    acts.push(Action::ToggleFullscreen);
+                }
+            });
+        });
+
+        // ---- playing, in the middle
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(mid), |ui| {
+            ui.horizontal(|ui| {
+                if icon_btn(ui, &IC_SHUF, self.shuffle, ink)
+                    .tip(if self.shuffle { "Shuffle is on - click to turn off" } else { "Shuffle the queue" })
+                    .clicked()
+                {
+                    acts.push(Action::Shuffle);
+                }
                 if icon_btn(ui, &IC_PREV, false, ink).tip("Previous").clicked() {
                     acts.push(Action::Prev);
                 }
@@ -384,13 +562,6 @@ impl App {
                 if icon_btn(ui, &IC_NEXT, false, ink).tip("Next").clicked() {
                     acts.push(Action::Next);
                 }
-                ui.add_space(14.0);
-                if icon_btn(ui, &IC_SHUF, self.shuffle, ink)
-                    .tip(if self.shuffle { "Shuffle is on - click to turn off" } else { "Shuffle the queue" })
-                    .clicked()
-                {
-                    acts.push(Action::Shuffle);
-                }
                 let (rep_icon, rep_tip) = match self.repeat {
                     Repeat::Off => (&IC_REP, "Repeat: off  (click for all)"),
                     Repeat::All => (&IC_REP, "Repeat all  (click for one track)"),
@@ -399,57 +570,6 @@ impl App {
                 if icon_btn(ui, rep_icon, self.repeat != Repeat::Off, ink).tip(rep_tip).clicked() {
                     acts.push(Action::Repeat);
                 }
-                ui.add_space(14.0);
-                if icon_btn(ui, &IC_BW, gray, ink)
-                    .tip(if gray { "Back to color art  (G)" } else { "Black and white art  (G)" })
-                    .clicked()
-                {
-                    acts.push(Action::ToggleGray);
-                }
-                let sp = icon_btn(ui, &IC_SPEC, self.show_spec, ink)
-                    .tip("Spectrum behind the cover  (right-click for size and opacity)");
-                if sp.clicked() {
-                    acts.push(Action::ToggleSpec);
-                }
-                sp.context_menu(|ui| {
-                    let step = |ui: &mut egui::Ui, name: &str, v: &mut f32, d: f32, lo: f32, hi: f32| {
-                        if menu_item(ui, &format!("{}  {}%   (+)", name, (*v * 100.0).round() as i32)) {
-                            *v = (*v + d).min(hi);
-                        }
-                        if menu_item(ui, &format!("{}  {}%   (-)", name, (*v * 100.0).round() as i32)) {
-                            *v = (*v - d).max(lo);
-                        }
-                    };
-                    step(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8);
-                    step(ui, "COVER", &mut self.art_op, 0.05, 0.5, 1.0);
-                    step(ui, "HEIGHT", &mut self.spec_h, 0.08, 0.15, 0.9);
-                    step(ui, "WIDTH", &mut self.spec_w, 0.1, 0.2, 1.0);
-                    self.viz_menu(ui, 1);
-                    self.dirty = true;
-                });
-                let skin_b = icon_btn(ui, &IC_SKIN, false, ink).tip(format!(
-                    "Skin: {}  (click for the next, right-click to pick one)",
-                    SKIN_NAMES[SKIN.load(Ordering::Relaxed) % PALS.len()]
-                ));
-                if skin_b.clicked() {
-                    acts.push(Action::Skin);
-                }
-                skin_b.context_menu(|ui| skin_menu(ui, acts));
-                if icon_btn(ui, &IC_MIC, lyr, ink).tip("Lyrics  (L)").clicked() {
-                    acts.push(Action::ToggleLyrics);
-                }
-                if icon_btn(ui, if fs { &IC_WIN } else { &IC_FULL }, false, ink)
-                    .tip(if fs { "Leave fullscreen  (F)" } else { "Fullscreen  (F)" })
-                    .clicked()
-                {
-                    acts.push(Action::ToggleFullscreen);
-                }
-                let sb = retro_btn(ui, &crate::tools::speed_label(self.speed), self.speed != 100)
-                    .tip("Speed (pitch stays): click for the next one, right-click to pick or type any  (Up / Down keys)");
-                if sb.clicked() {
-                    acts.push(Action::Speed(crate::tools::next_speed(self.speed)));
-                }
-                sb.context_menu(|ui| self.speed_menu(ui, acts));
                 // files and YouTube clips are not on Tidal, so there is nothing to like
                 if icon_btn(ui, &IC_HEART, liked_now, if liked_now { pal().red } else { ink })
                     .tip(if liked_now { "Remove from My Tracks  (H)" } else { "Add to My Tracks  (H)" })
@@ -459,13 +579,19 @@ impl App {
                         acts.push(Action::ToggleLike(t.clone()));
                     }
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if retro_btn(ui, "CLOSE", false).clicked() {
-                        acts.push(Action::ToggleArt);
-                    }
-                    ui.add_space(14.0);
+            });
+        });
+
+        // ---- the rest: speed, practice, queue, then sound and CLOSE at the edge
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right), |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if retro_btn(ui, "CLOSE", false).clicked() {
+                    acts.push(Action::ToggleArt);
+                }
+                ui.add_space(10.0);
+                if roomy {
                     // volume: drag, click or scroll over it
-                    let (sr, vr) = ui.allocate_exact_size(Vec2::new(120.0, BTN_H), Sense::click_and_drag());
+                    let (sr, vr) = ui.allocate_exact_size(Vec2::new(100.0, BTN_H), Sense::click_and_drag());
                     let vr = vr
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .tip(format!("Volume {}%  (drag, or scroll over it)", (self.volume * 100.0).round()));
@@ -488,34 +614,74 @@ impl App {
                     if vr.hovered() && wheel != 0.0 {
                         acts.push(Action::Volume((self.volume + wheel * 0.002).clamp(0.0, 1.0)));
                     }
-                    let spk: &[&str] = if self.volume <= 0.0 {
-                        &IC_SPK0
-                    } else if self.volume < 0.5 {
-                        &IC_SPK1
+                }
+                let spk: &[&str] = if self.volume <= 0.0 {
+                    &IC_SPK0
+                } else if self.volume < 0.5 {
+                    &IC_SPK1
+                } else {
+                    &IC_SPK2
+                };
+                if icon_btn(ui, spk, self.volume <= 0.0, ink).tip(if self.volume <= 0.0 { "Unmute" } else { "Mute" }).clicked() {
+                    if self.volume > 0.0 {
+                        self.vol_before = self.volume;
+                        acts.push(Action::Volume(0.0));
                     } else {
-                        &IC_SPK2
-                    };
-                    if icon_btn(ui, spk, self.volume <= 0.0, ink)
-                        .tip(if self.volume <= 0.0 { "Unmute" } else { "Mute" })
-                        .clicked()
-                    {
-                        if self.volume > 0.0 {
-                            self.vol_before = self.volume;
-                            acts.push(Action::Volume(0.0));
-                        } else {
-                            acts.push(Action::Volume(self.vol_before.max(0.3)));
-                        }
+                        acts.push(Action::Volume(self.vol_before.max(0.3)));
                     }
-                });
+                }
+                let ob =
+                    icon_btn(ui, &IC_OUT, self.out_device.is_some(), ink).tip("Sound output: speakers, headphones, Bluetooth...");
+                self.output_popup(ui, &ob, acts);
+                ui.add_space(14.0);
+                if icon_btn(ui, &IC_MENU, self.art_queue, ink).tip("The queue: what plays next").clicked() {
+                    self.art_queue = !self.art_queue;
+                }
+                if PRACTICE
+                    && retro_btn(ui, "PRACTICE", self.practice).tip("The loop and speed tools along the top  (P)").clicked()
+                {
+                    acts.push(Action::TogglePractice);
+                }
+                let sb = retro_btn(ui, &crate::tools::speed_label(self.speed), self.speed != 100)
+                    .tip("Speed (pitch stays): click for the next one, right-click to pick or type any  (Up / Down keys)");
+                if sb.clicked() {
+                    acts.push(Action::Speed(crate::tools::next_speed(self.speed)));
+                }
+                sb.context_menu(|ui| self.speed_menu(ui, acts));
             });
         });
         ptext(
             &p,
             Pos2::new(full.max.x - 30.0, full.max.y - 14.0),
             Align::Max,
-            "Click the cover: record    Esc close    F fullscreen    G b&w    L lyrics    H like    Space play/pause",
+            "Click the cover: record    Right-click it: border    Esc close    F fullscreen    G b&w    L lyrics    H like    Space play/pause",
             1.0,
             pal().dim,
         );
     }
+}
+
+/// The cover as a fine grid of points, each placed through the same 3D tilt, so the picture stays a flat,
+/// stiff card at any angle (stretched over just two triangles it would bend along the diagonal).
+fn cover_grid(p: &egui::Painter, xf: &impl Fn(f32, f32) -> Pos2, h: f32, id: egui::TextureId, alpha: f32) {
+    const N: u32 = 12;
+    const E: f32 = 0.006;
+    let color = Color32::from_white_alpha((alpha.clamp(0.0, 1.0) * 255.0) as u8);
+    let mut mesh = egui::Mesh::with_texture(id);
+    for j in 0..=N {
+        for i in 0..=N {
+            let (u, v) = (i as f32 / N as f32, j as f32 / N as f32);
+            let pos = xf(-h + 2.0 * h * u, -h + 2.0 * h * v);
+            let uv = Pos2::new(E + (1.0 - 2.0 * E) * u, E + (1.0 - 2.0 * E) * v);
+            mesh.vertices.push(egui::epaint::Vertex { pos, uv, color });
+        }
+    }
+    for j in 0..N {
+        for i in 0..N {
+            let a = j * (N + 1) + i;
+            let b = a + N + 1;
+            mesh.indices.extend_from_slice(&[a, a + 1, b + 1, a, b + 1, b]);
+        }
+    }
+    p.add(egui::Shape::mesh(mesh));
 }

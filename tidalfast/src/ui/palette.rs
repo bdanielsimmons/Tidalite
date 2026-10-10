@@ -221,6 +221,7 @@ impl App {
             return;
         }
 
+        crate::credits::block_behind(ctx, "palette");
         let dim = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("palette_dim")));
         dim.rect_filled(ctx.screen_rect(), 0.0, Color32::from_black_alpha(130));
         let w = 560.0_f32.min(ctx.screen_rect().width() - 40.0);

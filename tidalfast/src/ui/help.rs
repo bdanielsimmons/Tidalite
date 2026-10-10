@@ -19,6 +19,7 @@ impl App {
         let mut open_prefs = false;
         let binds = self.binds.clone();
         // dim everything behind it
+        crate::credits::block_behind(ctx, "help");
         let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("help_dim")));
         p.rect_filled(ctx.screen_rect(), 0.0, egui::Color32::from_black_alpha(150));
         let size = egui::vec2(640.0_f32.min(ctx.screen_rect().width() - 40.0), 520.0_f32.min(ctx.screen_rect().height() - 40.0));
@@ -140,7 +141,7 @@ fn start_tab(ui: &mut egui::Ui) {
     points(
         ui,
         &[
-            "Click the little squares button for the next skin, or right-click it to pick one.",
+            "Skins are in the TIDALITE menu at the top of the library, with preferences, storage and the log.",
             "In the album view: right-click the spectrum icon for bars, waveform, colors, size.",
             "Everything saves by itself.",
         ],

@@ -139,8 +139,9 @@ Right-click a row in the queue: play now / remove / like. Drag queue rows to reo
 
 The LIBRARY window has tabs: MY TRACKS (your liked songs, loaded in the background, with PLAY and SHUFFLE),
 LISTS, ALBUMS, ARTISTS. HOME shows Tidal's home feed.
-Tools row: SKIN (olive, aqua, dark, amber), EQ (10-band equalizer), SLEEP (timer with a 20 s fade-out),
-DISK (where tracks are stored), LOG. Settings are remembered between runs.
+The TIDALITE menu (top of the library) holds the skins, preferences, help and tours, where tracks are stored, and the log.
+The player has the EQ (10-band equalizer) and the sleep timer (the moon; it fades out over 20 s). In practice mode the
+pomodoro timer and the metronome sit in the practice panel. Settings are remembered between runs.
 
 ## Listening vs. practicing (transcribing)
 

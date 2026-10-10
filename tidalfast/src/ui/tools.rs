@@ -47,6 +47,7 @@ pub const F_BAND_BPM: u32 = 46;
 pub const F_UNIT: u32 = 47;
 pub const F_TUNE_IREAL: u32 = 48;
 pub const F_LOOK: u32 = 49;
+pub const F_WINAMP: u32 = 50;
 
 impl App {
     /// A box you can type into. Shows `shown`; returns the typed text when you press Enter or click away.

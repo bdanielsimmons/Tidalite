@@ -32,6 +32,8 @@ mod sources;
 mod store;
 #[path = "data/update.rs"]
 mod update;
+#[path = "data/winamp.rs"]
+mod winamp;
 
 #[path = "ui/album_view.rs"]
 mod album_view;
@@ -66,6 +68,8 @@ mod vicon;
 mod views;
 #[path = "ui/viz.rs"]
 mod viz;
+#[path = "ui/winamp_ui.rs"]
+mod winamp_ui;
 
 use api::{cover_url, Api, Card, GoTo, Kind, Page, Track};
 use eframe::egui::{self, Align, Color32, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
@@ -142,6 +146,12 @@ enum Msg {
     Beats(i64, Option<(f32, f32)>),
     /// tempo / key detected from a track's audio
     Meta(i64, meta::Info),
+    /// Winamp skins found (the list, whether they add to what is shown)
+    WaList(Result<Vec<winamp::WaSkin>, String>, bool),
+    /// a Winamp skin fetched and turned into colours
+    WaSkin(Result<(winamp::WaSkin, skin::Pal, winamp::Art), String>),
+    /// a free playlist font fetched (which one)
+    FontReady(usize, Result<Vec<u8>, String>),
     /// a track's credits: (role, names)
     Credits(Result<Vec<(String, String)>, String>),
     /// stem separation finished for this track id
@@ -190,6 +200,19 @@ enum Action {
     Search(String),
     Back,
     Forward,
+    /// the queue: 0 shuffle, 1 sort by artist, 2 sort by title, 3 reverse
+    QueueOp(u8),
+    /// pick the playlist font (index into winamp_ui::PL_FONTS)
+    PlFont(usize),
+    /// left / right balance, -100 to 100
+    Balance(i32),
+    /// the Winamp skin browser: open / close, search, load more, wear one
+    WaOpen,
+    WaSearch,
+    WaMore,
+    WaApply(winamp::WaSkin),
+    /// play through another sound output (None = the system default)
+    SetDevice(Option<String>),
     /// covers as spinning records, or square
     ToggleVinyl,
     Tab(Tab),
@@ -417,9 +440,16 @@ fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) 
 }
 
 /// Right-click list of every skin; the current one is marked.
-fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+/// The skin list; a worn Winamp skin shows as the one picked (click it to browse others).
+fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, winamp: Option<&str>) {
+    if let Some(name) = winamp {
+        if menu_item(ui, &format!("> WINAMP: {}", name.to_uppercase())) {
+            acts.push(Action::WaOpen);
+            ui.close_menu();
+        }
+    }
     for (n, name) in SKIN_NAMES.iter().enumerate() {
-        let mark = if n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
+        let mark = if winamp.is_none() && n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
         if menu_item(ui, &format!("{}{}", mark, name)) {
             acts.push(Action::SkinSet(n));
             ui.close_menu();
@@ -440,20 +470,24 @@ fn ibtn(ui: &mut egui::Ui, icon: &[&str], text: &str, on: bool) -> egui::Respons
     let dy = if down { 1.0 } else { 0.0 };
     let o = Pos2::new((rect.min.x + 10.0).round(), (rect.center().y - icon.len() as f32 + dy).round());
     pixmap(ui.painter(), o, 2.0, icon, pal().ink);
-    ptext(
-        ui.painter(),
-        Pos2::new(o.x + icon[0].len() as f32 * 2.0 + 8.0, rect.center().y + dy),
-        Align::Min,
-        text,
-        2.0,
-        pal().ink,
-    );
+    let tx = o.x + icon[0].len() as f32 * 2.0 + 8.0;
+    ui_text(ui.painter(), Pos2::new(tx, rect.center().y + dy), Align::Min, text, 2.0, rect.max.x - tx - 4.0, pal().ink);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Interface text (buttons, tabs, headers, titles): in the worn Winamp skin's own font when there is one,
+/// otherwise Tidalite's.
+fn ui_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, px: f32, max_w: f32, col: Color32) {
+    if !winamp_ui::skin_text(p, pos, align, text, px, max_w) {
+        ptext_fit(p, pos, align, text, px, max_w, col);
+    }
 }
 
 /// Fit a pixel icon into `r` as large as whole dots allow.
 fn icon_in(p: &egui::Painter, r: Rect, icon: &[&str], col: Color32) {
-    let k = ((r.height() - 3.0) / icon.len() as f32).floor().max(1.0);
+    // the dot size is a whole number of real screen pixels: crisp, and as fine as the button allows
+    let ppp = font::ppp();
+    let k = (((r.height() - 3.0) * ppp / icon.len() as f32).floor().max(1.0)) / ppp;
     let (w, h) = (icon[0].len() as f32 * k, icon.len() as f32 * k);
     pixmap(p, Pos2::new((r.center().x - w / 2.0).round(), (r.center().y - h / 2.0).round()), k, icon, col);
 }
@@ -583,6 +617,10 @@ fn window_deco(ui: &egui::Ui, inner: Rect, title: &str) {
     let u = thick(2.0);
     let outer = Rect::from_min_max(inner.min - Vec2::new(14.0, 30.0), inner.max + Vec2::new(14.0, 14.0));
     tour::note(title, outer);
+    // a worn Winamp skin dresses every window in its own frame
+    if winamp_ui::draw_frame(p, outer, inner, title) {
+        return;
+    }
     if style() != 0 {
         modern_deco(p, outer, inner, title);
         return;
@@ -851,24 +889,27 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
             x += w + 3.0;
             continue;
         }
-        fill_rect(
-            p,
-            r,
-            if on {
-                pal().beige_lt
-            } else if resp.hovered() {
-                pal().beige_h
-            } else {
-                pal().beige_dk
-            },
-        );
-        fill_rect(p, Rect::from_min_size(r.min, Vec2::new(r.width(), t)), pal().edge);
-        fill_rect(p, Rect::from_min_size(r.min, Vec2::new(t, r.height())), pal().edge);
-        fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::new(t, r.height())), pal().edge);
-        // chipped top corners
-        fill_rect(p, Rect::from_min_size(r.min, Vec2::splat(t)), pal().beige);
-        fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::splat(t)), pal().beige);
-        ptext_fit(
+        // with a Winamp skin on, the tab is a piece of the skin's title bar
+        if !winamp_ui::skin_tab(p, r, on) {
+            fill_rect(
+                p,
+                r,
+                if on {
+                    pal().beige_lt
+                } else if resp.hovered() {
+                    pal().beige_h
+                } else {
+                    pal().beige_dk
+                },
+            );
+            fill_rect(p, Rect::from_min_size(r.min, Vec2::new(r.width(), t)), pal().edge);
+            fill_rect(p, Rect::from_min_size(r.min, Vec2::new(t, r.height())), pal().edge);
+            fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::new(t, r.height())), pal().edge);
+            // chipped top corners
+            fill_rect(p, Rect::from_min_size(r.min, Vec2::splat(t)), pal().beige);
+            fill_rect(p, Rect::from_min_size(Pos2::new(r.max.x - t, r.min.y), Vec2::splat(t)), pal().beige);
+        }
+        ui_text(
             p,
             Pos2::new(r.center().x, r.min.y + (base - r.min.y) / 2.0 + 1.0),
             Align::Center,
@@ -911,7 +952,7 @@ fn retro_btn_w(ui: &mut egui::Ui, text: &str, w: f32, active: bool) -> egui::Res
     let down = resp.is_pointer_button_down_on() || active;
     raised_h(ui.painter(), rect, down, resp.hovered());
     let dy = if down { 1.0 } else { 0.0 };
-    ptext(ui.painter(), rect.center() + Vec2::new(0.0, dy), Align::Center, text, 2.0, pal().ink);
+    ui_text(ui.painter(), rect.center() + Vec2::new(0.0, dy), Align::Center, text, 2.0, rect.width() - 8.0, pal().ink);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -925,7 +966,7 @@ fn section_header(ui: &mut egui::Ui, text: &str) {
     ui.add_space(6.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
     fill_rect(ui.painter(), rect, pal().edge);
-    ptext(ui.painter(), Pos2::new(rect.min.x + 8.0, rect.center().y), Align::Min, text, 2.0, pal().trim);
+    ui_text(ui.painter(), Pos2::new(rect.min.x + 8.0, rect.center().y), Align::Min, text, 2.0, rect.width() - 16.0, pal().trim);
 }
 
 /// Thin sub-heading bar used inside the queue.
@@ -939,6 +980,16 @@ fn mini_header(ui: &mut egui::Ui, text: &str) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, HEAD_H), Sense::hover());
     fill_rect(ui.painter(), rect, pal().groove);
     ptext(ui.painter(), Pos2::new(rect.min.x + 8.0, rect.center().y), Align::Min, text, 1.0, pal().bar_txt);
+}
+
+/// One piece of text in a list row: the skin's playlist font when a Winamp skin is on, Tidalite's pixel font
+/// otherwise; cut to fit `max_w`. Returns how wide it came out.
+fn row_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, max_w: f32, col: Color32) -> f32 {
+    if winamp_ui::chrome_on() {
+        winamp_ui::sans_text(p, pos, align, text, ROW_H * 0.62, max_w, col)
+    } else {
+        ptext(p, pos, align, &fit(text, 2.0, max_w), 2.0, col)
+    }
 }
 
 /// One list row. Text is only built (and drawn) when the row is on screen.
@@ -982,11 +1033,11 @@ fn list_row(
     let rtxt = right();
     let mut rw = if let Some((a, b)) = rtxt.split_once('\t') {
         // two right-hand columns, lined up with `table_header`
-        ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, b, 2.0, fg2);
-        let w = ptext(p, Pos2::new(rect.max.x - 10.0 - TBL_W2, cy), Align::Max, a, 2.0, fg2);
+        row_text(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, b, 200.0, fg2);
+        let w = row_text(p, Pos2::new(rect.max.x - 10.0 - TBL_W2, cy), Align::Max, a, 200.0, fg2);
         TBL_W2 + w
     } else {
-        ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, &rtxt, 2.0, fg2)
+        row_text(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, &rtxt, 300.0, fg2)
     };
     if stored {
         pixmap(p, Pos2::new(rect.max.x - 10.0 - rw - 16.0, cy - 4.0), 2.0, &CHECK[..], fg2);
@@ -998,7 +1049,7 @@ fn list_row(
         if state == RowState::Playing {
             pixmap(p, Pos2::new(x0 + 2.0, cy - 5.0), 2.0, &PLAY_S[..], pal().bar_txt);
         } else {
-            ptext_fit(p, Pos2::new(x0 + 34.0, cy), Align::Max, &n.to_string(), 2.0, 34.0, fg2);
+            row_text(p, Pos2::new(x0 + 34.0, cy), Align::Max, &n.to_string(), 34.0, fg2);
         }
         tx = x0 + 44.0;
     }
@@ -1011,20 +1062,18 @@ fn list_row(
         let mut x = tx;
         for (i, c) in cells.iter().enumerate().take(3) {
             if cw[i] > 0.0 {
-                let t = fit(c, 2.0, (cw[i] - 12.0).max(20.0));
-                ptext(p, Pos2::new(x, cy), Align::Min, &t, 2.0, if i == 0 { fg } else { fg2 });
+                row_text(p, Pos2::new(x, cy), Align::Min, c, (cw[i] - 12.0).max(20.0), if i == 0 { fg } else { fg2 });
                 x += cw[i];
             }
         }
         if let (true, Some((key, bpm))) = (col_on(3), cells.get(3).and_then(|c| c.split_once('|'))) {
             let kx = rect.max.x - 10.0 - 80.0 - KB_W;
-            ptext(p, Pos2::new(kx, cy), Align::Min, key, 2.0, fg2);
-            ptext(p, Pos2::new(kx + KB_GAP, cy), Align::Min, bpm, 2.0, fg2);
+            row_text(p, Pos2::new(kx, cy), Align::Min, key, KB_GAP - 6.0, fg2);
+            row_text(p, Pos2::new(kx + KB_GAP, cy), Align::Min, bpm, 50.0, fg2);
         }
     } else {
         let avail = (rect.max.x - 10.0 - rw - 16.0) - tx;
-        let ltxt = fit(&lraw, 2.0, avail.max(20.0));
-        ptext(p, Pos2::new(tx, cy), Align::Min, &ltxt, 2.0, fg);
+        row_text(p, Pos2::new(tx, cy), Align::Min, &lraw, avail.max(20.0), fg);
     }
     Some(resp.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
@@ -1155,7 +1204,7 @@ impl Tip for egui::Response {
 fn chip(ui: &egui::Ui, rect: Rect, text: &str, active: bool, id: &str) -> egui::Response {
     let r = ui.interact(rect, ui.id().with(id), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     raised_h(ui.painter(), rect, active || r.is_pointer_button_down_on(), r.hovered() && !active);
-    ptext_fit(ui.painter(), rect.center(), Align::Center, text, 1.0, rect.width() - 6.0, pal().ink);
+    ui_text(ui.painter(), rect.center(), Align::Center, text, 1.0, rect.width() - 6.0, pal().ink);
     r
 }
 
@@ -1228,7 +1277,7 @@ fn title_line(ui: &mut egui::Ui, text: &str, px: f32, col: Color32) {
     let h = 7.0 * spx(px) + 10.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
     let t = fit(text, px, rect.width() - 4.0);
-    ptext(ui.painter(), Pos2::new(rect.min.x + 2.0, rect.center().y), Align::Min, &t, px, col);
+    ui_text(ui.painter(), Pos2::new(rect.min.x + 2.0, rect.center().y), Align::Min, &t, px, rect.width() - 4.0, col);
 }
 
 // -------------------------------------------------------------------- misc
@@ -1311,6 +1360,9 @@ struct Images {
     req: Sender<String>,
     /// average colour of the top and bottom half of each cover, for the art-view gradient
     avg: HashMap<String, [Color32; 2]>,
+    /// per place a cover is shown (album view, player): the cover on show, the one it is fading from, and when
+    /// the new one arrived. The old cover stays up while the next loads, so a track change never flashes.
+    hold: HashMap<&'static str, (Option<egui::TextureId>, Option<egui::TextureId>, f64)>,
 }
 
 impl Images {
@@ -1326,6 +1378,30 @@ impl Images {
             let _ = self.req.send(url.to_string());
         }
         None
+    }
+
+    /// The cover to show at `slot` for `url`: (now showing, fading from, how far the fade is 0..1).
+    /// While the new cover loads, the previous one stays; when it arrives it fades in over the old.
+    fn held(
+        &mut self,
+        slot: &'static str,
+        url: &str,
+        gray: bool,
+        now: f64,
+    ) -> (Option<egui::TextureId>, Option<egui::TextureId>, f32) {
+        let new = art_tex(self, url, gray);
+        let gone = url.is_empty() || self.failed(url);
+        let e = self.hold.entry(slot).or_insert((None, None, 0.0));
+        match new {
+            Some(n) if e.0 != Some(n) => *e = (Some(n), e.0, now),
+            None if gone => *e = (None, None, 0.0),
+            _ => {}
+        }
+        let f = ((now - e.2) / 0.35).clamp(0.0, 1.0) as f32;
+        if f >= 1.0 {
+            e.1 = None;
+        }
+        (e.0, e.1, f)
     }
 
     /// Tried and failed (or no picture at all): nothing is coming.
@@ -1403,37 +1479,26 @@ fn paint_art_g(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, round:
     }
 }
 
-/// A vinyl record with its tonearm: the stand-in for a picture that is loading (`spin` = seconds, it turns)
-/// or that does not exist (`None`, still).
+/// The stand-in for a missing picture: a quiet square with the Tidalite gem, or (`spin` = seconds) a small
+/// turning arc while it loads.
 fn paint_record(p: &egui::Painter, rect: Rect, spin: Option<f32>) {
     let c = rect.center();
-    let r = rect.width().min(rect.height()) * 0.42;
-    p.circle_filled(c, r, Color32::from_gray(18));
-    for k in 1..=5 {
-        p.circle_stroke(c, r * (0.48 + k as f32 * 0.095), Stroke::new(1.0_f32, Color32::from_gray(38)));
+    let s = rect.width().min(rect.height());
+    p.rect_filled(Rect::from_center_size(c, Vec2::splat(s)), 0.0, Color32::from_black_alpha(60));
+    let col = pal().ink2.gamma_multiply(0.7);
+    match spin {
+        Some(t) => {
+            // three quarters of a ring, turning
+            let r = s * 0.12;
+            let pts: Vec<Pos2> = (0..=24).map(|k| c + Vec2::angled(t * 4.0 + k as f32 / 24.0 * 4.7) * r).collect();
+            p.add(egui::Shape::line(pts, Stroke::new((s * 0.025).max(2.0), col)));
+        }
+        None => {
+            // the Tidalite gem, quietly
+            let g = Rect::from_center_size(c, Vec2::splat(s * 0.36));
+            vicon::gem(p, g, pal().ink2.gamma_multiply(0.75), pal().ink2.gamma_multiply(0.35));
+        }
     }
-    // a sheen sweeping round so the turning shows
-    let a = spin.unwrap_or(0.6) * 2.4;
-    for (da, alpha) in [(0.0f32, 46u8), (0.18, 28), (-0.18, 28)] {
-        let (s, co) = (a + da).sin_cos();
-        p.line_segment(
-            [c + Vec2::new(co, s) * r * 0.5, c + Vec2::new(co, s) * r * 0.96],
-            Stroke::new(2.0_f32, Color32::from_white_alpha(alpha)),
-        );
-    }
-    p.circle_filled(c, r * 0.36, pal().red);
-    let (s, co) = a.sin_cos();
-    p.line_segment(
-        [c + Vec2::new(co, s) * r * 0.12, c + Vec2::new(co, s) * r * 0.3],
-        Stroke::new(1.5_f32, Color32::from_white_alpha(120)),
-    );
-    p.circle_filled(c, r * 0.06, Color32::from_gray(10));
-    // tonearm: pivot top right, resting on the outer grooves
-    let pivot = Pos2::new(rect.max.x - rect.width() * 0.12, rect.min.y + rect.height() * 0.12);
-    let tip = c + Vec2::new(r * 0.52, r * 0.62);
-    p.line_segment([pivot, tip], Stroke::new(3.0_f32, pal().trim));
-    p.circle_filled(pivot, r * 0.12, pal().trim);
-    p.rect_filled(Rect::from_center_size(tip, Vec2::splat(r * 0.16)), Rounding::same(1.0), pal().trim);
 }
 
 /// Covers shown as records instead of squares (click a cover to switch). Saved in the settings.
@@ -1524,6 +1589,37 @@ fn paint_page_art(ui: &egui::Ui, images: &mut Images, url: &str, rect: Rect, art
     }
 }
 
+/// A cover drawn into four corners at `alpha`, with a hair cropped off each edge (where JPEG junk lives).
+fn cover_quad(p: &egui::Painter, cs: [Pos2; 4], id: egui::TextureId, alpha: f32) {
+    const E: f32 = 0.006;
+    let uvs = [Pos2::new(E, E), Pos2::new(1.0 - E, E), Pos2::new(1.0 - E, 1.0 - E), Pos2::new(E, 1.0 - E)];
+    let color = Color32::from_white_alpha((alpha.clamp(0.0, 1.0) * 255.0) as u8);
+    let mut mesh = egui::Mesh::with_texture(id);
+    for (pos, uv) in cs.iter().zip(uvs.iter()) {
+        mesh.vertices.push(egui::epaint::Vertex { pos: *pos, uv: *uv, color });
+    }
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    p.add(egui::Shape::mesh(mesh));
+}
+
+/// A cover that changes smoothly: the old one stays until the new one is in, then the new fades in over it.
+fn paint_held(ui: &egui::Ui, images: &mut Images, slot: &'static str, url: &str, rect: Rect, gray: bool) {
+    let (tex, prev, f) = images.held(slot, url, gray, ui.input(|i| i.time));
+    let cs = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+    match tex {
+        Some(id) => {
+            if let Some(old) = prev {
+                cover_quad(ui.painter(), cs, old, 1.0);
+            }
+            cover_quad(ui.painter(), cs, id, f);
+            if f < 1.0 {
+                ui.ctx().request_repaint();
+            }
+        }
+        None => paint_art_g(ui, images, url, rect, 0.0, gray),
+    }
+}
+
 /// Width of the last right-hand column in two-column rows.
 const TBL_W2: f32 = 140.0;
 
@@ -1585,22 +1681,22 @@ fn col_header(ui: &mut egui::Ui, numbered: bool) {
     let avail = (rect.max.x - 10.0 - right_w() - tx).max(40.0);
     let cw = col_widths(avail);
     let p = ui.painter();
-    ptext(p, Pos2::new(rect.min.x + 8.0, cy), Align::Min, if numbered { "#" } else { "" }, 2.0, pal().trim);
+    ui_text(p, Pos2::new(rect.min.x + 8.0, cy), Align::Min, if numbered { "#" } else { "" }, 2.0, 400.0, pal().trim);
     if col_on(3) {
         let kx = rect.max.x - 10.0 - 80.0 - KB_W;
-        ptext(p, Pos2::new(kx, cy), Align::Min, "KEY", 2.0, pal().trim);
-        ptext(p, Pos2::new(kx + KB_GAP, cy), Align::Min, "BPM", 2.0, pal().trim);
+        ui_text(p, Pos2::new(kx, cy), Align::Min, "KEY", 2.0, 400.0, pal().trim);
+        ui_text(p, Pos2::new(kx + KB_GAP, cy), Align::Min, "BPM", 2.0, 400.0, pal().trim);
     }
-    ptext(p, Pos2::new(tx, cy), Align::Min, "NAME", 2.0, pal().trim);
+    ui_text(p, Pos2::new(tx, cy), Align::Min, "NAME", 2.0, 400.0, pal().trim);
     let mut x = tx + cw[0];
     for (i, name) in COL_NAMES[..2].iter().enumerate() {
         if cw[i + 1] > 0.0 {
-            ptext(p, Pos2::new(x, cy), Align::Min, name, 2.0, pal().trim);
+            ui_text(p, Pos2::new(x, cy), Align::Min, name, 2.0, 400.0, pal().trim);
             x += cw[i + 1];
         }
     }
     if col_on(2) {
-        ptext(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, "LENGTH", 2.0, pal().trim);
+        ui_text(p, Pos2::new(rect.max.x - 10.0, cy), Align::Max, "LENGTH", 2.0, 400.0, pal().trim);
     }
     // drag the line between two columns to share the room differently
     let vis: Vec<usize> = (0..3).filter(|&i| cw[i] > 0.0).collect();
@@ -1949,6 +2045,29 @@ struct App {
     spec_op: f32,
     spec_h: f32,
     spec_w: f32,
+    /// the album view's visualizer in a box: 0 none, 1 a themed box, 2 a thin line
+    spec_frame: u8,
+    /// the visualizer settings panel, open on 0 (the player's screen) or 1 (the album view)
+    viz_panel: Option<usize>,
+    /// the Winamp skin browser: open, what was searched, the skins found, still loading, no more to load,
+    /// and the skin being worn (md5, name)
+    show_winamp: bool,
+    wa_q: String,
+    wa_list: Vec<winamp::WaSkin>,
+    wa_busy: bool,
+    wa_end: bool,
+    wa_worn: Option<(String, String)>,
+    /// the worn Winamp skin's own pictures, drawn for the player and the equalizer
+    wa_art: Option<winamp_ui::WaTex>,
+    /// the album view cover's border (right-click the cover): 0 none, 1 subtle, 2 the skin's colour
+    art_border: u8,
+    /// the album view's background colours as shown, easing toward the new cover's
+    bg_now: Option<[Color32; 2]>,
+    /// the sound output chosen in Preferences (None = the system default), and the outputs last found
+    out_device: Option<String>,
+    out_list: Vec<String>,
+    /// the queue panel open over the album view
+    art_queue: bool,
     /// visualizer settings: [0] the small one in the player, [1] the one in the album view
     viz: [viz::VizCfg; 2],
     viz_wave: Vec<f32>,
@@ -2140,6 +2259,17 @@ struct App {
     pomo_sound: bool,
     lib_frac: f32,
     stack_frac: f32,
+    /// the queue hidden (the PL button), the player taking the whole column
+    queue_hidden: bool,
+    /// the first row shown in the Winamp playlist (a fraction while scrolling)
+    wa_pl_top: f32,
+    /// the playlist font picked (index into winamp_ui::PL_FONTS; 0 = the skin's own)
+    pl_font: usize,
+    /// equalizer AUTO: remember an EQ per song, and the ones remembered
+    eq_auto: bool,
+    eq_songs: HashMap<i64, [f32; 10]>,
+    /// left / right balance, -100 to 100
+    balance: i32,
     ebuf: String,
     ebuf_id: u32,
     chart_tried: std::collections::HashSet<String>,
@@ -2210,7 +2340,7 @@ impl App {
             tx,
             rx,
             ctx,
-            images: Images { map: HashMap::new(), requested: HashSet::new(), req, avg: HashMap::new() },
+            images: Images { map: HashMap::new(), requested: HashSet::new(), req, avg: HashMap::new(), hold: HashMap::new() },
             _font_tex: font_tex,
             auth: Auth::LoggedOut,
             login_code: None,
@@ -2256,6 +2386,20 @@ impl App {
             spec_op: 0.2,
             spec_h: 0.42,
             spec_w: 0.6,
+            spec_frame: 1,
+            viz_panel: None,
+            show_winamp: false,
+            wa_q: String::new(),
+            wa_list: Vec::new(),
+            wa_busy: false,
+            wa_end: false,
+            wa_worn: None,
+            wa_art: None,
+            art_border: 1,
+            bg_now: None,
+            out_device: None,
+            out_list: Vec::new(),
+            art_queue: false,
             viz: [viz::VizCfg::player(), viz::VizCfg::art()],
             viz_wave: vec![0.0; WAVE_N],
             show_lyrics: true,
@@ -2428,6 +2572,12 @@ impl App {
             pomo_sound: false,
             lib_frac: 0.34,
             stack_frac: 1.0,
+            queue_hidden: false,
+            wa_pl_top: 0.0,
+            pl_font: 0,
+            eq_auto: false,
+            eq_songs: HashMap::new(),
+            balance: 0,
             ebuf: String::new(),
             ebuf_id: 0,
             chart_tried: Default::default(),
@@ -2474,6 +2624,44 @@ impl App {
         }
         if let Some(b) = st["tour_seen"].as_bool() {
             app.tour_seen = b;
+        }
+        if let Some(d) = st["out_device"].as_str() {
+            app.out_device = Some(d.to_string());
+            app.player.send(Cmd::Device(app.out_device.clone()));
+        }
+        if let Some(b) = st["art_border"].as_u64() {
+            app.art_border = (b as u8).min(2);
+        }
+        // the Winamp skin worn last time, from its saved file
+        if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
+            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
+            let (tx, ctx) = (app.tx.clone(), app.ctx.clone());
+            std::thread::spawn(move || {
+                if let Some(b) = winamp::load_saved(&s.md5) {
+                    let _ = tx.send(Msg::WaSkin(winamp::load(&b).map(|(p, art)| (s, p, art))));
+                    ctx.request_repaint();
+                }
+            });
+        }
+        if let Some(b) = st["balance"].as_i64() {
+            app.balance = (b as i32).clamp(-100, 100);
+            app.player.ctl.set_balance(app.balance);
+        }
+        if let Some(f) = st["pl_font"].as_u64() {
+            app.pl_font = (f as usize).min(winamp_ui::PL_FONTS.len() - 1);
+        }
+        app.eq_auto = st["eq_auto"].as_bool().unwrap_or(false);
+        if let Some(m) = st["eq_songs"].as_object() {
+            for (k, v) in m {
+                let g: Vec<f32> =
+                    v.as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect()).unwrap_or_default();
+                if let (Ok(id), true) = (k.parse::<i64>(), g.len() == 10) {
+                    app.eq_songs.insert(id, [g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7], g[8], g[9]]);
+                }
+            }
+        }
+        if let Some(f) = st["spec_frame"].as_u64() {
+            app.spec_frame = (f as u8).min(1);
         }
         if let Some(f) = st["spec_w"].as_f64() {
             app.spec_w = (f as f32).clamp(0.2, 1.0);
@@ -2587,6 +2775,14 @@ impl App {
             "spec_op": self.spec_op,
             "spec_h": self.spec_h,
             "spec_w": self.spec_w,
+            "spec_frame": self.spec_frame,
+            "pl_font": self.pl_font,
+            "eq_auto": self.eq_auto,
+            "eq_songs": self.eq_songs,
+            "balance": self.balance,
+            "winamp": self.wa_worn,
+            "art_border": self.art_border,
+            "out_device": self.out_device,
             "viz": [self.viz[0].save(), self.viz[1].save()],
             "lyrics": self.show_lyrics,
             "repeat": match self.repeat { Repeat::Off => 0, Repeat::All => 1, Repeat::One => 2 },
@@ -2639,6 +2835,7 @@ impl App {
         self.player.ctl.set_speed(self.speed);
         self.player.ctl.set_semis(if self.practice { self.semis } else { 0 });
         self.player.ctl.set_chan(if self.practice { self.chan } else { 0 });
+        self.player.ctl.set_balance(self.balance);
         self.player.ctl.set_count_in(if self.practice { self.count_in } else { 0 }, self.bpm as f32);
         if let Some(t) = self.cur_track() {
             match both {
@@ -3057,6 +3254,11 @@ impl App {
 
     /// Bar colours for the visualizer: None = the skin's own, else (main, cap).
     fn viz_tint(&self, color: u8) -> Option<(Color32, Color32)> {
+        if color == 0 {
+            if let Some(v) = self.wa_art.as_ref().map(|t| &t.vis).filter(|v| v.len() >= 24) {
+                return Some((v[12], v[2]));
+            }
+        }
         match color {
             2 => Some((Color32::from_rgb(70, 220, 110), Color32::from_rgb(255, 72, 60))),
             1 => {
@@ -3078,35 +3280,6 @@ impl App {
             }
             _ => None,
         }
-    }
-
-    /// Right-click menu for one visualizer (0 = player, 1 = album view); each keeps its own settings.
-    fn viz_menu(&mut self, ui: &mut egui::Ui, i: usize) {
-        let c = &mut self.viz[i];
-        if menu_item(ui, &format!("STYLE: {}  (click to change)", ["BARS", "WAVEFORM", "BARS + WAVE"][c.mode as usize % 3])) {
-            c.mode = (c.mode + 1) % 3;
-        }
-        let mut n = c.n as f32;
-        if menu_item(ui, &format!("NUMBER OF BARS  {}   (+)", c.n)) {
-            n = (n + 4.0).min(96.0);
-        }
-        if menu_item(ui, &format!("NUMBER OF BARS  {}   (-)", c.n)) {
-            n = (n - 4.0).max(8.0);
-        }
-        c.n = n as usize;
-        let cname = ["SKIN", "FROM COVER ART", "CLASSIC GREEN + RED"][c.color as usize % 3];
-        if menu_item(ui, &format!("COLORS: {}  (click to change)", cname)) {
-            c.color = (c.color + 1) % 3;
-        }
-        for (name, v, d, lo, hi) in [("BAR WIDTH", &mut c.w, 0.1, 0.3, 1.0), ("SENSITIVITY", &mut c.gain, 0.2, 0.4, 3.0)] {
-            if menu_item(ui, &format!("{}  {}%   (+)", name, (*v * 100.0).round() as i32)) {
-                *v = (*v + d).min(hi);
-            }
-            if menu_item(ui, &format!("{}  {}%   (-)", name, (*v * 100.0).round() as i32)) {
-                *v = (*v - d).max(lo);
-            }
-        }
-        self.dirty = true;
     }
 
     /// Bands, peaks and wave shaped for one visualizer: its own bar count and sensitivity.
@@ -3236,6 +3409,86 @@ impl App {
                     self.ctx.data_mut(|d| d.insert_temp(id, (ang, 14.0f32)));
                 }
                 self.dirty = true;
+            }
+            Action::SetDevice(d) => {
+                self.out_device = d.clone();
+                self.dirty = true;
+                self.player.send(Cmd::Device(d));
+                // the song starts again on the new output, where it was (paused stays paused)
+                if let (Some(i), Some(t)) = (self.cur, self.cur_track()) {
+                    if !self.stopped {
+                        let bytes = match self.srcmap.get(&t.id) {
+                            Some(Src::File(p)) => std::fs::read(p).ok(),
+                            _ => cache::get(t.id),
+                        };
+                        match bytes {
+                            Some(b) => self.player.send(Cmd::Swap(b, self.pos(), self.paused)),
+                            None => self.play_index(i),
+                        }
+                    }
+                }
+                self.set_note("SOUND OUTPUT CHANGED");
+            }
+            Action::WaOpen => {
+                self.show_winamp = !self.show_winamp;
+                if self.show_winamp {
+                    self.show_log = false;
+                    self.show_eq = false;
+                    self.show_cache = false;
+                    if self.wa_list.is_empty() && !self.wa_busy {
+                        self.apply(Action::WaSearch);
+                    }
+                }
+            }
+            Action::WaSearch | Action::WaMore => {
+                let more = matches!(a, Action::WaMore);
+                if self.wa_busy || (more && self.wa_end) {
+                    return;
+                }
+                self.wa_busy = true;
+                if !more {
+                    self.wa_list.clear();
+                    self.wa_end = false;
+                }
+                let (q, from) = (self.wa_q.clone(), if more { self.wa_list.len() } else { 0 });
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::WaList(winamp::list(&q, from), more));
+                    ctx.request_repaint();
+                });
+            }
+            Action::WaApply(s) => {
+                self.set_note(&format!("PUTTING ON {}...", s.name.to_uppercase()));
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let r = winamp::fetch(&s).and_then(|b| winamp::load(&b)).map(|(p, art)| (s, p, art));
+                    let _ = tx.send(Msg::WaSkin(r));
+                    ctx.request_repaint();
+                });
+            }
+            Action::Balance(b) => {
+                self.balance = b.clamp(-100, 100);
+                self.player.ctl.set_balance(self.balance);
+                self.dirty = true;
+            }
+            Action::QueueOp(op) => {
+                let cur_id = self.cur_track().map(|t| t.id);
+                let mut v: Vec<Track> = (*self.queue).clone();
+                match op {
+                    0 => shuffle_vec(&mut v),
+                    1 => v.sort_by_key(|t| (t.artist.to_lowercase(), t.title.to_lowercase())),
+                    2 => v.sort_by_key(|t| t.title.to_lowercase()),
+                    _ => v.reverse(),
+                }
+                self.cur = cur_id.and_then(|id| v.iter().position(|t| t.id == id));
+                self.queue = Arc::new(v);
+                self.orig_queue = None;
+                self.set_note(["QUEUE SHUFFLED", "SORTED BY ARTIST", "SORTED BY TITLE", "QUEUE REVERSED"][op.min(3) as usize]);
+            }
+            Action::PlFont(i) => {
+                self.pl_font = i;
+                self.dirty = true;
+                self.apply_pl_font();
             }
             Action::Forward => {
                 if let Some(p) = self.fwd.pop() {
@@ -3489,6 +3742,10 @@ impl App {
                 self.refresh_prefetch();
             }
             Action::SkinSet(n) => {
+                skin::set_custom(None);
+                self.wa_worn = None;
+                self.wa_art = None;
+                winamp_ui::set_chrome(None);
                 let n = n % PALS.len();
                 SKIN.store(n, Ordering::Relaxed);
                 setup_style(&self.ctx);
@@ -3496,6 +3753,10 @@ impl App {
                 self.set_note(&format!("SKIN: {}", SKIN_NAMES[n]));
             }
             Action::Skin => {
+                skin::set_custom(None);
+                self.wa_worn = None;
+                self.wa_art = None;
+                winamp_ui::set_chrome(None);
                 let n = (SKIN.load(Ordering::Relaxed) + 1) % PALS.len();
                 SKIN.store(n, Ordering::Relaxed);
                 setup_style(&self.ctx);
@@ -3534,16 +3795,11 @@ impl App {
                     if self.pinned { egui::viewport::WindowLevel::AlwaysOnTop } else { egui::viewport::WindowLevel::Normal };
                 self.ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(lvl));
             }
-            Action::ToggleEq => {
-                self.show_eq = !self.show_eq;
-                if self.show_eq {
-                    self.show_log = false;
-                    self.show_cache = false;
-                }
-            }
+            Action::ToggleEq => self.show_eq = !self.show_eq,
             Action::ToggleCacheView => {
                 self.show_cache = !self.show_cache;
                 if self.show_cache {
+                    self.show_winamp = false;
                     self.show_log = false;
                     self.show_eq = false;
                     self.cache_stats = cache::stats();
@@ -3797,6 +4053,7 @@ impl eframe::App for App {
                 && self.ed.id == 0
                 && !self.show_help
                 && self.credits.is_none()
+                && self.viz_panel.is_none()
                 && self.artist_pick.is_none()
                 && !self.show_prefs
                 && !self.palette_open
@@ -3871,21 +4128,52 @@ impl eframe::App for App {
                         .frame(panel_frame())
                         .show(ctx, |ui| self.library_ui(ui, &mut acts));
                 }
-                egui::TopBottomPanel::top("player")
-                    .exact_height(player_h)
-                    .resizable(false)
-                    .show_separator_line(false)
-                    .frame(panel_frame())
-                    .show(ctx, |ui| self.player_window(ui, &mut acts));
-                if self.practice {
-                    egui::TopBottomPanel::top("practice")
-                        .exact_height(practice_h)
+                // the equalizer docks under the player: the skin's at the player's own scale, or Tidalite's
+                let eq_h = if self.wa_art.is_some() { 116.0 * s + 44.0 + 46.0 } else { 340.0 };
+                if self.queue_hidden {
+                    // PL off: no queue, the player fills the column (the practice panel and equalizer under it)
+                    if self.show_eq {
+                        egui::TopBottomPanel::bottom("eq_dock")
+                            .exact_height(eq_h)
+                            .resizable(false)
+                            .show_separator_line(false)
+                            .frame(panel_frame())
+                            .show(ctx, |ui| self.eq_dock(ui));
+                    }
+                    if self.practice {
+                        egui::TopBottomPanel::bottom("practice")
+                            .exact_height(practice_h)
+                            .resizable(false)
+                            .show_separator_line(false)
+                            .frame(panel_frame())
+                            .show(ctx, |ui| self.practice_ui(ui, &mut acts));
+                    }
+                    egui::CentralPanel::default().frame(panel_frame()).show(ctx, |ui| self.player_window(ui, &mut acts));
+                } else {
+                    egui::TopBottomPanel::top("player")
+                        .exact_height(player_h)
                         .resizable(false)
                         .show_separator_line(false)
                         .frame(panel_frame())
-                        .show(ctx, |ui| self.practice_ui(ui, &mut acts));
+                        .show(ctx, |ui| self.player_window(ui, &mut acts));
+                    if self.show_eq {
+                        egui::TopBottomPanel::top("eq_dock")
+                            .exact_height(eq_h)
+                            .resizable(false)
+                            .show_separator_line(false)
+                            .frame(panel_frame())
+                            .show(ctx, |ui| self.eq_dock(ui));
+                    }
+                    if self.practice {
+                        egui::TopBottomPanel::top("practice")
+                            .exact_height(practice_h)
+                            .resizable(false)
+                            .show_separator_line(false)
+                            .frame(panel_frame())
+                            .show(ctx, |ui| self.practice_ui(ui, &mut acts));
+                    }
+                    egui::CentralPanel::default().frame(panel_frame()).show(ctx, |ui| self.playlist_ui(ui, &mut acts));
                 }
-                egui::CentralPanel::default().frame(panel_frame()).show(ctx, |ui| self.playlist_ui(ui, &mut acts));
 
                 // drag handles between the windows
                 if !self.focus_mode {
@@ -3899,9 +4187,9 @@ impl eframe::App for App {
                         None => {}
                     }
                 }
-                let y = player_h + practice_h;
+                let y = player_h + practice_h + if self.show_eq { eq_h } else { 0.0 };
                 let r = Rect::from_min_size(Pos2::new(lib_w, y - 7.0), Vec2::new(right_w, 14.0));
-                match splitter(ctx, "split_h", r, false) {
+                match if self.queue_hidden { None } else { splitter(ctx, "split_h", r, false) } {
                     Some(Some(y)) => {
                         self.stack_frac = (y / screen.height()).clamp(0.3, 1.0);
                         self.dirty = true;
@@ -3940,6 +4228,7 @@ impl eframe::App for App {
         self.floating_modes(ctx, &mut acts);
         self.help_overlay(ctx, &mut acts);
         self.credits_overlay(ctx);
+        self.viz_panel(ctx);
         self.artist_picker(ctx, &mut acts);
         self.palette_overlay(ctx);
         self.prefs_overlay(ctx, &mut acts);

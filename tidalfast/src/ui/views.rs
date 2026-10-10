@@ -364,7 +364,7 @@ fn sub_tabs(ui: &mut egui::Ui, items: &[(Sec, &str)], cur: usize) -> Option<usiz
         let resp = ui.interact(r, ui.id().with(("subtab", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         let on = i == cur;
         let col = if on || resp.hovered() { pal().ink } else { pal().ink2 };
-        ptext_fit(ui.painter(), r.center() - Vec2::new(0.0, 1.0), Align::Center, name, 2.0, w - 4.0, col);
+        crate::ui_text(ui.painter(), r.center() - Vec2::new(0.0, 1.0), Align::Center, name, 2.0, w - 4.0, col);
         if on {
             let u = Rect::from_min_max(Pos2::new(r.min.x + 4.0, r.max.y - 3.0), Pos2::new(r.max.x - 4.0, r.max.y - 1.0));
             fill_rect(ui.painter(), u, pal().ink);
@@ -1714,6 +1714,19 @@ impl App {
             if retro_btn_w(ui, "MORE", 64.0, self.more).tip("Speed trainer, pitch, metronome, ear modes, export").clicked() {
                 acts.push(Action::ToggleMore);
             }
+            ui.add_space(8.0);
+            let ink = pal().ink;
+            let tb = crate::icon_btn_w(ui, &crate::IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 44.0)
+                .tip("Focus timer (pomodoro): work in blocks with short rests between");
+            if tb.clicked() {
+                acts.push(Action::TimerPanel);
+            }
+            let mb = crate::icon_btn_w(ui, &crate::IC_METRO, self.metro_open, ink, 44.0)
+                .tip("Metronome with beats, subdivisions and a pendulum");
+            if mb.clicked() {
+                acts.push(Action::MetroPanel);
+            }
+            crate::tour::mark("TIMEBTNS", tb.rect.union(mb.rect));
         });
         row_mark(ui, "LOOPROW", ab_top);
         let speed_top = ui.cursor().min.y;

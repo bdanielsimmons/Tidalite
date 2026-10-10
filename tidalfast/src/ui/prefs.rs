@@ -234,6 +234,7 @@ impl App {
             return;
         }
 
+        crate::credits::block_behind(ctx, "prefs");
         let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("prefs_dim")));
         p.rect_filled(ctx.screen_rect(), 0.0, egui::Color32::from_black_alpha(150));
         let size = egui::vec2(640.0_f32.min(ctx.screen_rect().width() - 40.0), 540.0_f32.min(ctx.screen_rect().height() - 40.0));
@@ -280,6 +281,27 @@ impl App {
                         if matches!(self.upd_state, 0 | 3) && retro_btn(ui, "CHECK NOW", false).clicked() {
                             self.start_update_check();
                         }
+
+                        section_header(ui, "SOUND OUTPUT");
+                        para(
+                            ui,
+                            "Where the sound plays. Bluetooth headphones and speakers show up here once they are paired in your computer's Bluetooth settings. If the chosen one is off or unplugged, the default plays instead.",
+                            pal().ink2,
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            if retro_btn(ui, "SYSTEM DEFAULT", self.out_device.is_none()).clicked() && self.out_device.is_some() {
+                                acts.push(Action::SetDevice(None));
+                            }
+                            for name in self.out_list.clone() {
+                                let on = self.out_device.as_deref() == Some(name.as_str());
+                                if retro_btn(ui, &name.to_uppercase(), on).clicked() && !on {
+                                    acts.push(Action::SetDevice(Some(name)));
+                                }
+                            }
+                            if retro_btn(ui, "REFRESH", false).tip("Look again (after pairing or plugging something in)").clicked() {
+                                self.out_list = crate::player::output_devices();
+                            }
+                        });
 
                         section_header(ui, "SIZE OF EVERYTHING");
                         para(ui, "Makes buttons and text bigger or smaller. Ctrl and + / - (Cmd on a Mac) does the same.", pal().ink2);
