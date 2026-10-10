@@ -7,6 +7,9 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- Set your own key and BPM for any song (right-click > Key and BPM...), kept on this computer
+- A new tune opens straight to its lead sheet, ready to fill in
+- Write who wrote a tune in its ABOUT line
 - CHORDS tab under PRACTICE - find any chord (notes, grips, scales) or click notes on a neck to name them
 - CLUSTERS trainer - semitone and tone clusters through the parent scales, fixed cluster / fixed bass, and in a tune
 - VOICINGS trainer - triads, shells, close, drop 2, drop 3 and drop 2&4 on every string set, walked through a tune's changes
@@ -14,9 +17,6 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 - The band loops, keeps each part's level, and can export a WAV
 - Edit the title and artist of your own files (written into the file's tags)
 - High contrast skins (dark and light), plus colour-blind safe loops and reduce motion in Preferences > ACCESSIBILITY
-- Sleek skins and tooltips use Chakra Petch, a retro font that isn't pixel text
-- HIFI / 320K sits on the player's title bar with every skin; Winamp skins show the key and BPM in the scrolling title
-- Winamp skins: thousands of classic ones from the Winamp Skin Museum, or Tidalite's own palettes as sleek Winamp-style skins (ORIGINAL) or the classic pixel look (RETRO ORIGINAL)
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
