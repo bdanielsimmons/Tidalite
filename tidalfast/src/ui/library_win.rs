@@ -19,9 +19,6 @@ impl App {
             ptext(p, c + Vec2::new(0.0, -40.0), Align::Center, "A retro player for Tidal and more", 2.0, pal().ink2);
         }
         match self.auth {
-            Auth::Checking => {
-                ptext(p, c + Vec2::new(0.0, 24.0), Align::Center, "Checking session...", 2.0, pal().ink);
-            }
             Auth::LoggingIn => match &self.login_code {
                 Some((code, url)) => {
                     ptext(p, c + Vec2::new(0.0, -6.0), Align::Center, "Approve the login in your browser", 2.0, pal().ink);
@@ -415,6 +412,30 @@ impl App {
                 acts.push(Action::WaSearch);
             }
         });
+        // the ones worn lately: click to wear again, X to take one off the list
+        if !self.wa_recent.is_empty() {
+            ui.add_space(6.0);
+            let worn_now = self.wa_worn.as_ref().map(|w| w.0.clone());
+            ui.horizontal_wrapped(|ui| {
+                crate::views::label(ui, "WORN LATELY", 110.0);
+                for (md5, name) in self.wa_recent.clone() {
+                    let on = worn_now.as_deref() == Some(md5.as_str());
+                    let w = (text_w(&name, 2.0) + 20.0).min(200.0);
+                    if retro_btn_w(ui, &name, w, on).tip("Wear it again").clicked() {
+                        acts.push(Action::WaApply(crate::winamp::WaSkin {
+                            md5: md5.clone(),
+                            name: name.clone(),
+                            shot: String::new(),
+                            download: String::new(),
+                        }));
+                    }
+                    if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
+                        acts.push(Action::WaForget(md5));
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+        }
         ui.add_space(8.0);
         let list = self.wa_list.clone();
         let worn = self.wa_worn.as_ref().map(|w| w.0.clone());

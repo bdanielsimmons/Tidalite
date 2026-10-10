@@ -300,6 +300,27 @@ impl App {
                             }
                         });
 
+                        section_header(ui, "OPENING SOUND");
+                        para(ui, "A little sound when Tidalite opens: its own chime, or a short sound file of yours.", pal().ink2);
+                        ui.horizontal_wrapped(|ui| {
+                            for (m, name) in [(0u8, "OFF"), (1, "TIDALITE CHIME"), (2, "MY FILE")] {
+                                let ok = m != 2 || self.intro_file.is_some();
+                                if retro_btn(ui, name, self.intro == m).clicked() {
+                                    acts.push(Action::Intro(if ok { m } else { 3 }));
+                                }
+                            }
+                            if retro_btn(ui, "CHOOSE FILE...", false).clicked() {
+                                acts.push(Action::Intro(3));
+                            }
+                            if retro_btn(ui, "PLAY", false).tip("Hear it now").clicked() {
+                                acts.push(Action::Intro(4));
+                            }
+                        });
+                        if let Some(f) = &self.intro_file {
+                            let name = std::path::Path::new(f).file_name().map_or(f.clone(), |n| n.to_string_lossy().to_string());
+                            para(ui, &format!("Your file: {}", name), pal().dim);
+                        }
+
                         section_header(ui, "SIZE OF EVERYTHING");
                         para(ui, "Makes buttons and text bigger or smaller. Ctrl and + / - (Cmd on a Mac) does the same.", pal().ink2);
                         ui.horizontal_wrapped(|ui| {

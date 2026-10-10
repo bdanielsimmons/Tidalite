@@ -978,7 +978,7 @@ pub fn output_devices() -> Vec<String> {
 }
 
 /// Open the output with this name; if it is gone (unplugged, Bluetooth off), the default one.
-fn open_named(name: Option<&str>) -> Result<(OutputStream, OutputStreamHandle), String> {
+pub(crate) fn open_named(name: Option<&str>) -> Result<(OutputStream, OutputStreamHandle), String> {
     if let Some(want) = name {
         if let Ok(devs) = rodio::cpal::default_host().output_devices() {
             for d in devs {

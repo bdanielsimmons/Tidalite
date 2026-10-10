@@ -199,6 +199,12 @@ impl App {
         }
     }
 
+    /// A tune's tempo: the one saved with it, else one written in its notes ("300 bpm", "it's at 300").
+    pub(crate) fn tune_bpm(&self, i: usize) -> Option<u32> {
+        let t = self.store.tunes.get(i)?;
+        (t.bpm > 0).then_some(t.bpm).or_else(|| tempo_in_notes(&t.notes))
+    }
+
     pub(crate) fn cur_tune(&self) -> Option<usize> {
         self.cur_track().and_then(|t| self.store.tune_of(t.id))
     }
@@ -504,13 +510,8 @@ impl App {
         self.pending_seek = None;
         self.sel_anchor = None;
         self.last_wraps = self.player.ctl.wraps();
-        self.bpm = self
-            .store
-            .bpm
-            .get(&t.id)
-            .copied()
-            .or_else(|| self.store.tune_of(t.id).map(|i| self.store.tunes[i].bpm).filter(|b| *b > 0))
-            .unwrap_or(0);
+        self.bpm =
+            self.store.bpm.get(&t.id).copied().or_else(|| self.store.tune_of(t.id).and_then(|i| self.tune_bpm(i))).unwrap_or(0);
         self.wave = (t.id, None);
         self.sync_loop();
     }
@@ -867,6 +868,14 @@ impl App {
                 }
             }
             Msg::WaSkin(r) => self.wear_skin(r, true),
+            Msg::IntroFile(f) => {
+                if f.is_some() {
+                    self.intro_file = f;
+                    self.intro = 2;
+                    self.dirty = true;
+                    self.apply(Action::Intro(4));
+                }
+            }
             Msg::FontReady(choice, r) => match r {
                 Ok(_) => {
                     // kept on disk now: wear it if it is still the one wanted
@@ -1342,6 +1351,20 @@ impl App {
             }
             Action::OpenTune(i) => {
                 self.tune_open = i;
+                // the tune's own tempo for the metronome and the band (kept with it from now on)
+                if let Some(b) = i.and_then(|i| self.tune_bpm(i)) {
+                    self.mt_bpm = b;
+                    self.mt_add = 0.0;
+                    if self.cur.is_none() || self.stopped {
+                        self.bpm = b;
+                    }
+                    if let Some(t) = i.and_then(|i| self.store.tunes.get_mut(i)) {
+                        if t.bpm == 0 {
+                            t.bpm = b;
+                            self.store_dirty = true;
+                        }
+                    }
+                }
                 if i.is_some() {
                     self.chart_pick = i;
                     self.chart_live = false;
@@ -1919,13 +1942,20 @@ impl App {
             Knob::LoopA => self.apply(Action::SetAAt(v.max(0.0))),
             Knob::LoopB => self.apply(Action::SetBAt(v.max(0.0))),
             Knob::Bpm => {
-                let b = u(30.0, 300.0);
+                let b = u(30.0, 400.0);
                 self.mt_bpm = b;
                 self.mt_add = 0.0;
                 self.mt_step_at = Instant::now();
                 self.bpm = b;
                 if self.cur.is_some() && !self.stopped {
                     self.set_bpm(b as i32);
+                }
+                // an open tune keeps the tempo you set for it
+                if let Some(i) = self.tune_open.or_else(|| self.chart_tune()) {
+                    if let Some(t) = self.store.tunes.get_mut(i) {
+                        t.bpm = b;
+                        self.store_dirty = true;
+                    }
                 }
             }
             Knob::Beats => {
@@ -2032,7 +2062,7 @@ impl App {
     }
 
     fn set_bpm(&mut self, b: i32) {
-        let b = b.clamp(30, 300) as u32;
+        let b = b.clamp(30, 400) as u32;
         self.bpm = b;
         if let Some(t) = self.cur_track() {
             self.store.bpm.insert(t.id, b);
@@ -2111,5 +2141,52 @@ mod tests {
     fn knob_steps() {
         assert_eq!(knob_step(Knob::LoopA), 0.2);
         assert_eq!(knob_step(Knob::Speed), 5.0);
+    }
+}
+
+/// A tempo written in a tune's notes: a number with "bpm" next to it, else the first plain number that could be
+/// a tempo (40 to 400), as in "the song is at 300".
+pub(crate) fn tempo_in_notes(notes: &str) -> Option<u32> {
+    let low = notes.to_lowercase();
+    let mut nums: Vec<(usize, usize, u32)> = Vec::new();
+    let b = low.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_digit() {
+            let s = i;
+            while i < b.len() && b[i].is_ascii_digit() {
+                i += 1;
+            }
+            // part of a bigger token (1:23, 4/4, 3.5) is not a tempo
+            let joined = |c: Option<&u8>| c.map_or(false, |c| matches!(c, b':' | b'/' | b'.' | b','));
+            if !joined(s.checked_sub(1).and_then(|k| b.get(k)))
+                && !(joined(b.get(i)) && b.get(i + 1).map_or(false, |c| c.is_ascii_digit()))
+            {
+                if let Ok(v) = low[s..i].parse::<u32>() {
+                    nums.push((s, i, v));
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    let ok = |v: u32| (40..=400).contains(&v);
+    nums.iter()
+        .find(|(s, e, v)| ok(*v) && (low[*e..].trim_start().starts_with("bpm") || low[..*s].trim_end().ends_with("bpm")))
+        .or_else(|| nums.iter().find(|(_, _, v)| ok(*v)))
+        .map(|n| n.2)
+}
+
+#[cfg(test)]
+mod tempo_tests {
+    use super::tempo_in_notes;
+
+    #[test]
+    fn tempos_from_notes() {
+        assert_eq!(tempo_in_notes("the song is at 300 lol"), Some(300));
+        assert_eq!(tempo_in_notes("bridge at 1:23, take it 240 bpm"), Some(240));
+        assert_eq!(tempo_in_notes("32 bars, AABA, 4/4"), None);
+        assert_eq!(tempo_in_notes("bpm: 180"), Some(180));
+        assert_eq!(tempo_in_notes(""), None);
     }
 }

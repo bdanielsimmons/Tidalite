@@ -10,6 +10,8 @@ mod extras;
 mod band;
 #[path = "audio/decode.rs"]
 mod decode;
+#[path = "audio/intro.rs"]
+mod intro;
 #[path = "audio/media.rs"]
 mod media;
 #[path = "audio/player.rs"]
@@ -155,6 +157,8 @@ enum Msg {
     WaSkin(Result<(winamp::WaSkin, skin::Pal, winamp::Art), String>),
     /// a free playlist font fetched (which one)
     FontReady(usize, Result<Vec<u8>, String>),
+    /// the file picked for the opening sound
+    IntroFile(Option<String>),
     /// a track's credits: (role, names)
     Credits(Result<Vec<(String, String)>, String>),
     /// stem separation finished for this track id
@@ -219,6 +223,10 @@ enum Action {
     WaGen(usize),
     /// a Tidalite palette in a look: 0 its own pixel panels (RETRO ORIGINAL), 2 the sleek Winamp style (ORIGINAL)
     Theme(usize, usize),
+    /// the opening sound: 0 off, 1 Tidalite's chime, 2 your file; 3 pick a file; 4 play it now
+    Intro(u8),
+    /// take a skin off the list of ones worn lately
+    WaForget(String),
     /// play through another sound output (None = the system default)
     SetDevice(Option<String>),
     /// covers as spinning records, or square
@@ -354,7 +362,6 @@ enum Action {
 
 #[derive(PartialEq, Clone, Copy)]
 enum Auth {
-    Checking,
     LoggedOut,
     LoggingIn,
     In,
@@ -478,11 +485,18 @@ fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, worn: Option<&(String, S
             // the ones worn lately (the one on now marked): back in a click, from the copy kept on disk
             for (md5, name) in recent {
                 let on = museum.is_some() && worn.map_or(false, |w| &w.0 == md5);
-                if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name.to_uppercase())) {
-                    let s = winamp::WaSkin { md5: md5.clone(), name: name.clone(), shot: String::new(), download: String::new() };
-                    acts.push(Action::WaApply(s));
-                    ui.close_menu();
-                }
+                ui.horizontal(|ui| {
+                    // X takes it off the list
+                    if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
+                        acts.push(Action::WaForget(md5.clone()));
+                    }
+                    if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name.to_uppercase())) {
+                        let s =
+                            winamp::WaSkin { md5: md5.clone(), name: name.clone(), shot: String::new(), download: String::new() };
+                        acts.push(Action::WaApply(s));
+                        ui.close_menu();
+                    }
+                });
             }
             if menu_item(ui, "  BROWSE SKINS...") {
                 acts.push(Action::WaOpen);
@@ -2162,6 +2176,9 @@ struct App {
     art_op: f32,
     show_prefs: bool,
     auto_restart: bool,
+    /// the opening sound: 0 off, 1 Tidalite's chime, 2 the file below
+    intro: u8,
+    intro_file: Option<String>,
     binds: Vec<Option<egui::Key>>,
     rebinding: Option<usize>,
     bind_note: String,
@@ -2490,6 +2507,8 @@ impl App {
             art_op: 0.9,
             show_prefs: false,
             auto_restart: false,
+            intro: 1,
+            intro_file: None,
             binds: prefs::default_binds(),
             rebinding: None,
             bind_note: String::new(),
@@ -2638,6 +2657,10 @@ impl App {
         if let Some(f) = st["art_op"].as_f64() {
             app.art_op = (f as f32).clamp(0.5, 1.0);
         }
+        if let Some(m) = st["intro"].as_u64() {
+            app.intro = (m as u8).min(2);
+        }
+        app.intro_file = st["intro_file"].as_str().map(|s| s.to_string());
         if let Some(b) = st["auto_restart"].as_bool() {
             app.auto_restart = b;
         }
@@ -2664,6 +2687,21 @@ impl App {
         if let Some(list) = st["wa_recent"].as_array() {
             app.wa_recent = list.iter().filter_map(|v| Some((v[0].as_str()?.to_string(), v[1].as_str()?.to_string()))).collect();
         }
+        if let Some(g) = st["winamp"][0].as_str().and_then(|m| m.strip_prefix("gen:")).and_then(|g| g.parse::<usize>().ok()) {
+            app.apply(Action::WaGen(g));
+        } else if st["winamp"].is_null() && st["plain"].as_bool() != Some(true) {
+            // the SLEEK style unless PLAIN was picked
+            app.apply(Action::WaGen(2));
+        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
+            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
+            let (tx, ctx) = (app.tx.clone(), app.ctx.clone());
+            std::thread::spawn(move || {
+                if let Some(b) = winamp::load_saved(&s.md5) {
+                    let _ = tx.send(Msg::WaSkin(winamp::load(&b).map(|(p, art)| (s, p, art))));
+                    ctx.request_repaint();
+                }
+            });
+        }
         if let Some(b) = st["balance"].as_i64() {
             app.balance = (b as i32).clamp(-100, 100);
             app.player.ctl.set_balance(app.balance);
@@ -2672,23 +2710,6 @@ impl App {
             app.pl_font = (f as usize).min(winamp_ui::PL_FONTS.len() - 1);
         }
         app.eq_auto = st["eq_auto"].as_bool().unwrap_or(false);
-        // the skin worn last time (SLEEK unless PLAIN was picked), put on before the first frame so the window
-        // opens already wearing it
-        let gen = match st["winamp"][0].as_str() {
-            Some(m) => m.strip_prefix("gen:").and_then(|g| g.parse::<usize>().ok()),
-            None if st["plain"].as_bool() != Some(true) => Some(2),
-            None => None,
-        };
-        if let Some(g) = gen.filter(|g| *g > 0) {
-            let n = SKIN.load(Ordering::Relaxed) % PALS.len();
-            let look = (g - 1).min(genskin::LOOKS.len() - 1);
-            app.wear_skin(genskin::wear(&PALS[n], look).map(|(p, art)| (app.gen_skin(n, look), p, art)), false);
-        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
-            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
-            if let Some(b) = winamp::load_saved(&s.md5) {
-                app.wear_skin(winamp::load(&b).map(|(p, art)| (s, p, art)), false);
-            }
-        }
         if let Some(m) = st["eq_songs"].as_object() {
             for (k, v) in m {
                 let g: Vec<f32> =
@@ -2774,8 +2795,12 @@ impl App {
         app.apply_eq();
         media::spawn(app.tx.clone(), app.ctx.clone());
         crate::api::log(&format!("tidalite {} started (token saved: {})", VERSION, app.api.has_token()));
+        app.play_intro();
         if app.api.has_token() {
-            app.auth = Auth::Checking;
+            // the app opens straight away; the saved session is checked behind it (the library shows LOADING
+            // meanwhile), and only an expired one brings up the sign-in screen
+            app.auth = Auth::In;
+            app.loading = true;
             let (api, tx, ctx) = (app.api.clone(), app.tx.clone(), app.ctx.clone());
             std::thread::spawn(move || {
                 match api.refresh_info() {
@@ -2804,6 +2829,8 @@ impl App {
             "spec": self.show_spec,
             "tour_seen": self.tour_seen,
             "auto_restart": self.auto_restart,
+            "intro": self.intro,
+            "intro_file": self.intro_file,
             "art_op": self.art_op,
             "zoom": self.ctx.zoom_factor(),
             "binds": prefs::binds_to_json(&self.binds),
@@ -3389,6 +3416,16 @@ impl App {
         }
     }
 
+    /// The opening sound, as set in Preferences.
+    fn play_intro(&self) {
+        let file = match self.intro {
+            0 => return,
+            2 => self.intro_file.clone(),
+            _ => None,
+        };
+        intro::play(file, self.out_device.clone(), (self.volume * self.volume).max(0.15));
+    }
+
     /// The name card of palette `n` drawn in `look` (genskin).
     fn gen_skin(&self, n: usize, look: usize) -> winamp::WaSkin {
         winamp::WaSkin {
@@ -3533,6 +3570,28 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            Action::WaForget(md5) => {
+                self.wa_recent.retain(|r| r.0 != md5);
+                self.dirty = true;
+            }
+            Action::Intro(m) => match m {
+                3 => {
+                    let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                    std::thread::spawn(move || {
+                        let f = rfd::FileDialog::new()
+                            .set_title("A short sound for when Tidalite opens")
+                            .add_filter("Audio", &sources::AUDIO_EXT)
+                            .pick_file();
+                        let _ = tx.send(Msg::IntroFile(f.map(|p| p.to_string_lossy().to_string())));
+                        ctx.request_repaint();
+                    });
+                }
+                4 => self.play_intro(),
+                m => {
+                    self.intro = m.min(2);
+                    self.dirty = true;
+                }
+            },
             Action::Theme(n, g) => {
                 if g == 0 {
                     self.wa_worn = None;
@@ -3551,7 +3610,8 @@ impl App {
                 let n = SKIN.load(Ordering::Relaxed) % PALS.len();
                 let look = (g - 1).min(genskin::LOOKS.len() - 1);
                 let s = self.gen_skin(n, look);
-                self.wear_skin(genskin::wear(&PALS[n], look).map(|(p, art)| (s, p, art)), true);
+                let _ = self.tx.send(Msg::WaSkin(genskin::wear(&PALS[n], look).map(|(p, art)| (s, p, art))));
+                self.ctx.request_repaint();
             }
             Action::Balance(b) => {
                 self.balance = b.clamp(-100, 100);
