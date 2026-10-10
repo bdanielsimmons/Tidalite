@@ -7,16 +7,16 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- LINES under PRACTICE - Slonimsky's Diary (lines from Slonimsky's system, or a pattern book you add) and scales in intervals, in notation and tab, looped, counted
+- Practice progressions under TUNES - fold open a group, pick a key, hear it, or send it to the lead sheet for the band
+- Drag across bars on the lead sheet to loop just those
+- Charts can change time signature bar by bar (iReal Pro imports keep them)
+- Tunes have WRITTEN BY, YEAR, FROM and STYLE, filled in for you when they can be found
 - Set your own key and BPM for any song (right-click > Key and BPM...), kept on this computer
 - A new tune opens straight to its lead sheet, ready to fill in
 - Write who wrote a tune in its ABOUT line
 - CHORDS tab under PRACTICE - find any chord (notes, grips, scales) or click notes on a neck to name them
 - CLUSTERS trainer - semitone and tone clusters through the parent scales, fixed cluster / fixed bass, and in a tune
-- VOICINGS trainer - triads, shells, close, drop 2, drop 3 and drop 2&4 on every string set, walked through a tune's changes
-- PASSING CHORDS - V7, ii-V, tritone sub, diminished, half-step and backdoor approaches, in the voicing and strings you pick
-- The band loops, keeps each part's level, and can export a WAV
-- Edit the title and artist of your own files (written into the file's tags)
-- High contrast skins (dark and light), plus colour-blind safe loops and reduce motion in Preferences > ACCESSIBILITY
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).
