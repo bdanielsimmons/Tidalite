@@ -4,6 +4,10 @@ A retro, Winamp-flavoured desktop player for Tidal. Native Rust (egui), no brows
 you log in with the normal "approve in your browser" flow. Needs an active Tidal subscription.
 Unofficial: it talks to the same endpoints the Tidal apps and the open-source `tidalapi` library use.
 
+<!-- demo:start -->
+**See it in action:** [the tour](https://github.com/bdanielsimmons/Backline/releases/download/demo/backline-tour.mp4) · [the practice tour](https://github.com/bdanielsimmons/Backline/releases/download/demo/backline-practice-tour.mp4) (MP4 videos)
+<!-- demo:end -->
+
 ## What's new
 
 <!-- whats-new -->
