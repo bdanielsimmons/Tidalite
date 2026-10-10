@@ -96,7 +96,7 @@ const BASIC: &[Step] = &[
         key: "ARTBTNS",
         scene: Scene::Album,
         title: "THE ALBUM VIEW",
-        text: "A big cover, lyrics you can scroll and click to jump, and the visualizer behind it. Click the cover to put it on a spinning record. Playing is in the middle; on the left, how it looks (lyrics, the visualizer - right-click it for its style and size - black and white, fullscreen); on the right, the speed, practice tools, the queue and the volume. CLOSE or ESC takes you back.",
+        text: "A big cover, lyrics you can scroll and click to jump, and the visualizer behind it. Click the cover to put it on a spinning record. Playing is in the middle; on the left, how it looks (lyrics, the visualizer - right-click it for its style and size, fullscreen); on the right, the speed, practice tools, the queue and the volume. CLOSE or ESC takes you back.",
     },
     Step {
         key: "QUEUE",

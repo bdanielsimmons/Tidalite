@@ -380,14 +380,15 @@ impl App {
         ui.horizontal(|ui| {
             title_line(ui, "WINAMP SKINS", 3.0, pal().ink);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if retro_btn(ui, "CLOSE", false).tip("Back to the library").clicked() {
-                    acts.push(Action::WaOpen);
+                if retro_btn(ui, "CLOSE", false).tip("Back to the library (mouse back works too; forward returns here)").clicked()
+                {
+                    acts.push(Action::Back);
                 }
             });
         });
         para(
             ui,
-            "Classic skins from the Winamp Skin Museum (skins.webamp.org). Click one to wear its colours; your own skins are back in the TIDALITE menu.",
+            "From the Winamp Skin Museum. Click one to wear it; the ones you wore lately stay in the TIDALITE menu.",
             pal().ink2,
         );
         if let Some((_, name)) = &self.wa_worn {
@@ -558,9 +559,9 @@ impl App {
             acts.push(Action::WaOpen);
         }
         ui.add_space(4.0);
-        para(ui, "SKIN", pal().ink2);
         let worn = self.wa_worn.clone();
-        skin_menu(ui, acts, worn.as_ref());
+        let recent = self.wa_recent.clone();
+        skin_menu(ui, acts, worn.as_ref(), &recent);
         done || acts.len() != before
     }
 
@@ -653,8 +654,6 @@ impl App {
         let loading = self.loading;
         let tab = self.lib_tab;
         let playing_id = self.cur_track().map(|t| t.id);
-        // how fast a record on the page turns: the playback speed while music plays, else still
-        let sounding = if self.cur.is_some() && !self.paused && !self.stopped { self.speed as f32 / 100.0 } else { 0.0 };
         let (show_log, show_cache, show_winamp) = (self.show_log, self.show_cache, self.show_winamp);
         let sec = self.sec;
         let sec_i = sec as u8;
@@ -688,7 +687,7 @@ impl App {
                             );
                         }
                         if let Some(pg) = &page {
-                            page_view(ui, &mut self.images, pg, playing_id, sounding, tab, &self.liked, acts);
+                            page_view(ui, &mut self.images, pg, playing_id, tab, &self.liked, acts);
                         }
                     }
                     Sec::Files => self.files_view(ui, acts),

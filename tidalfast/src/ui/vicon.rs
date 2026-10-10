@@ -105,11 +105,6 @@ pub fn draw(p: &egui::Painter, r: Rect, rows: &[&str], col: Color32) -> bool {
         pen.line(&pen.arc(0.5, 0.45, 0.28, 0.0, 180.0));
         pen.line(&[(0.5, 0.74), (0.5, 0.9)]);
         pen.line(&[(0.34, 0.92), (0.66, 0.92)]);
-    } else if is(&IC_BW) {
-        pen.circle(0.5, 0.5, 0.38);
-        let mut half = pen.arc(0.5, 0.5, 0.38, 90.0, 270.0);
-        half.push(half[0]);
-        pen.poly(&half);
     } else if is(&IC_SPEC) {
         for (i, h) in [0.4, 0.7, 0.95, 0.55, 0.8].iter().enumerate() {
             let x = 0.08 + i as f32 * 0.19;

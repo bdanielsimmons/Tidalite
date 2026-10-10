@@ -37,17 +37,11 @@ impl App {
         // ---- background: the cover's average colour as a soft gradient (never a stretched picture)
         let url = track.as_ref().map(|t| cover_url(&t.cover, 640)).unwrap_or_default();
         // the cover on show stays up while the next one loads, then the new one fades in
-        let (tex, prev, fade) = self.images.held("album", &url, self.art_gray, ui.input(|i| i.time));
+        let (tex, prev, fade) = self.images.held("album", &url, false, ui.input(|i| i.time));
         if fade < 1.0 {
             ui.ctx().request_repaint();
         }
-        let avg = self
-            .images
-            .avg
-            .get(&format!("gray:{}", url))
-            .filter(|_| self.art_gray)
-            .or_else(|| self.images.avg.get(&url))
-            .copied();
+        let avg = self.images.avg.get(&url).copied();
         // ease from the old cover's colours to the new one's instead of jumping
         if let Some(tg) = avg {
             let k = 1.0 - (-dt * 4.0).exp();
@@ -530,7 +524,7 @@ impl App {
                 });
             });
         }
-        let (gray, lyr, fs) = (self.art_gray, self.show_lyrics, self.fullscreen);
+        let (lyr, fs) = (self.show_lyrics, self.fullscreen);
         let cur_t = self.cur_track();
         let liked_now = cur_t.as_ref().map(|t| self.liked.contains(&t.id)).unwrap_or(false);
         let playing = active && !self.paused;
@@ -554,12 +548,6 @@ impl App {
                 }
                 if sp.secondary_clicked() {
                     self.viz_panel = Some(1);
-                }
-                if icon_btn(ui, &IC_BW, gray, ink)
-                    .tip(if gray { "Back to colour art  (G)" } else { "Black and white art  (G)" })
-                    .clicked()
-                {
-                    acts.push(Action::ToggleGray);
                 }
                 if icon_btn(ui, if fs { &IC_WIN } else { &IC_FULL }, false, ink)
                     .tip(if fs { "Leave fullscreen  (F)" } else { "Fullscreen  (F)" })

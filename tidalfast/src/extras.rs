@@ -118,6 +118,35 @@ fn safe_name(s: &str) -> String {
 }
 
 impl App {
+    /// Put on a skin (downloaded or drawn by Tidalite). `announce`: say so in the status line (not at start-up).
+    pub(crate) fn wear_skin(
+        &mut self,
+        r: Result<(crate::winamp::WaSkin, crate::skin::Pal, crate::winamp::Art), String>,
+        announce: bool,
+    ) {
+        match r {
+            Ok((s, p, art)) => {
+                crate::skin::set_custom(Some(p));
+                self.wa_art = Some(crate::winamp_ui::WaTex::new(&self.ctx, art));
+                crate::winamp_ui::set_chrome(self.wa_art.as_ref());
+                self.apply_pl_font();
+                crate::setup_style(&self.ctx);
+                if announce {
+                    self.set_note(&format!("WINAMP SKIN: {}", s.name.to_uppercase()));
+                }
+                if !s.md5.starts_with("gen:") {
+                    // remembered among the recent ones, newest first
+                    self.wa_recent.retain(|r| r.0 != s.md5);
+                    self.wa_recent.insert(0, (s.md5.clone(), s.name.clone()));
+                    self.wa_recent.truncate(8);
+                }
+                self.wa_worn = Some((s.md5, s.name));
+                self.dirty = true;
+            }
+            Err(e) => self.set_err(format!("WINAMP SKIN: {}", e)),
+        }
+    }
+
     // ------------------------------------------------------------ start-up
     pub(crate) fn init_store(&mut self) {
         let mut vs: Vec<Version> = Vec::new();
@@ -837,19 +866,7 @@ impl App {
                     Err(e) => self.set_err(format!("WINAMP SKINS: {}", e)),
                 }
             }
-            Msg::WaSkin(r) => match r {
-                Ok((s, p, art)) => {
-                    crate::skin::set_custom(Some(p));
-                    self.wa_art = Some(crate::winamp_ui::WaTex::new(&self.ctx, art));
-                    crate::winamp_ui::set_chrome(self.wa_art.as_ref());
-                    self.apply_pl_font();
-                    crate::setup_style(&self.ctx);
-                    self.set_note(&format!("WINAMP SKIN: {}", s.name.to_uppercase()));
-                    self.wa_worn = Some((s.md5, s.name));
-                    self.dirty = true;
-                }
-                Err(e) => self.set_err(format!("WINAMP SKIN: {}", e)),
-            },
+            Msg::WaSkin(r) => self.wear_skin(r, true),
             Msg::FontReady(choice, r) => match r {
                 Ok(_) => {
                     // kept on disk now: wear it if it is still the one wanted

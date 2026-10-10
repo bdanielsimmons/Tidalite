@@ -60,25 +60,9 @@ impl Place {
         let snap = |v: f32| (v * ppp).round() / ppp;
         Place { o: Pos2::new(snap(area.center().x - 137.5 * s), snap(area.center().y - 58.0 * s)), s }
     }
-    /// The same column as the main window (its left edge and scale), centred down `area`, when it fits there:
-    /// the equalizer and playlist line up under the player, as Winamp stacks them.
-    fn under_main(area: Rect) -> Place {
-        match MAIN_COL.with(|c| c.get()) {
-            Some((x, s)) if 116.0 * s <= area.height() + 0.5 && x >= area.min.x - 0.5 && x + 275.0 * s <= area.max.x + 0.5 => {
-                let ppp = font::ppp();
-                Place { o: Pos2::new(x, (((area.center().y - 58.0 * s) * ppp).round()) / ppp), s }
-            }
-            _ => Place::fit(area),
-        }
-    }
     fn r(&self, x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::from_min_size(self.o + Vec2::new(x, y) * self.s, Vec2::new(w, h) * self.s)
     }
-}
-
-thread_local! {
-    /// The main window's left edge and scale this frame, for the windows stacked under it.
-    static MAIN_COL: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
 }
 
 /// text.bmp: which cell (row, column) each character is in; cells are 5 x 6.
@@ -281,24 +265,89 @@ pub(crate) fn draw_frame(p: &egui::Painter, outer: Rect, inner: Rect, title: &st
     })
 }
 
+/// Winamp's own visualizer, 76 x 16 skin pixels from `o` at `s` points per pixel, in the skin's colours
+/// (viscolor.txt): 19 bars (2 = their top colour ... 17 = the bottom, 23 = the peaks), the oscilloscope (18 to
+/// 22, brightest at the centre line), or both. `mode`: 0 bars, 1 wave, 2 both.
+#[allow(clippy::too_many_arguments)]
+fn skin_viz(p: &egui::Painter, o: Pos2, s: f32, vis: &[Color32], bands: &[f32], peaks: &[f32], wave: &[f32], mode: u8) {
+    if vis.len() < 24 {
+        return;
+    }
+    let px = |x: f32, y: f32, w: f32, h: f32, c: Color32| {
+        p.rect_filled(Rect::from_min_size(o + Vec2::new(x, y) * s, Vec2::new(w, h) * s), 0.0, c);
+    };
+    if mode != 1 && !bands.is_empty() {
+        for b in 0..19usize {
+            let i = b * bands.len() / 19;
+            let h = (bands[i].clamp(0.0, 1.0) * 16.0).round() as usize;
+            for row in 0..h {
+                let top = 15 - row;
+                px(b as f32 * 4.0, top as f32, 3.0, 1.0, vis[2 + top]);
+            }
+            if let Some(pk) = peaks.get(i) {
+                let ph = (pk.clamp(0.0, 1.0) * 16.0).round() as usize;
+                if ph > 0 {
+                    px(b as f32 * 4.0, (16 - ph) as f32, 3.0, 1.0, vis[23]);
+                }
+            }
+        }
+    }
+    if mode != 0 && !wave.is_empty() {
+        // one dot per column, joined to the last one, as Winamp's line scope draws
+        let y_at = |x: usize| {
+            let v = wave[x * wave.len() / 76];
+            (7.5 - v.clamp(-1.0, 1.0) * 8.0).round().clamp(0.0, 15.0) as i32
+        };
+        let mut prev = y_at(0);
+        for x in 0..76usize {
+            let y = y_at(x);
+            let (a, b) = if prev < y { (prev, y) } else { (y, prev) };
+            for yy in a..=b {
+                let k = ((yy - 8).unsigned_abs() as usize / 2).min(4);
+                px(x as f32, yy as f32, 1.0, 1.0, vis[18 + k]);
+            }
+            prev = y;
+        }
+    }
+}
+
 impl App {
+    /// The visualizer settings' preview of the player screen while a skin is worn: the skin's own visualizer,
+    /// as large as fits in `r`. False when no skin is worn.
+    pub(crate) fn skin_viz_preview(
+        &self,
+        p: &egui::Painter,
+        r: Rect,
+        bands: &[f32],
+        peaks: &[f32],
+        wave: &[f32],
+        mode: u8,
+    ) -> bool {
+        let Some(t) = self.wa_art.as_ref() else { return false };
+        let ppp = font::ppp();
+        let s = (((r.width() / 76.0).min(r.height() / 16.0) * ppp).floor().max(1.0)) / ppp;
+        let o = Pos2::new(r.center().x - 38.0 * s, r.center().y - 8.0 * s);
+        p.rect_filled(Rect::from_min_size(o, Vec2::new(76.0, 16.0) * s), 0.0, t.vis[0]);
+        skin_viz(p, o, s, &t.vis, bands, peaks, wave, mode);
+        true
+    }
+
     /// The main window, drawn from the worn skin. Everything is clickable and drives Tidalite.
     pub(crate) fn winamp_main(&mut self, ui: &mut egui::Ui, area: Rect, acts: &mut Vec<Action>) {
         let Some(t) = self.wa_art.take() else { return };
-        // the player sits in the middle (the equalizer and playlist line up under it); the album cover is small,
-        // in the margin to its right. A click on it opens the album view, as everywhere else
+        // the player sits in the middle, in line with the equalizer under it; the album cover is small, in the
+        // margin to its right, framed in the skin's colours; a click on it opens the album view
         let side = (area.height() * 0.55).min(area.width() * 0.14);
         let skin_area = area.shrink2(Vec2::new(side + 20.0, 0.0));
         let pl = Place::fit(skin_area);
-        MAIN_COL.with(|c| c.set(Some((pl.o.x, pl.s))));
         let right = pl.o.x + 275.0 * pl.s;
         let cover = Rect::from_center_size(Pos2::new((right + area.max.x) / 2.0, area.center().y), Vec2::splat(side));
         if let Some(tr) = self.cur_track() {
             let url = cover_url(&tr.cover, 320);
-            // framed like a button in the skin's colours: it is the way into the album view
+            // framed in the skin's colours
             raised(ui.painter(), cover.expand(4.0), false);
             inset(ui.painter(), cover.expand(1.0), pal().lcd);
-            paint_held(ui, &mut self.images, "player", &url, cover, self.art_gray);
+            paint_held(ui, &mut self.images, "player", &url, cover, false);
         } else {
             paint_record(ui.painter(), cover, None);
         }
@@ -439,22 +488,9 @@ impl App {
         if vz.secondary_clicked() {
             self.viz_panel = Some(0);
         }
-        let (bands, peaks, _) = self.viz_data(0);
-        if active && t.vis.len() >= 18 && !bands.is_empty() {
-            for b in 0..19usize {
-                let i = b * bands.len() / 19;
-                let h = (bands[i].clamp(0.0, 1.0) * 16.0).round() as usize;
-                for row in 0..h {
-                    let top = 15 - row;
-                    p.rect_filled(pl.r(24.0 + b as f32 * 4.0, 43.0 + top as f32, 3.0, 1.0), 0.0, t.vis[2 + top]);
-                }
-                if let (Some(pk), Some(c)) = (peaks.get(i), t.vis.get(23)) {
-                    let ph = (pk.clamp(0.0, 1.0) * 16.0).round() as usize;
-                    if ph > 0 {
-                        p.rect_filled(pl.r(24.0 + b as f32 * 4.0, 43.0 + (16 - ph) as f32, 3.0, 1.0), 0.0, *c);
-                    }
-                }
-            }
+        let (bands, peaks, wave) = self.viz_data(0);
+        if active {
+            skin_viz(&p, pl.o + Vec2::new(24.0, 43.0) * pl.s, pl.s, &t.vis, &bands, &peaks, &wave, self.viz[0].mode);
             ui.ctx().request_repaint();
         }
         // volume: the strip picture follows the level; right-click it for the sound output
@@ -590,7 +626,7 @@ impl App {
     /// The equalizer, drawn from the worn skin: ON, PRESETS, the curve and the ten sliders.
     pub(crate) fn winamp_eq(&mut self, ui: &mut egui::Ui, area: Rect) {
         let Some(t) = self.wa_art.take() else { return };
-        let pl = Place::under_main(area);
+        let pl = Place::fit(area);
         let p = ui.painter().clone();
         let id = ui.id().with("winamp_eq");
         let mut changed = false;
@@ -1105,13 +1141,6 @@ impl App {
     /// tracks in the playlist font and colours, its scrollbar, and the bottom bar with working buttons.
     pub(crate) fn winamp_playlist(&mut self, ui: &mut egui::Ui, outer: Rect, acts: &mut Vec<Action>) {
         let Some(t) = self.wa_art.take() else { return };
-        // as wide as the player above, and right under it
-        let mut outer = outer;
-        if let Some((x, s)) = MAIN_COL.with(|c| c.get()) {
-            if x >= outer.min.x - 0.5 && x + 275.0 * s <= outer.max.x + 0.5 {
-                outer = Rect::from_min_max(Pos2::new(x, outer.min.y), Pos2::new(x + 275.0 * s, outer.max.y));
-            }
-        }
         let p = ui.painter().clone();
         let ppp = font::ppp();
         let k = ((1.5 * ppp).round().max(1.0)) / ppp;

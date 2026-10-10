@@ -135,7 +135,11 @@ impl App {
             ui.ctx().request_repaint();
             let (pv, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 150.0), Sense::hover());
             let c = &self.viz[which];
-            if which == 0 {
+            if which == 0 && self.wa_art.is_some() {
+                // a skin is worn: the player shows the skin's own visualizer, exactly as Winamp draws it
+                crate::inset(ui.painter(), pv, pal().edge);
+                self.skin_viz_preview(ui.painter(), pv.shrink(6.0), &vb, &vp, &vw, c.mode);
+            } else if which == 0 {
                 crate::inset(ui.painter(), pv, pal().lcd);
                 crate::viz_draw(ui.painter(), pv.shrink(6.0), &vb, &vp, &vw, c.mode, c.w, false, 1.0, self.viz_tint(c.color));
             } else {
@@ -185,16 +189,22 @@ impl App {
                 self.viz[which].mode = m;
                 dirty = true;
             }
-            if let Some(m) = choice(ui, "COLOURS", &["SKIN", "FROM COVER", "GREEN + RED"], self.viz[which].color) {
-                self.viz[which].color = m;
-                dirty = true;
+            // with a skin on, the player screen keeps Winamp's own: its colours, 19 bars
+            let skin_screen = which == 0 && self.wa_art.is_some();
+            if skin_screen {
+                crate::views::dim_line(ui, "THE SKIN'S OWN VISUALIZER: ITS COLOURS, 19 BARS, AS IN WINAMP", 1.0, pal().dim);
+            } else {
+                if let Some(m) = choice(ui, "COLOURS", &["SKIN", "FROM COVER", "GREEN + RED"], self.viz[which].color) {
+                    self.viz[which].color = m;
+                    dirty = true;
+                }
+                let mut n = self.viz[which].n as f32;
+                if stepper(ui, "BARS", &mut n, 4.0, 8.0, 96.0, false) {
+                    self.viz[which].n = n as usize;
+                    dirty = true;
+                }
+                dirty |= stepper(ui, "BAR WIDTH", &mut self.viz[which].w, 0.1, 0.3, 1.0, true);
             }
-            let mut n = self.viz[which].n as f32;
-            if stepper(ui, "BARS", &mut n, 4.0, 8.0, 96.0, false) {
-                self.viz[which].n = n as usize;
-                dirty = true;
-            }
-            dirty |= stepper(ui, "BAR WIDTH", &mut self.viz[which].w, 0.1, 0.3, 1.0, true);
             dirty |= stepper(ui, "SENSITIVITY", &mut self.viz[which].gain, 0.2, 0.4, 3.0, true);
             if which == 1 {
                 dirty |= stepper(ui, "OPACITY", &mut self.spec_op, 0.05, 0.05, 0.8, true);

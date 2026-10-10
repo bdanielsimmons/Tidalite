@@ -32,11 +32,13 @@ impl App {
                 right -= w + 6.0;
                 r
             };
-            let r_pin = place(28.0);
-            let r_mini = place(if self.mini { 36.0 } else { 36.0 });
-            let r_prac = place(if PRACTICE { 56.0 } else { 0.0 });
-            let r_lis = place(if PRACTICE { 40.0 } else { 0.0 });
-            let r_focus = place(if PRACTICE { 48.0 } else { 0.0 });
+            // each chip as wide as its word in the font being worn
+            let fit = |s: &str| text_w(s, 1.0) + 14.0;
+            let r_pin = place(fit("PIN"));
+            let r_mini = place(fit(if self.mini { "FULL" } else { "MINI" }));
+            let r_prac = place(if PRACTICE { fit("PRACTICE") } else { 0.0 });
+            let r_lis = place(if PRACTICE { fit("LISTEN") } else { 0.0 });
+            let r_focus = place(if PRACTICE { fit("FOCUS") } else { 0.0 });
             if PRACTICE
                 && chip(ui, r_focus, "FOCUS", self.focus_mode, "c_focus")
                     .tip("Hide the lists: just the player, your tools and the chart")
@@ -210,10 +212,14 @@ impl App {
         inset(p, cv, pal().edge);
         if let Some(t) = &track {
             if !t.cover.is_empty() {
-                paint_held(ui, &mut self.images, "player", &cover_url(&t.cover, 160), cv.shrink(2.0), self.art_gray);
+                paint_held(ui, &mut self.images, "player", &cover_url(&t.cover, 160), cv.shrink(2.0), false);
             }
         }
-        let cvr = ui.interact(cv, ui.id().with("cover"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        // the cover opens the album view
+        let cvr = ui
+            .interact(cv, ui.id().with("cover"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .tip("Album view  (A)");
         if cvr.clicked() {
             acts.push(Action::ToggleArt);
         }

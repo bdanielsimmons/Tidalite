@@ -18,7 +18,6 @@ const ITEMS: &[(&str, &str, bool)] = &[
     ("Mode: mini player", "mode4", false),
     ("Full screen on / off", "full", false),
     ("Lyrics on / off", "lyrics", false),
-    ("Black and white art", "gray", false),
     ("Visualizer on / off", "spec", false),
     ("Next skin", "skin", false),
     ("Equalizer", "eq", false),

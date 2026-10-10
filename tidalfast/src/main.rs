@@ -217,6 +217,8 @@ enum Action {
     WaApply(winamp::WaSkin),
     /// wear the palette as a Winamp skin drawn by Tidalite: 0 off, then one per look (genskin::LOOKS)
     WaGen(usize),
+    /// a Tidalite palette in a look: 0 its own pixel panels (RETRO ORIGINAL), 2 the sleek Winamp style (ORIGINAL)
+    Theme(usize, usize),
     /// play through another sound output (None = the system default)
     SetDevice(Option<String>),
     /// covers as spinning records, or square
@@ -244,7 +246,6 @@ enum Action {
     ClearStatus,
     CopyLog,
     ToggleArt,
-    ToggleGray,
     ToggleSpec,
     ToggleLyrics,
     ToggleFullscreen,
@@ -445,40 +446,50 @@ fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) 
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Right-click list of every skin; the current one is marked.
-/// The skin list; a worn Winamp skin shows as the one picked (click it to browse others).
 /// The look Tidalite's own palette is worn in: 0 its usual look, 1.. a Winamp skin drawn from it (genskin).
 fn gen_look(worn: Option<&(String, String)>) -> usize {
     worn.and_then(|w| w.0.strip_prefix("gen:")?.parse::<usize>().ok()).unwrap_or(0)
 }
 
-fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, worn: Option<&(String, String)>) {
+/// The skins, in three sections side by side: ORIGINAL (Tidalite's palettes as sleek Winamp-style skins, in
+/// Silkscreen), RETRO ORIGINAL (Tidalite's own pixel panels, as it always was) and WINAMP (skins from the Skin
+/// Museum: the one worn, and browsing for more). The one worn is marked.
+fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, worn: Option<&(String, String)>, recent: &[(String, String)]) {
     let look = gen_look(worn);
-    // a downloaded skin (Tidalite's own are listed with their style below)
-    let winamp = worn.filter(|_| look == 0).map(|w| w.1.as_str());
-    if let Some(name) = winamp {
-        if menu_item(ui, &format!("> WINAMP: {}", name.to_uppercase())) {
-            acts.push(Action::WaOpen);
-            ui.close_menu();
+    let museum = worn.filter(|_| look == 0).map(|w| w.1.as_str());
+    let cur = SKIN.load(Ordering::Relaxed) % PALS.len();
+    ui.horizontal_top(|ui| {
+        for (title, g) in [("ORIGINAL", 2usize), ("RETRO ORIGINAL", 0)] {
+            ui.vertical(|ui| {
+                ui.set_min_width(170.0);
+                para(ui, title, pal().ink2);
+                for (n, name) in SKIN_NAMES.iter().enumerate() {
+                    let on = n == cur && if g == 0 { worn.is_none() } else { look == g };
+                    if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name)) {
+                        acts.push(Action::Theme(n, g));
+                        ui.close_menu();
+                    }
+                }
+            });
         }
-    }
-    for (n, name) in SKIN_NAMES.iter().enumerate() {
-        let mark = if winamp.is_none() && n == SKIN.load(Ordering::Relaxed) % PALS.len() { "> " } else { "  " };
-        if menu_item(ui, &format!("{}TIDALITE {}", mark, name)) {
-            acts.push(Action::SkinSet(n));
-            ui.close_menu();
-        }
-    }
-    ui.add_space(4.0);
-    para(ui, "STYLE", pal().ink2);
-    // SLEEK (the default) and PIXEL are Winamp skins drawn by Tidalite; PLAIN is Tidalite's own panels
-    for (g, name) in [(2usize, "SLEEK"), (1, "PIXEL"), (0, "PLAIN")] {
-        let mark = if winamp.is_none() && g == look { "> " } else { "  " };
-        if menu_item(ui, &format!("{}{}", mark, name)) {
-            acts.push(Action::WaGen(g));
-            ui.close_menu();
-        }
-    }
+        ui.vertical(|ui| {
+            ui.set_min_width(170.0);
+            para(ui, "WINAMP", pal().ink2);
+            // the ones worn lately (the one on now marked): back in a click, from the copy kept on disk
+            for (md5, name) in recent {
+                let on = museum.is_some() && worn.map_or(false, |w| &w.0 == md5);
+                if menu_item(ui, &format!("{}{}", if on { "> " } else { "  " }, name.to_uppercase())) {
+                    let s = winamp::WaSkin { md5: md5.clone(), name: name.clone(), shot: String::new(), download: String::new() };
+                    acts.push(Action::WaApply(s));
+                    ui.close_menu();
+                }
+            }
+            if menu_item(ui, "  BROWSE SKINS...") {
+                acts.push(Action::WaOpen);
+                ui.close_menu();
+            }
+        });
+    });
 }
 
 fn icon_btn(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32) -> egui::Response {
@@ -845,15 +856,12 @@ fn logo(ui: &mut egui::Ui) {
     ptext(p, Pos2::new(rect.min.x + 50.0, rect.center().y + ty), Align::Min, "TIDALITE", tsz, pal().ink);
     let tag =
         if PRACTICE { "A RETRO PLAYER FOR TIDAL AND MORE - MADE FOR PRACTICE" } else { "A RETRO PLAYER FOR TIDAL AND MORE" };
-    ptext_fit(p, Pos2::new(rect.min.x + 51.0, rect.center().y + gy), Align::Min, tag, 1.0, rect.width() - 110.0, pal().ink2);
-    ptext(
-        p,
-        Pos2::new(rect.max.x - 10.0, rect.center().y + gy),
-        Align::Max,
-        &if update::build() > 0 { format!("{} .{}", VERSION, update::build()) } else { VERSION.to_string() },
-        1.0,
-        pal().dim,
-    );
+    let version = if update::build() > 0 { format!("{} .{}", VERSION, update::build()) } else { VERSION.to_string() };
+    // the tagline stops short of the version number, whatever the font's width
+    let vw = text_w(&version, 1.0);
+    let tag_w = rect.width() - 51.0 - vw - 24.0;
+    ptext_fit(p, Pos2::new(rect.min.x + 51.0, rect.center().y + gy), Align::Min, tag, 1.0, tag_w, pal().ink2);
+    ptext(p, Pos2::new(rect.max.x - 10.0, rect.center().y + gy), Align::Max, &version, 1.0, pal().dim);
 }
 
 /// Folder-style tabs with a baseline; the open tab joins the panel below. Returns the clicked tab.
@@ -1883,7 +1891,6 @@ fn page_view(
     images: &mut Images,
     page: &Page,
     playing_id: Option<i64>,
-    sounding: f32,
     tab: Tab,
     liked: &HashSet<i64>,
     acts: &mut Vec<Action>,
@@ -1941,27 +1948,10 @@ fn page_view(
     let has_header = !page.image.is_empty() || !page.subtitle.is_empty();
     if has_header {
         ui.horizontal(|ui| {
-            let (cr, art_r) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::click());
-            let art_r = art_r.on_hover_cursor(egui::CursorIcon::PointingHand).tip(if VINYL.load(Ordering::Relaxed) {
-                "Click to show the cover"
-            } else {
-                "Click to put it on a record"
-            });
-            if art_r.clicked() {
-                acts.push(Action::ToggleVinyl);
-            }
-            let tex = images.get(&page.image);
-            if VINYL.load(Ordering::Relaxed) && tex.is_some() {
-                // it turns while a song from this page plays
-                // an album's record turns while one of its songs plays; an artist's whenever music plays
-                let mine = page.artist || page.tracks.iter().any(|t| Some(t.id) == playing_id);
-                paint_vinyl(ui.painter(), cr, tex, vinyl_angle(ui, if mine { sounding } else { 0.0 }), 1.0);
-            } else {
-                if !page.artist {
-                    inset(ui.painter(), cr, pal().edge);
-                }
-                paint_page_art(ui, images, &page.image, cr.shrink(2.0), page.artist);
-            }
+            // the page's picture, square and framed like the rest of the skin (just a picture: no click)
+            let (cr, _) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::hover());
+            inset(ui.painter(), cr, pal().edge);
+            paint_page_art(ui, images, &page.image, cr.shrink(2.0), false);
             ui.vertical(|ui| {
                 title_line(ui, &page.title, 3.0, pal().ink);
                 title_line(ui, &page.subtitle, 2.0, pal().ink2);
@@ -2062,7 +2052,6 @@ struct App {
     audio_err_shown: bool,
 
     art_view: bool,
-    art_gray: bool,
     show_spec: bool,
     spec_op: f32,
     spec_h: f32,
@@ -2074,11 +2063,15 @@ struct App {
     /// the Winamp skin browser: open, what was searched, the skins found, still loading, no more to load,
     /// and the skin being worn (md5, name)
     show_winamp: bool,
+    /// the Winamp skins page was left with BACK: FORWARD opens it again
+    wa_fwd: bool,
     wa_q: String,
     wa_list: Vec<winamp::WaSkin>,
     wa_busy: bool,
     wa_end: bool,
     wa_worn: Option<(String, String)>,
+    /// Winamp skins worn lately (md5, name), newest first, to go back to one in a click
+    wa_recent: Vec<(String, String)>,
     /// the worn Winamp skin's own pictures, drawn for the player and the equalizer
     wa_art: Option<winamp_ui::WaTex>,
     /// the album view cover's border (right-click the cover): 0 none, 1 subtle, 2 the skin's colour
@@ -2407,7 +2400,6 @@ impl App {
             show_log: false,
             audio_err_shown: false,
             art_view: false,
-            art_gray: false,
             show_spec: true,
             spec_op: 0.2,
             spec_h: 0.42,
@@ -2415,11 +2407,13 @@ impl App {
             spec_frame: 1,
             viz_panel: None,
             show_winamp: false,
+            wa_fwd: false,
             wa_q: String::new(),
             wa_list: Vec::new(),
             wa_busy: false,
             wa_end: false,
             wa_worn: None,
+            wa_recent: Vec::new(),
             wa_art: None,
             art_border: 1,
             cap_size: 1,
@@ -2667,20 +2661,8 @@ impl App {
             app.art_border = (b as u8).min(2);
         }
         // the Winamp skin worn last time, from its saved file
-        if let Some(g) = st["winamp"][0].as_str().and_then(|m| m.strip_prefix("gen:")).and_then(|g| g.parse::<usize>().ok()) {
-            app.apply(Action::WaGen(g));
-        } else if st["winamp"].is_null() && st["plain"].as_bool() != Some(true) {
-            // the SLEEK style unless PLAIN was picked
-            app.apply(Action::WaGen(2));
-        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
-            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
-            let (tx, ctx) = (app.tx.clone(), app.ctx.clone());
-            std::thread::spawn(move || {
-                if let Some(b) = winamp::load_saved(&s.md5) {
-                    let _ = tx.send(Msg::WaSkin(winamp::load(&b).map(|(p, art)| (s, p, art))));
-                    ctx.request_repaint();
-                }
-            });
+        if let Some(list) = st["wa_recent"].as_array() {
+            app.wa_recent = list.iter().filter_map(|v| Some((v[0].as_str()?.to_string(), v[1].as_str()?.to_string()))).collect();
         }
         if let Some(b) = st["balance"].as_i64() {
             app.balance = (b as i32).clamp(-100, 100);
@@ -2690,6 +2672,23 @@ impl App {
             app.pl_font = (f as usize).min(winamp_ui::PL_FONTS.len() - 1);
         }
         app.eq_auto = st["eq_auto"].as_bool().unwrap_or(false);
+        // the skin worn last time (SLEEK unless PLAIN was picked), put on before the first frame so the window
+        // opens already wearing it
+        let gen = match st["winamp"][0].as_str() {
+            Some(m) => m.strip_prefix("gen:").and_then(|g| g.parse::<usize>().ok()),
+            None if st["plain"].as_bool() != Some(true) => Some(2),
+            None => None,
+        };
+        if let Some(g) = gen.filter(|g| *g > 0) {
+            let n = SKIN.load(Ordering::Relaxed) % PALS.len();
+            let look = (g - 1).min(genskin::LOOKS.len() - 1);
+            app.wear_skin(genskin::wear(&PALS[n], look).map(|(p, art)| (app.gen_skin(n, look), p, art)), false);
+        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
+            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
+            if let Some(b) = winamp::load_saved(&s.md5) {
+                app.wear_skin(winamp::load(&b).map(|(p, art)| (s, p, art)), false);
+            }
+        }
         if let Some(m) = st["eq_songs"].as_object() {
             for (k, v) in m {
                 let g: Vec<f32> =
@@ -2708,9 +2707,6 @@ impl App {
         }
         if let Some(f) = st["spec_h"].as_f64() {
             app.spec_h = (f as f32).clamp(0.15, 0.9);
-        }
-        if let Some(b) = st["art_gray"].as_bool() {
-            app.art_gray = b;
         }
         if let Some(b) = st["lyrics"].as_bool() {
             app.show_lyrics = b;
@@ -2805,7 +2801,6 @@ impl App {
             "skin": SKIN.load(Ordering::Relaxed),
             "volume": self.volume,
             "lossless": self.prefer_lossless,
-            "art_gray": self.art_gray,
             "spec": self.show_spec,
             "tour_seen": self.tour_seen,
             "auto_restart": self.auto_restart,
@@ -2821,6 +2816,7 @@ impl App {
             "eq_songs": self.eq_songs,
             "balance": self.balance,
             "winamp": self.wa_worn,
+            "wa_recent": self.wa_recent,
             "plain": self.wa_worn.is_none(),
             "art_border": self.art_border,
             "cap_size": self.cap_size,
@@ -3393,7 +3389,25 @@ impl App {
         }
     }
 
+    /// The name card of palette `n` drawn in `look` (genskin).
+    fn gen_skin(&self, n: usize, look: usize) -> winamp::WaSkin {
+        winamp::WaSkin {
+            md5: format!("gen:{}", look + 1),
+            name: format!("{} {}", SKIN_NAMES[n], genskin::LOOKS[look]),
+            shot: String::new(),
+            download: String::new(),
+        }
+    }
+
     fn apply(&mut self, a: Action) {
+        // going anywhere in the library leaves the Winamp skins page
+        if matches!(
+            a,
+            Action::Home | Action::Library | Action::Section(_) | Action::Search(_) | Action::Open(_) | Action::GoTo(..)
+        ) {
+            self.show_winamp = false;
+            self.wa_fwd = false;
+        }
         match a {
             Action::StartLogin => self.start_login(),
             Action::Home => {
@@ -3435,6 +3449,15 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            // the Winamp skins page sits on top of the library's history: BACK leaves it, FORWARD returns
+            Action::Back if self.show_winamp => {
+                self.show_winamp = false;
+                self.wa_fwd = true;
+            }
+            Action::Forward if self.wa_fwd => {
+                self.wa_fwd = false;
+                self.apply(Action::WaOpen);
+            }
             Action::Back => {
                 if let Some(p) = self.back.pop() {
                     if let Some(cur) = self.page.replace(p) {
@@ -3474,6 +3497,7 @@ impl App {
             }
             Action::WaOpen => {
                 self.show_winamp = !self.show_winamp;
+                self.wa_fwd = false;
                 if self.show_winamp {
                     self.show_log = false;
                     self.show_eq = false;
@@ -3509,6 +3533,16 @@ impl App {
                     ctx.request_repaint();
                 });
             }
+            Action::Theme(n, g) => {
+                if g == 0 {
+                    self.wa_worn = None;
+                    self.apply(Action::SkinSet(n));
+                } else {
+                    SKIN.store(n % PALS.len(), Ordering::Relaxed);
+                    self.dirty = true;
+                    self.apply(Action::WaGen(g));
+                }
+            }
             Action::WaGen(g) => {
                 if g == 0 {
                     self.apply(Action::SkinSet(SKIN.load(Ordering::Relaxed)));
@@ -3516,18 +3550,8 @@ impl App {
                 }
                 let n = SKIN.load(Ordering::Relaxed) % PALS.len();
                 let look = (g - 1).min(genskin::LOOKS.len() - 1);
-                let s = winamp::WaSkin {
-                    md5: format!("gen:{}", look + 1),
-                    name: if look == 1 {
-                        format!("TIDALITE {}", SKIN_NAMES[n])
-                    } else {
-                        format!("TIDALITE {} {}", SKIN_NAMES[n], genskin::LOOKS[look])
-                    },
-                    shot: String::new(),
-                    download: String::new(),
-                };
-                let _ = self.tx.send(Msg::WaSkin(genskin::wear(&PALS[n], look).map(|(p, art)| (s, p, art))));
-                self.ctx.request_repaint();
+                let s = self.gen_skin(n, look);
+                self.wear_skin(genskin::wear(&PALS[n], look).map(|(p, art)| (s, p, art)), true);
             }
             Action::Balance(b) => {
                 self.balance = b.clamp(-100, 100);
@@ -3968,10 +3992,6 @@ impl App {
                 self.show_spec = !self.show_spec;
                 self.dirty = true;
             }
-            Action::ToggleGray => {
-                self.art_gray = !self.art_gray;
-                self.dirty = true;
-            }
             Action::ToggleLyrics => {
                 self.show_lyrics = !self.show_lyrics;
                 self.dirty = true;
@@ -4154,10 +4174,10 @@ impl eframe::App for App {
             // (the other sections have no page history, so there they do nothing)
             if m_back && self.art_view {
                 acts.push(Action::ToggleArt);
-            } else if m_back && self.sec == Sec::Tidal {
+            } else if m_back && (self.sec == Sec::Tidal || self.show_winamp) {
                 acts.push(Action::Back);
             }
-            if m_fwd && !self.art_view && self.sec == Sec::Tidal {
+            if m_fwd && !self.art_view && (self.sec == Sec::Tidal || self.wa_fwd) {
                 acts.push(Action::Forward);
             }
 
@@ -4186,7 +4206,7 @@ impl eframe::App for App {
                 };
                 let right_w = screen.width() - lib_w;
                 let inner_w = right_w - 28.0;
-                let practice_h = if !self.practice { 0.0 } else { 262.0 };
+                let practice_h = if !self.practice { 0.0 } else { 300.0 };
                 let max_inner_h = ((screen.height() - practice_h) * 0.5 - 44.0).max(120.0);
                 let s = (inner_w / 300.0).min(max_inner_h / 138.0).clamp(0.8, 3.0);
                 let player_h = 138.0 * s + 44.0;

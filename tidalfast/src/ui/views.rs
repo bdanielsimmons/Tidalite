@@ -7,7 +7,7 @@ use crate::font::{ptext, ptext_fit, spx, text_w};
 use crate::sources;
 use crate::stems;
 use crate::store::{self, Ext};
-use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
+use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
     cache, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal, para,
     play_buttons, retro_btn, retro_btn_w, section_header, tab_row, table_header, title_line, track_cells, window_deco, Action,
@@ -1489,7 +1489,27 @@ impl App {
     // ------------------------------------------------------------- PRACTICE
     /// Transcribing tools: waveform, A-B loop, saved sections, slow-down and the extras behind MORE.
     pub(crate) fn practice_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        window_deco(ui, ui.max_rect(), "PRACTICE");
+        let inner = ui.max_rect();
+        window_deco(ui, inner, "PRACTICE");
+        // the focus timer and the metronome have their own corner, in the title strip
+        let tools = Rect::from_min_size(Pos2::new(inner.max.x - 96.0, inner.min.y - 27.0), Vec2::new(96.0, 24.0));
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tools), |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.horizontal(|ui| {
+                let ink = pal().ink;
+                let tb = crate::icon_btn_w(ui, &crate::IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 44.0)
+                    .tip("Focus timer (pomodoro): work in blocks with short rests between");
+                if tb.clicked() {
+                    acts.push(Action::TimerPanel);
+                }
+                let mb = crate::icon_btn_w(ui, &crate::IC_METRO, self.metro_open, ink, 44.0)
+                    .tip("Metronome with beats, subdivisions and a pendulum");
+                if mb.clicked() {
+                    acts.push(Action::MetroPanel);
+                }
+                crate::tour::mark("TIMEBTNS", tb.rect.union(mb.rect));
+            });
+        });
         let dur = self.track_len();
         let pos = self.pos();
         let tid = self.cur_track().map(|t| t.id);
@@ -1499,7 +1519,7 @@ impl App {
         let shift = ui.input(|i| i.modifiers.shift);
 
         // ---- waveform timeline
-        let (bar, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::click_and_drag());
+        let (bar, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 54.0), Sense::click_and_drag());
         let resp = resp
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .tip("Click to jump. Shift + drag to select a loop (inside a loop: slide it). Ctrl + drag A or B to move it. Right-click for more.");
@@ -1655,18 +1675,19 @@ impl App {
         } else {
             ptext(ui.painter(), bar.center(), Align::Center, "PLAY A TRACK TO START", 2.0, pal().dim);
         }
-        ui.add_space(2.0);
+        ui.add_space(10.0);
 
-        // ---- A / B  (each block reports where it is, for the practice tour)
+        // ---- A and B, then the loop's own buttons  (each block reports where it is, for the practice tour)
         let row_mark = |ui: &egui::Ui, key: &str, top: f32| {
             let r = ui.min_rect();
             crate::tour::mark(key, Rect::from_min_max(Pos2::new(r.min.x, top), Pos2::new(r.max.x, ui.cursor().min.y)));
         };
         let ab_top = ui.cursor().min.y;
-        let a_txt = format!("A {}", self.loop_a.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()));
-        let b_txt = format!("B {}", self.loop_b.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string()));
+        let a_txt = self.loop_a.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string());
+        let b_txt = self.loop_b.map(fmt_t).unwrap_or_else(|| "-:--.-".to_string());
         ui.horizontal_wrapped(|ui| {
-            if retro_btn_w(ui, "SET A", 64.0, false).tip("Loop start at the current position  ([ key)").clicked() && active {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if retro_btn_w(ui, "A", 44.0, false).tip("Loop start here  ([ key)").clicked() && active {
                 acts.push(Action::SetAAt(pos));
             }
             self.num_step(
@@ -1676,10 +1697,10 @@ impl App {
                 92.0,
                 Knob::LoopA,
                 a_txt,
-                "Nudge earlier / later - or click the box and type a time like 1:23.5",
+                "Nudge earlier / later - or click and type a time like 1:23.5",
             );
-            ui.add_space(8.0);
-            if retro_btn_w(ui, "SET B", 64.0, false).tip("Loop end at the current position  (] key)").clicked() && active {
+            ui.add_space(14.0);
+            if retro_btn_w(ui, "B", 44.0, false).tip("Loop end here  (] key)").clicked() && active {
                 acts.push(Action::SetBAt(pos));
             }
             self.num_step(
@@ -1689,67 +1710,59 @@ impl App {
                 92.0,
                 Knob::LoopB,
                 b_txt,
-                "Nudge earlier / later - or click the box and type a time like 2:05",
+                "Nudge earlier / later - or click and type a time like 2:05",
             );
-        });
-        ui.horizontal_wrapped(|ui| {
+            ui.add_space(14.0);
             let ink = pal().ink;
             if crate::icon_btn_w(ui, &crate::IC_REP, self.loop_on && both, ink, 44.0).tip("Loop on / off  (\\ key)").clicked() {
                 acts.push(Action::LoopToggle);
             }
-            if crate::icon_btn_w(ui, &crate::IC_X, false, ink, 44.0).tip("Clear the A-B loop").clicked() {
+            if crate::icon_btn_w(ui, &crate::IC_X, false, ink, 44.0).tip("Clear the loop").clicked() {
                 acts.push(Action::LoopClear);
             }
-            ui.add_space(8.0);
+        });
+        row_mark(ui, "LOOPROW", ab_top);
+        ui.add_space(8.0);
+
+        // ---- moving around, the speed, and MORE
+        let speed_top = ui.cursor().min.y;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let ink = pal().ink;
             if crate::icon_btn_w(ui, &crate::IC_REW, false, ink, 44.0).tip("Back two seconds  (, key)").clicked() {
                 acts.push(Action::SeekRel(-2.0));
             }
             if crate::icon_btn_w(ui, &crate::IC_PREV, false, ink, 44.0)
-                .tip("Restart: back to the loop start (or the track start)  (. key)")
+                .tip("Back to the loop start (or the track start)  (. key)")
                 .clicked()
             {
                 acts.push(Action::Seek(self.loop_a.unwrap_or(0.0)));
             }
-            ui.add_space(8.0);
-            if retro_btn_w(ui, "MORE", 64.0, self.more).tip("Speed trainer, pitch, metronome, ear modes, export").clicked() {
+            ui.add_space(14.0);
+            label(ui, "SPEED", 64.0);
+            // a drop-down of speeds (Up / Down keys still step it)
+            let sp = retro_btn_w(ui, &format!("{}%  v", self.speed), 92.0, self.speed != 100)
+                .tip("Playback speed (Down / Up keys step it)");
+            let menu = ui.id().with("speed_menu");
+            if sp.clicked() {
+                ui.memory_mut(|m| m.toggle_popup(menu));
+            }
+            egui::popup::popup_below_widget(ui, menu, &sp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                ui.set_min_width(110.0);
+                for pct in [50u32, 60, 70, 75, 80, 85, 90, 95, 100, 110, 125, 150] {
+                    let mark = if self.speed == pct { "> " } else { "   " };
+                    if menu_item(ui, &format!("{}{}%", mark, pct)) {
+                        acts.push(Action::Speed(pct));
+                    }
+                }
+            });
+            ui.add_space(14.0);
+            if retro_btn_w(ui, "MORE", 64.0, self.more).tip("Speed trainer, pitch, ear modes, stems").clicked() {
                 acts.push(Action::ToggleMore);
             }
-            ui.add_space(8.0);
-            let ink = pal().ink;
-            let tb = crate::icon_btn_w(ui, &crate::IC_TOMATO, self.pomo > 0 || self.timer_open, ink, 44.0)
-                .tip("Focus timer (pomodoro): work in blocks with short rests between");
-            if tb.clicked() {
-                acts.push(Action::TimerPanel);
-            }
-            let mb = crate::icon_btn_w(ui, &crate::IC_METRO, self.metro_open, ink, 44.0)
-                .tip("Metronome with beats, subdivisions and a pendulum");
-            if mb.clicked() {
-                acts.push(Action::MetroPanel);
-            }
-            crate::tour::mark("TIMEBTNS", tb.rect.union(mb.rect));
         });
-        row_mark(ui, "LOOPROW", ab_top);
-        let speed_top = ui.cursor().min.y;
-        ui.horizontal_wrapped(|ui| {
-            label(ui, "SPEED", 64.0);
-            for pct in [50u32, 70, 85, 100] {
-                if retro_btn_w(ui, &format!("{}", pct), 44.0, self.speed == pct).clicked() {
-                    acts.push(Action::Speed(pct));
-                }
-            }
-            ui.add_space(8.0);
-            self.num_step(
-                ui,
-                acts,
-                F_SPEED,
-                64.0,
-                Knob::Speed,
-                format!("{}%", self.speed),
-                "Slower / faster (Down / Up keys) - or type a percent",
-            );
-        });
-
         row_mark(ui, "SPEEDROW", speed_top);
+        ui.add_space(10.0);
 
         // ---- saved loops for this track
         ui.horizontal_wrapped(|ui| {
@@ -1872,12 +1885,6 @@ impl App {
                                             .clicked()
                                         {
                                             acts.push(Action::ToggleFocus);
-                                        }
-                                        if retro_btn_w(ui, "METRONOME", 116.0, self.metro_open)
-                                            .tip("Open the metronome")
-                                            .clicked()
-                                        {
-                                            acts.push(Action::MetroPanel);
                                         }
                                     });
                                 }
