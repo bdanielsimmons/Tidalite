@@ -933,8 +933,8 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
             x += w + 3.0;
             continue;
         }
-        // with a Winamp skin on, the tab is a piece of the skin's title bar
-        if !winamp_ui::skin_tab(p, r, on) {
+        // in the skin's colours (a piece of its title bar would bring its stripes through the words)
+        {
             fill_rect(
                 p,
                 r,

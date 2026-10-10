@@ -419,19 +419,22 @@ impl App {
             ui.horizontal_wrapped(|ui| {
                 crate::views::label(ui, "WORN LATELY", 110.0);
                 for (md5, name) in self.wa_recent.clone() {
-                    let on = worn_now.as_deref() == Some(md5.as_str());
-                    let w = (text_w(&name, 2.0) + 20.0).min(200.0);
-                    if retro_btn_w(ui, &name, w, on).tip("Wear it again").clicked() {
-                        acts.push(Action::WaApply(crate::winamp::WaSkin {
-                            md5: md5.clone(),
-                            name: name.clone(),
-                            shot: String::new(),
-                            download: String::new(),
-                        }));
-                    }
-                    if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
-                        acts.push(Action::WaForget(md5));
-                    }
+                    // a name and its X stay together when the row wraps
+                    ui.horizontal(|ui| {
+                        let on = worn_now.as_deref() == Some(md5.as_str());
+                        let w = (text_w(&name, 2.0) + 20.0).min(200.0);
+                        if retro_btn_w(ui, &name, w, on).tip("Wear it again").clicked() {
+                            acts.push(Action::WaApply(crate::winamp::WaSkin {
+                                md5: md5.clone(),
+                                name: name.clone(),
+                                shot: String::new(),
+                                download: String::new(),
+                            }));
+                        }
+                        if retro_btn_w(ui, "X", 24.0, false).tip("Take it off this list").clicked() {
+                            acts.push(Action::WaForget(md5));
+                        }
+                    });
                     ui.add_space(6.0);
                 }
             });

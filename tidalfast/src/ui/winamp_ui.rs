@@ -165,22 +165,6 @@ pub(crate) fn set_chrome(t: Option<&WaTex>) {
     CHROME.with(|c| *c.borrow_mut() = v);
 }
 
-/// A tab drawn as a piece of the skin's title bar (lit when it is the open one). False when no skin is worn.
-pub(crate) fn skin_tab(p: &egui::Painter, r: Rect, on: bool) -> bool {
-    CHROME.with(|c| {
-        let c = c.borrow();
-        let Some(((tex, size), _)) = c.as_ref() else { return false };
-        // the title bar's plain tile, selected (top row) or not (second row)
-        let sy = if on { 0.0 } else { 21.0 };
-        let uv = Rect::from_min_max(
-            Pos2::new(127.02 / size.x, (sy + 0.02) / size.y),
-            Pos2::new(151.98 / size.x, (sy + 19.98) / size.y),
-        );
-        p.image(tex.id(), r, uv, if on { Color32::WHITE } else { Color32::from_gray(200) });
-        true
-    })
-}
-
 /// A window's frame and title from the worn skin. False when no skin is worn (Tidalite draws its own).
 pub(crate) fn draw_frame(p: &egui::Painter, outer: Rect, inner: Rect, title: &str) -> bool {
     CHROME.with(|c| {
