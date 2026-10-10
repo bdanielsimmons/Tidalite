@@ -50,6 +50,8 @@ mod credits;
 mod font;
 #[path = "ui/help.rs"]
 mod help;
+#[path = "ui/history.rs"]
+mod history;
 #[path = "ui/icons.rs"]
 mod icons;
 #[path = "ui/library_win.rs"]
@@ -110,6 +112,11 @@ const NB: usize = 19;
 /// Points in the waveform visualizer.
 const WAVE_N: usize = 128;
 const BTN_H: f32 = 26.0;
+
+/// Button height (it scales with a panel that scales its contents).
+fn bh() -> f32 {
+    BTN_H * font::ui_scale()
+}
 const ROW_H: f32 = 24.0;
 const HEAD_H: f32 = 18.0;
 
@@ -142,7 +149,7 @@ enum Msg {
     Menu(String),
     Tuning(i64, Option<(i32, f32)>),
     UpdateStaged(Result<(), String>),
-    YtList(String, Result<Vec<store::Ext>, String>),
+    YtList(String, Result<(String, Vec<store::Ext>), String>),
     ScMeta(store::Ext),
     Wave(i64, Option<Vec<u8>>),
     Exported(Result<String, String>),
@@ -276,6 +283,12 @@ enum Action {
     LoopClear,
     Speed(u32),
     ToggleCacheView,
+    /// the TIDALITE tab: skins, preferences, help, storage, the log
+    TidalitePage,
+    /// load your Tidal library again
+    RefreshLibrary,
+    /// the log, under the TIDALITE tab
+    ShowLog,
     ClearCache,
     OpenCache,
     ToggleKeep,
@@ -331,7 +344,6 @@ enum Action {
     GoSection(usize),
     DeleteSection(usize),
     ToggleFocus,
-    ToggleMore,
     RemoveVersion(usize, usize),
     Pomo,
     TimerPanel,
@@ -446,10 +458,11 @@ fn marquee(ui: &egui::Ui, rect: Rect, text: &str, px: f32, color: Color32) {
 
 /// A button showing a pixel icon, `w` wide. `col` tints it; `on` draws it pressed.
 fn icon_btn_w(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32, w: f32) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let sc = font::ui_scale();
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w * sc, bh()), Sense::click());
     let down = resp.is_pointer_button_down_on() || on;
     raised_h(ui.painter(), rect, down, resp.hovered());
-    let px = 2.0;
+    let px = 2.0 * sc;
     let (iw, ih) = (icon[0].len() as f32 * px, icon.len() as f32 * px);
     let dy = if down { 1.0 } else { 0.0 };
     let o = Pos2::new((rect.center().x - iw / 2.0).round(), (rect.center().y - ih / 2.0 + dy).round());
@@ -469,7 +482,8 @@ fn skin_menu(ui: &mut egui::Ui, acts: &mut Vec<Action>, worn: Option<&(String, S
     let look = gen_look(worn);
     let museum = worn.filter(|_| look == 0).map(|w| w.1.as_str());
     let cur = SKIN.load(Ordering::Relaxed) % PALS.len();
-    ui.horizontal_top(|ui| {
+    // the columns wrap under each other when the space is narrow
+    ui.horizontal_wrapped(|ui| {
         for (title, g) in [("ORIGINAL", 2usize), ("RETRO ORIGINAL", 0)] {
             ui.vertical(|ui| {
                 ui.set_min_width(170.0);
@@ -516,14 +530,16 @@ fn icon_btn(ui: &mut egui::Ui, icon: &[&str], on: bool, col: Color32) -> egui::R
 
 /// Icon on the left, a short label on the right.
 fn ibtn(ui: &mut egui::Ui, icon: &[&str], text: &str, on: bool) -> egui::Response {
-    let w = 10.0 + icon[0].len() as f32 * 2.0 + 8.0 + text_w(text, 2.0) + 10.0;
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let sc = font::ui_scale();
+    let ip = 2.0 * sc;
+    let w = (10.0 + 8.0 + 10.0) * sc + icon[0].len() as f32 * ip + text_w(text, 2.0);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::click());
     let down = resp.is_pointer_button_down_on() || on;
     raised_h(ui.painter(), rect, down, resp.hovered());
     let dy = if down { 1.0 } else { 0.0 };
-    let o = Pos2::new((rect.min.x + 10.0).round(), (rect.center().y - icon.len() as f32 + dy).round());
-    pixmap(ui.painter(), o, 2.0, icon, pal().ink);
-    let tx = o.x + icon[0].len() as f32 * 2.0 + 8.0;
+    let o = Pos2::new((rect.min.x + 10.0 * sc).round(), (rect.center().y - icon.len() as f32 * ip / 2.0 + dy).round());
+    pixmap(ui.painter(), o, ip, icon, pal().ink);
+    let tx = o.x + icon[0].len() as f32 * ip + 8.0 * sc;
     ui_text(ui.painter(), Pos2::new(tx, rect.center().y + dy), Align::Min, text, 2.0, rect.max.x - tx - 4.0, pal().ink);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -884,7 +900,7 @@ fn logo(ui: &mut egui::Ui) {
 
 /// Folder-style tabs with a baseline; the open tab joins the panel below. Returns the clicked tab.
 fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
-    let h = 26.0;
+    let h = 26.0 * font::ui_scale();
     let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h + 6.0), Sense::hover());
     let t = thick(2.0);
     let base = row.max.y - 4.0;
@@ -977,7 +993,7 @@ fn tab_row(ui: &mut egui::Ui, items: &[&str], cur: usize) -> Option<usize> {
 /// Small pixel check box with a label. Returns the click.
 fn check_box(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
     let w = text_w(text, 2.0) + 30.0;
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::click());
     let b = Rect::from_center_size(Pos2::new(rect.min.x + 11.0, rect.center().y), Vec2::splat(16.0));
     inset(ui.painter(), b, pal().lcd);
     if on {
@@ -995,8 +1011,8 @@ fn check_box(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
 }
 
 fn retro_btn_w(ui: &mut egui::Ui, text: &str, w: f32, active: bool) -> egui::Response {
-    let w = w.max(text_w(text, 2.0) + 16.0);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let w = (w * font::ui_scale()).max(text_w(text, 2.0) + 16.0);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::click());
     let down = resp.is_pointer_button_down_on() || active;
     raised_h(ui.painter(), rect, down, resp.hovered());
     let dy = if down { 1.0 } else { 0.0 };
@@ -1150,8 +1166,9 @@ fn goto_items(ui: &mut egui::Ui, acts: &mut Vec<Action>, t: &Track, tidal: bool)
 
 /// Retro-styled entry for right-click menus. Returns true when clicked.
 fn menu_item(ui: &mut egui::Ui, text: &str) -> bool {
-    let w = (text_w(text, 2.0) + 28.0).max(150.0);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 24.0), Sense::click());
+    let sc = font::ui_scale();
+    let w = (text_w(text, 2.0) + 28.0 * sc).max(150.0 * sc);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 24.0 * sc), Sense::click());
     if resp.hovered() {
         fill_rect(ui.painter(), rect, pal().sel);
     }
@@ -1165,7 +1182,7 @@ fn dropdown(ui: &mut egui::Ui, id: &str, title: &str, items: &[&str], sel: usize
     let cur = items.get(sel).copied().unwrap_or("");
     let text = if title.is_empty() { cur.to_string() } else { format!("{}: {}", title, cur) };
     let w = (text_w(&text, 2.0) + 38.0).max(min_w);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::click());
     let key = egui::Id::new(("dd", id));
     let open = ui.ctx().data(|d| d.get_temp::<bool>(key)).unwrap_or(false);
     let down = resp.is_pointer_button_down_on() || open;
@@ -1258,7 +1275,8 @@ fn chip(ui: &egui::Ui, rect: Rect, text: &str, active: bool, id: &str) -> egui::
 
 /// Sunken LCD readout box.
 fn lcd_box(ui: &mut egui::Ui, text: &str, w: f32, col: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+    let w = w * font::ui_scale();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
     inset(ui.painter(), rect, pal().lcd);
     ptext_fit(ui.painter(), rect.center(), Align::Center, text, 2.0, w - 12.0, col);
 }
@@ -1893,13 +1911,17 @@ fn cards_list(ui: &mut egui::Ui, cards: &[Card], tags: bool, acts: &mut Vec<Acti
     }
 }
 
-fn play_buttons(ui: &mut egui::Ui, tracks: &[Track], acts: &mut Vec<Action>) {
+/// PLAY and SHUFFLE for a list; `refresh`: and REFRESH, to load it from Tidal again (your library).
+fn play_buttons(ui: &mut egui::Ui, tracks: &[Track], acts: &mut Vec<Action>, refresh: bool) {
     ui.horizontal(|ui| {
         if ibtn(ui, &IC_PLAY, "PLAY", false).clicked() {
             acts.push(Action::Play(tracks.to_vec(), 0));
         }
         if ibtn(ui, &IC_SHUF, "SHUFFLE", false).clicked() {
             acts.push(Action::PlayShuffled(tracks.to_vec()));
+        }
+        if refresh && ibtn(ui, &IC_REP, "REFRESH", false).tip("Load your library from Tidal again").clicked() {
+            acts.push(Action::RefreshLibrary);
         }
     });
 }
@@ -1926,10 +1948,8 @@ fn page_view(
                     format!("{} songs", page.tracks.len())
                 };
                 title_line(ui, &sub, 2.0, pal().ink2);
-                if !page.tracks.is_empty() {
-                    ui.add_space(4.0);
-                    play_buttons(ui, &page.tracks, acts);
-                }
+                ui.add_space(4.0);
+                play_buttons(ui, &page.tracks, acts, true);
                 ui.add_space(8.0);
                 if page.tracks.is_empty() {
                     title_line(ui, "No liked songs found.", 2.0, pal().ink2);
@@ -1975,7 +1995,7 @@ fn page_view(
                 title_line(ui, &page.subtitle, 2.0, pal().ink2);
                 ui.add_space(6.0);
                 if !page.tracks.is_empty() {
-                    play_buttons(ui, &page.tracks, acts);
+                    play_buttons(ui, &page.tracks, acts, false);
                 }
             });
         });
@@ -2030,6 +2050,8 @@ struct App {
     login_err: String,
 
     page: Option<Arc<Page>>,
+    /// your library as last loaded: MY LIBRARY shows it at once (REFRESH loads it again)
+    lib_page: Option<Arc<Page>>,
     back: Vec<Arc<Page>>,
     /// pages left with Back, for Forward (cleared when you open something new)
     fwd: Vec<Arc<Page>>,
@@ -2082,8 +2104,12 @@ struct App {
     /// the Winamp skin browser: open, what was searched, the skins found, still loading, no more to load,
     /// and the skin being worn (md5, name)
     show_winamp: bool,
-    /// the Winamp skins page was left with BACK: FORWARD opens it again
-    wa_fwd: bool,
+    /// the TIDALITE page (skins, preferences, help, storage, the log, signing out)
+    show_tl: bool,
+    /// where you have been in the library, for back / forward (see history.rs)
+    hist_back: Vec<history::Spot>,
+    hist_fwd: Vec<history::Spot>,
+    hist_at: Option<history::Spot>,
     wa_q: String,
     wa_list: Vec<winamp::WaSkin>,
     wa_busy: bool,
@@ -2126,6 +2152,8 @@ struct App {
     saved_size: Vec2,
     show_eq: bool,
     eq_gains: [f32; 10],
+    /// the equalizer's preamp, in dB (-12 to +12)
+    eq_pre: f32,
     eq_on: bool,
     dirty: bool,
     last_save: Instant,
@@ -2203,6 +2231,9 @@ struct App {
     pl_open: Option<usize>,
     pl_pick: Option<Track>,
     yt_results: Vec<store::Ext>,
+    /// the opened playlist's name, and whether its songs are shown (it starts folded up)
+    yt_title: String,
+    yt_open: bool,
     yt_cur: Option<String>,
     offline: bool,
     new_tune: String,
@@ -2301,6 +2332,8 @@ struct App {
     pomo_sound: bool,
     lib_frac: f32,
     stack_frac: f32,
+    /// the practice panel's height (drag the edge above it)
+    prac_h: f32,
     /// the queue hidden (the PL button), the player taking the whole column
     queue_hidden: bool,
     /// where each floating window sits (outer rectangle), by name
@@ -2389,6 +2422,7 @@ impl App {
             login_code: None,
             login_err: String::new(),
             page: None,
+            lib_page: None,
             back: Vec::new(),
             fwd: Vec::new(),
             credits: None,
@@ -2431,7 +2465,10 @@ impl App {
             spec_frame: 1,
             viz_panel: None,
             show_winamp: false,
-            wa_fwd: false,
+            show_tl: false,
+            hist_back: Vec::new(),
+            hist_fwd: Vec::new(),
+            hist_at: None,
             wa_q: String::new(),
             wa_list: Vec::new(),
             wa_busy: false,
@@ -2464,6 +2501,7 @@ impl App {
             saved_size: Vec2::ZERO,
             show_eq: false,
             eq_gains: [0.0; 10],
+            eq_pre: 0.0,
             eq_on: false,
             dirty: false,
             last_save: Instant::now(),
@@ -2531,6 +2569,8 @@ impl App {
             pl_open: None,
             pl_pick: None,
             yt_results: Vec::new(),
+            yt_title: String::new(),
+            yt_open: false,
             yt_cur: None,
             offline: false,
             new_tune: String::new(),
@@ -2621,6 +2661,7 @@ impl App {
             pomo_sound: false,
             lib_frac: 0.34,
             stack_frac: 1.0,
+            prac_h: 300.0,
             queue_hidden: false,
             wa_pl_top: 0.0,
             pl_font: 0,
@@ -2758,6 +2799,7 @@ impl App {
                 app.eq_gains[i] = (x.as_f64().unwrap_or(0.0) as f32).clamp(-12.0, 12.0);
             }
         }
+        app.eq_pre = st["eq_pre"].as_f64().map_or(0.0, |v| (v as f32).clamp(-12.0, 12.0));
         if let Some(b) = st["keep_cache"].as_bool() {
             app.keep_cache = b;
         }
@@ -2772,7 +2814,10 @@ impl App {
             app.lib_frac = (f as f32).clamp(0.2, 0.7);
         }
         if let Some(f) = st["stack_frac"].as_f64() {
-            app.stack_frac = (f as f32).clamp(0.3, 1.0);
+            app.stack_frac = (f as f32).clamp(0.1, 1.0);
+        }
+        if let Some(h) = st["prac_h"].as_f64() {
+            app.prac_h = (h as f32).clamp(220.0, 900.0);
         }
         if let Some(c) = st["cols"].as_u64() {
             // settings from before the KEY / BPM column: show it once, it can be turned off from the header
@@ -2829,7 +2874,7 @@ impl App {
     }
 
     fn apply_eq(&self) {
-        self.player.eq.set(self.eq_gains, self.eq_on);
+        self.player.eq.set(self.eq_gains, self.eq_pre, self.eq_on);
     }
 
     fn save_settings(&mut self) {
@@ -2865,12 +2910,14 @@ impl App {
             "repeat": match self.repeat { Repeat::Off => 0, Repeat::All => 1, Repeat::One => 2 },
             "eq_on": self.eq_on,
             "eq": self.eq_gains.to_vec(),
+            "eq_pre": self.eq_pre,
             "keep_cache": self.keep_cache,
             "speed": self.speed,
             "lib_frac": self.lib_frac,
             "offline": self.offline,
             "sc_browser": sources::SC_BROWSER.load(Ordering::Relaxed),
             "stack_frac": self.stack_frac,
+            "prac_h": self.prac_h,
             "pomo_sound": self.pomo_sound,
             "cols": COLS.load(Ordering::Relaxed),
             "cols_v": 2,
@@ -2948,6 +2995,12 @@ impl App {
         };
         if let Some(p) = self.page.as_mut() {
             f(p);
+        }
+        // the saved copy of your library too, unless it is the page on show (already done)
+        if let Some(l) = self.lib_page.as_mut() {
+            if !self.page.as_ref().is_some_and(|p| Arc::ptr_eq(p, l)) {
+                f(l);
+            }
         }
         for b in self.back.iter_mut() {
             f(b);
@@ -3448,13 +3501,15 @@ impl App {
     }
 
     fn apply(&mut self, a: Action) {
-        // going anywhere in the library leaves the Winamp skins page
+        // going anywhere in the library leaves the side pages (skins, TIDALITE, storage, the log)
         if matches!(
             a,
             Action::Home | Action::Library | Action::Section(_) | Action::Search(_) | Action::Open(_) | Action::GoTo(..)
         ) {
             self.show_winamp = false;
-            self.wa_fwd = false;
+            self.show_tl = false;
+            self.show_log = false;
+            self.show_cache = false;
         }
         match a {
             Action::StartLogin => self.start_login(),
@@ -3466,8 +3521,17 @@ impl App {
             }
             Action::Library => {
                 self.sec = Sec::Tidal;
-                self.back.clear();
-                self.fwd.clear();
+                match self.lib_page.clone() {
+                    // already loaded: shown straight away, no waiting
+                    Some(p) => {
+                        self.page = Some(p);
+                        self.serial += 1;
+                    }
+                    None => self.load(false, |a| a.library()),
+                }
+            }
+            Action::RefreshLibrary => {
+                self.sec = Sec::Tidal;
                 self.load(false, |a| a.library());
             }
             Action::Tab(t) => {
@@ -3497,22 +3561,20 @@ impl App {
                     ctx.request_repaint();
                 });
             }
-            // the Winamp skins page sits on top of the library's history: BACK leaves it, FORWARD returns
-            Action::Back if self.show_winamp => {
+            // one history for the whole library: every tab, page, tune and side page (history.rs)
+            Action::Back => self.hist_go(true),
+            Action::ShowLog => {
+                self.show_log = true;
+                self.show_tl = false;
                 self.show_winamp = false;
-                self.wa_fwd = true;
+                self.show_cache = false;
+                self.show_eq = false;
             }
-            Action::Forward if self.wa_fwd => {
-                self.wa_fwd = false;
-                self.apply(Action::WaOpen);
-            }
-            Action::Back => {
-                if let Some(p) = self.back.pop() {
-                    if let Some(cur) = self.page.replace(p) {
-                        self.fwd.push(cur);
-                    }
-                    self.serial += 1;
-                }
+            Action::TidalitePage => {
+                self.show_tl = true;
+                self.show_winamp = false;
+                self.show_log = false;
+                self.show_cache = false;
             }
             Action::ToggleVinyl => {
                 let on = !VINYL.fetch_xor(true, Ordering::Relaxed);
@@ -3545,7 +3607,8 @@ impl App {
             }
             Action::WaOpen => {
                 self.show_winamp = !self.show_winamp;
-                self.wa_fwd = false;
+                self.show_tl = false;
+                self.show_log = false;
                 if self.show_winamp {
                     self.show_log = false;
                     self.show_eq = false;
@@ -3648,14 +3711,7 @@ impl App {
                 self.dirty = true;
                 self.apply_pl_font();
             }
-            Action::Forward => {
-                if let Some(p) = self.fwd.pop() {
-                    if let Some(cur) = self.page.replace(p) {
-                        self.back.push(cur);
-                    }
-                    self.serial += 1;
-                }
-            }
+            Action::Forward => self.hist_go(false),
             Action::Play(tracks, i) => {
                 if tracks.is_empty() {
                     return;
@@ -3967,6 +4023,7 @@ impl App {
             Action::ToggleCacheView => {
                 self.show_cache = !self.show_cache;
                 if self.show_cache {
+                    self.show_tl = false;
                     self.show_winamp = false;
                     self.show_log = false;
                     self.show_eq = false;
@@ -4079,6 +4136,7 @@ impl App {
                 self.api.logout();
                 self.auth = Auth::LoggedOut;
                 self.page = None;
+                self.lib_page = None;
                 self.back.clear();
                 self.fwd.clear();
                 self.queue = Arc::new(Vec::new());
@@ -4242,13 +4300,12 @@ impl eframe::App for App {
             let (m_back, m_fwd) = ctx.input(|i| {
                 (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2))
             });
-            // (the other sections have no page history, so there they do nothing)
             if m_back && self.art_view {
                 acts.push(Action::ToggleArt);
-            } else if m_back && (self.sec == Sec::Tidal || self.show_winamp) {
+            } else if m_back {
                 acts.push(Action::Back);
             }
-            if m_fwd && !self.art_view && (self.sec == Sec::Tidal || self.wa_fwd) {
+            if m_fwd && !self.art_view {
                 acts.push(Action::Forward);
             }
 
@@ -4277,9 +4334,16 @@ impl eframe::App for App {
                 };
                 let right_w = screen.width() - lib_w;
                 let inner_w = right_w - 28.0;
-                let practice_h = if !self.practice { 0.0 } else { 300.0 };
+                // the practice panel's height and the player's are yours to drag (double-click a handle: back to auto)
+                let practice_h = if !self.practice { 0.0 } else { self.prac_h.clamp(220.0, (screen.height() * 0.6).max(220.0)) };
                 let max_inner_h = ((screen.height() - practice_h) * 0.5 - 44.0).max(120.0);
-                let s = (inner_w / 300.0).min(max_inner_h / 138.0).clamp(0.8, 3.0);
+                let auto_s = (inner_w / 300.0).min(max_inner_h / 138.0).clamp(0.8, 3.0);
+                let s = if self.stack_frac >= 0.99 {
+                    auto_s
+                } else {
+                    let want = (self.stack_frac * screen.height() - 44.0).max(0.0);
+                    (inner_w / 300.0).min(want / 138.0).clamp(0.6, 3.0)
+                };
                 let player_h = 138.0 * s + 44.0;
 
                 if !self.focus_mode {
@@ -4288,7 +4352,14 @@ impl eframe::App for App {
                         .resizable(false)
                         .show_separator_line(false)
                         .frame(panel_frame())
-                        .show(ctx, |ui| self.library_ui(ui, &mut acts));
+                        .show(ctx, |ui| {
+                            // drawn in a child that does not stretch the panel: something too wide for the column
+                            // (long words in a wide font) is cut off at the edge instead of pushing the player away
+                            let r = ui.max_rect();
+                            let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(r));
+                            self.library_ui(&mut inner, &mut acts);
+                            ui.allocate_rect(r, Sense::hover());
+                        });
                 }
                 // the equalizer docks under the player: the skin's at the player's own scale, or Tidalite's
                 let eq_h = if self.wa_art.is_some() { 116.0 * s + 44.0 + 46.0 } else { 340.0 };
@@ -4338,7 +4409,39 @@ impl eframe::App for App {
                     egui::CentralPanel::default().frame(panel_frame()).show(ctx, |ui| self.playlist_ui(ui, &mut acts));
                 }
 
-                // drag handles between the windows
+                // drag handles between the windows: under the player (or the equalizer under it), its height;
+                // above the practice panel, the panel's height
+                if !self.queue_hidden {
+                    let y = screen.min.y + player_h + if self.show_eq { eq_h } else { 0.0 };
+                    let r = Rect::from_min_size(Pos2::new(lib_w, y - 7.0), Vec2::new(right_w, 14.0));
+                    match splitter(ctx, "split_h", r, false) {
+                        Some(Some(py)) => {
+                            let ph = (py - screen.min.y - if self.show_eq { eq_h } else { 0.0 }).max(120.0);
+                            self.stack_frac = (ph / screen.height()).clamp(0.1, 0.98);
+                            self.dirty = true;
+                        }
+                        Some(None) => {
+                            self.stack_frac = 1.0;
+                            self.dirty = true;
+                        }
+                        None => {}
+                    }
+                }
+                if self.practice {
+                    let y = screen.max.y - practice_h;
+                    let r = Rect::from_min_size(Pos2::new(lib_w, y - 7.0), Vec2::new(right_w, 14.0));
+                    match splitter(ctx, "split_p", r, false) {
+                        Some(Some(py)) => {
+                            self.prac_h = (screen.max.y - py).clamp(220.0, (screen.height() * 0.6).max(220.0));
+                            self.dirty = true;
+                        }
+                        Some(None) => {
+                            self.prac_h = 300.0;
+                            self.dirty = true;
+                        }
+                        None => {}
+                    }
+                }
                 if !self.focus_mode {
                     let r = Rect::from_min_size(Pos2::new(lib_w - 7.0, screen.min.y), Vec2::new(14.0, screen.height()));
                     match splitter(ctx, "split_v", r, true) {
@@ -4404,6 +4507,11 @@ impl eframe::App for App {
         }
         for a in acts {
             self.apply(a);
+        }
+        self.hist_track();
+        // keep the library copy current (more songs arrive in pages; likes change it)
+        if self.page.as_ref().is_some_and(|p| p.library) {
+            self.lib_page = self.page.clone();
         }
         let busy = self.cur.is_some() && !self.stopped && !self.paused;
         ctx.request_repaint_after(Duration::from_millis(if self.art_view {

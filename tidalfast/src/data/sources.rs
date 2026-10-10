@@ -355,19 +355,24 @@ pub fn list_name(url: &str) -> String {
     }
 }
 
-/// A YouTube playlist: what is in it (first 200), quick listing without per-video requests.
-pub fn yt_list(url: &str) -> Result<Vec<Ext>, String> {
+/// A YouTube playlist: its name and everything in it, a quick listing without per-video requests.
+pub fn yt_list(url: &str) -> Result<(String, Vec<Ext>), String> {
     let exe = ytdlp_path().ok_or_else(|| "yt-dlp is not installed - press GET YT-DLP".to_string())?;
     let out = command(&exe)
-        .args(["--no-warnings", "--flat-playlist", "--dump-json", "--playlist-end", "200"])
+        .args(["--no-warnings", "--flat-playlist", "--dump-json"])
         .arg(url.trim())
         .output()
         .map_err(|e| format!("could not run yt-dlp: {}", e))?;
     let mut list: Vec<Ext> = Vec::new();
+    let mut name = String::new();
+    let mut seen = std::collections::HashSet::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if name.is_empty() {
+            name = v["playlist_title"].as_str().or_else(|| v["playlist"].as_str()).unwrap_or("").to_string();
+        }
         let Some(vid) = v["id"].as_str().filter(|s| valid_id(s)) else { continue };
-        if list.iter().any(|e| e.src == vid) {
+        if !seen.insert(vid.to_string()) {
             continue;
         }
         list.push(Ext {
@@ -383,7 +388,10 @@ pub fn yt_list(url: &str) -> Result<Vec<Ext>, String> {
     if list.is_empty() {
         return Err(if out.status.success() { "nothing found at that link".to_string() } else { last_line(&out.stderr) });
     }
-    Ok(list)
+    if name.is_empty() {
+        name = list_name(url);
+    }
+    Ok((name, list))
 }
 
 /// A SoundCloud user (name or profile link): their playlists as (title, link).

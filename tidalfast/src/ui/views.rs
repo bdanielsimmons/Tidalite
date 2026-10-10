@@ -7,11 +7,11 @@ use crate::font::{ptext, ptext_fit, spx, text_w};
 use crate::sources;
 use crate::stems;
 use crate::store::{self, Ext};
-use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
+use crate::tools::{F_LOOK, F_LOOP_A, F_LOOP_B, F_SPEED, F_TR_LOOPS, F_TR_STEP, F_TUNE_IREAL};
 use crate::{
-    cache, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal, para,
+    bh, cache, chip, col_header, col_on, fill_rect, fmt_t, fmt_time, inset, lcd_box, list_row, menu_item, outline, pal, para,
     play_buttons, retro_btn, retro_btn_w, section_header, tab_row, table_header, title_line, track_cells, window_deco, Action,
-    App, Ed, RowState, Sec, Tip, BTN_H, PRACTICE,
+    App, Ed, RowState, Sec, Tip, PRACTICE,
 };
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::sync::atomic::Ordering;
@@ -310,7 +310,7 @@ pub(crate) fn field_row(
     hint: &str,
     tall: Option<f32>,
 ) -> FieldOut {
-    let h = tall.unwrap_or(BTN_H);
+    let h = tall.unwrap_or(bh());
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
     let ly = if tall.is_some() { rect.min.y + 13.0 } else { rect.center().y };
     ptext(ui.painter(), Pos2::new(rect.min.x + 4.0, ly), Align::Min, label, 2.0, pal().ink2);
@@ -319,7 +319,8 @@ pub(crate) fn field_row(
 }
 
 pub(crate) fn label(ui: &mut egui::Ui, text: &str, w: f32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+    let w = (w * crate::font::ui_scale()).max(crate::text_w(text, 2.0) + 6.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
     ptext(ui.painter(), Pos2::new(rect.min.x + 2.0, rect.center().y), Align::Min, text, 2.0, pal().ink2);
 }
 
@@ -338,7 +339,7 @@ const STEM_ICONS: [[&str; 7]; 4] = [
 
 /// Icon button for one stem: pressed in (bright) while the stem is playing.
 fn stem_btn(ui: &mut egui::Ui, i: usize, on: bool) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(44.0, BTN_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(44.0, bh()), Sense::click());
     crate::raised_h(ui.painter(), rect, resp.is_pointer_button_down_on() || on, resp.hovered() && !on);
     let dy = if on { 1.0 } else { 0.0 };
     let o = Pos2::new((rect.center().x - 7.0).round(), (rect.center().y - 7.0 + dy).round());
@@ -382,25 +383,86 @@ impl App {
     /// Two levels: MUSIC (the sources and your lists) and PRACTICE (tunes, diary) on top, that group's lists under it.
     /// Each group comes back to the list you last had open in it. The plain build has only MUSIC, so only its row shows.
     pub(crate) fn section_bar(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
-        const MUSIC: [(Sec, &str); 5] =
-            [(Sec::Tidal, "TIDAL"), (Sec::Sc, "SOUNDCLOUD"), (Sec::Files, "FILES"), (Sec::Yt, "YT"), (Sec::Lists, "LISTS")];
         const PRACTICE_SECS: [(Sec, &str); 2] = [(Sec::Tunes, "TUNES"), (Sec::Diary, "DIARY")];
+        // the TIDALITE tab covers its own page and the pages opened from it
+        let side = self.show_tl || self.show_winamp || self.show_log || self.show_cache;
         let in_practice = PRACTICE_SECS.iter().any(|s| s.0 == self.sec);
-        let music: Vec<(Sec, &str)> = MUSIC.iter().copied().filter(|s| s.0 != Sec::Tidal || !self.offline).collect();
-        if PRACTICE {
-            if let Some(i) = tab_row(ui, &["MUSIC", "PRACTICE"], in_practice as usize) {
-                if (i == 1) != in_practice {
-                    let back = if i == 1 { self.last_practice } else { self.last_music };
-                    let pool: &[(Sec, &str)] = if i == 1 { &PRACTICE_SECS } else { &music };
-                    let to = if pool.iter().any(|s| s.0 == back) { back } else { pool[0].0 };
-                    acts.push(Action::Section(to));
-                }
+        let tabs: &[&str] = if PRACTICE { &["MUSIC", "PRACTICE", "TIDALITE"] } else { &["MUSIC", "TIDALITE"] };
+        let last = tabs.len() - 1;
+        let cur = if side { last } else { (PRACTICE && in_practice) as usize };
+        let top = ui.cursor().min.y;
+        if let Some(i) = tab_row(ui, tabs, cur) {
+            if i == last {
+                acts.push(Action::TidalitePage);
+            } else if i != cur {
+                let to_practice = PRACTICE && i == 1;
+                let music: Vec<Sec> = [Sec::Tidal, Sec::Sc, Sec::Files, Sec::Yt, Sec::Lists]
+                    .into_iter()
+                    .filter(|s| *s != Sec::Tidal || !self.offline)
+                    .collect();
+                let back = if to_practice { self.last_practice } else { self.last_music };
+                let ok = if to_practice { PRACTICE_SECS.iter().any(|s| s.0 == back) } else { music.contains(&back) };
+                let to = if ok {
+                    back
+                } else if to_practice {
+                    Sec::Tunes
+                } else {
+                    music[0]
+                };
+                acts.push(Action::Section(to));
             }
         }
-        let group: &[(Sec, &str)] = if in_practice { &PRACTICE_SECS } else { &music };
-        let cur = group.iter().position(|s| s.0 == self.sec).unwrap_or(0);
-        if let Some(i) = sub_tabs(ui, group, cur) {
-            acts.push(Action::Section(group[i].0));
+        let r = ui.min_rect();
+        crate::tour::mark("APPMENU", Rect::from_min_max(Pos2::new(r.min.x, top), Pos2::new(r.max.x, ui.cursor().min.y)));
+        if side {
+            // the TIDALITE tab's own pages
+            let items =
+                [(Sec::Tidal, "SKINS & SETTINGS"), (Sec::Tidal, "WINAMP SKINS"), (Sec::Tidal, "STORAGE"), (Sec::Tidal, "LOG")];
+            let cur = if self.show_winamp {
+                1
+            } else if self.show_cache {
+                2
+            } else if self.show_log {
+                3
+            } else {
+                0
+            };
+            if let Some(i) = sub_tabs(ui, &items, cur) {
+                if i != cur {
+                    acts.push(match i {
+                        0 => Action::TidalitePage,
+                        1 => Action::WaOpen,
+                        2 => Action::ToggleCacheView,
+                        _ => Action::ShowLog,
+                    });
+                }
+            }
+            return;
+        }
+        if PRACTICE && in_practice {
+            let cur = PRACTICE_SECS.iter().position(|s| s.0 == self.sec).unwrap_or(0);
+            if let Some(i) = sub_tabs(ui, &PRACTICE_SECS, cur) {
+                acts.push(Action::Section(PRACTICE_SECS[i].0));
+            }
+            return;
+        }
+        // the music sources, with your Tidal library as its own stop
+        let mut items: Vec<(Sec, &str)> = Vec::new();
+        if !self.offline {
+            items.push((Sec::Tidal, "TIDAL"));
+            items.push((Sec::Tidal, "MY LIBRARY"));
+        }
+        items.extend([(Sec::Sc, "SOUNDCLOUD"), (Sec::Files, "FILES"), (Sec::Yt, "YT"), (Sec::Lists, "LISTS")]);
+        let on_library = self.sec == Sec::Tidal && self.page.as_ref().is_some_and(|p| p.library);
+        let cur =
+            items.iter().position(|s| s.0 == self.sec && (s.0 != Sec::Tidal || (s.1 == "MY LIBRARY") == on_library)).unwrap_or(0);
+        if let Some(i) = sub_tabs(ui, &items, cur) {
+            match items[i] {
+                (Sec::Tidal, "MY LIBRARY") => acts.push(Action::Library),
+                // TIDAL goes back to the Tidal page you had (home when that was your library)
+                (Sec::Tidal, _) if on_library || self.page.is_none() => acts.push(Action::Home),
+                (s, _) => acts.push(Action::Section(s)),
+            }
         }
     }
 
@@ -584,7 +646,7 @@ impl App {
         section_header(ui, "LIKED (ON THIS PC)");
         let tracks: Vec<Track> = self.store.hearts.iter().filter(|e| heart_group(e) == group).map(|e| e.to_track()).collect();
         ui.add_space(4.0);
-        play_buttons(ui, &tracks, acts);
+        play_buttons(ui, &tracks, acts, false);
         ui.add_space(4.0);
         self.ext_list(ui, acts, 4 + group);
     }
@@ -627,7 +689,7 @@ impl App {
             section_header(ui, "FILES");
             let tracks: Vec<Track> = self.store.files.iter().map(|e| e.to_track()).collect();
             ui.add_space(4.0);
-            play_buttons(ui, &tracks, acts);
+            play_buttons(ui, &tracks, acts, false);
             ui.add_space(4.0);
             self.ext_list(ui, acts, 0);
         }
@@ -643,7 +705,7 @@ impl App {
         ui.add_space(4.0);
         let have = sources::ytdlp_path().is_some();
         ui.horizontal_wrapped(|ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(150.0, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(150.0, bh()), Sense::hover());
             ptext(
                 ui.painter(),
                 Pos2::new(rect.min.x + 2.0, rect.center().y),
@@ -661,7 +723,7 @@ impl App {
         });
         ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = field(ui, &mut self.ed, F_YT, &mut self.yt_in, rect, "Paste a YouTube link or playlist...", false);
             if o.enter || retro_btn_w(ui, "ADD", 70.0, false).clicked() {
                 acts.push(Action::AddYt);
@@ -677,22 +739,51 @@ impl App {
         }
         self.saved_lists(ui, acts, "yt");
         if !self.yt_results.is_empty() {
-            section_header(ui, "PLAYLIST (RIGHT-CLICK TO KEEP A VIDEO)");
+            section_header(ui, "PLAYLIST");
             let tracks: Vec<Track> = self.yt_results.iter().map(|e| e.to_track()).collect();
+            let total: f32 = self.yt_results.iter().map(|e| e.dur).sum();
+            ui.add_space(4.0);
+            let name = if self.yt_title.is_empty() { "YouTube playlist".to_string() } else { self.yt_title.clone() };
+            title_line(ui, &name, 2.5, pal().ink);
+            title_line(
+                ui,
+                &format!(
+                    "{} songs{}",
+                    tracks.len(),
+                    if total > 0.0 { format!(", {}", crate::fmt_long(total)) } else { String::new() }
+                ),
+                2.0,
+                pal().ink2,
+            );
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
+                if crate::ibtn(ui, &crate::IC_PLAY, "PLAY", false).clicked() {
+                    acts.push(Action::Play(tracks.clone(), 0));
+                }
+                if crate::ibtn(ui, &crate::IC_SHUF, "SHUFFLE", false).clicked() {
+                    acts.push(Action::PlayShuffled(tracks.clone()));
+                }
+                if retro_btn(ui, if self.yt_open { "HIDE SONGS" } else { "SHOW SONGS" }, self.yt_open).clicked() {
+                    self.yt_open = !self.yt_open;
+                }
                 let saved = self.yt_cur.as_ref().map_or(true, |u| self.store.lists.iter().any(|l| &l.url == u));
-                if !saved
-                    && retro_btn(ui, "SAVE THIS PLAYLIST", false).tip("Keep the link so you can open it again later").clicked()
-                {
+                if !saved && retro_btn(ui, "SAVE", false).tip("Keep it in MY PLAYLISTS, to open it again later").clicked() {
                     if let Some(u) = self.yt_cur.clone() {
                         acts.push(Action::SaveList(1, u));
                     }
                 }
+                if retro_btn_w(ui, "X", 30.0, false).tip("Put this playlist away").clicked() {
+                    self.yt_results.clear();
+                    self.yt_title.clear();
+                    self.yt_cur = None;
+                    self.yt_open = false;
+                }
             });
-            play_buttons(ui, &tracks, acts);
-            ui.add_space(4.0);
-            self.ext_list(ui, acts, 7);
+            if self.yt_open && !self.yt_results.is_empty() {
+                ui.add_space(4.0);
+                dim_line(ui, "RIGHT-CLICK A SONG TO KEEP IT", 1.0, pal().dim);
+                self.ext_list(ui, acts, 7);
+            }
         }
         if self.store.yt.is_empty() {
             para(ui, "One-time setup: press GET YT-DLP. Then paste a link and press ADD. The first play downloads just the audio (a few MB); after that it is stored and starts instantly, like everything in this player.", pal().ink2);
@@ -708,7 +799,7 @@ impl App {
             section_header(ui, "SAVED CLIPS");
             let tracks: Vec<Track> = self.store.yt.iter().map(|e| e.to_track()).collect();
             ui.add_space(4.0);
-            play_buttons(ui, &tracks, acts);
+            play_buttons(ui, &tracks, acts, false);
             ui.add_space(4.0);
             self.ext_list(ui, acts, 1);
         }
@@ -737,7 +828,7 @@ impl App {
         }
         ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = field(ui, &mut self.ed, F_SC, &mut self.sc_in, rect, "Search SoundCloud, or paste a link...", false);
             if o.enter || retro_btn_w(ui, "GO", 70.0, false).clicked() {
                 acts.push(Action::ScGo);
@@ -793,7 +884,7 @@ impl App {
                     }
                 });
             }
-            play_buttons(ui, &tracks, acts);
+            play_buttons(ui, &tracks, acts, false);
             ui.add_space(4.0);
             self.ext_list(ui, acts, 3);
         }
@@ -801,7 +892,7 @@ impl App {
             section_header(ui, "MY SOUNDCLOUD");
             let tracks: Vec<Track> = self.store.sc.iter().map(|e| e.to_track()).collect();
             ui.add_space(4.0);
-            play_buttons(ui, &tracks, acts);
+            play_buttons(ui, &tracks, acts, false);
             ui.add_space(4.0);
             self.ext_list(ui, acts, 2);
         }
@@ -844,7 +935,7 @@ impl App {
         }
         ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = field(ui, &mut self.ed, F_NEW_PL, &mut self.new_pl, rect, "New playlist name...", false);
             if o.enter || retro_btn_w(ui, "NEW", 70.0, false).clicked() {
                 acts.push(Action::PlaylistNew(self.pl_pick.clone()));
@@ -899,7 +990,7 @@ impl App {
             return;
         }
         let tracks: Vec<Track> = items.iter().map(|v| v.to_track()).collect();
-        play_buttons(ui, &tracks, acts);
+        play_buttons(ui, &tracks, acts, false);
         ui.add_space(4.0);
         let playing = self.cur_track().map(|t| t.id);
         col_header(ui, true);
@@ -979,13 +1070,13 @@ impl App {
         }
         ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 78.0).max(80.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = field(ui, &mut self.ed, F_NEW_TUNE, &mut self.new_tune, rect, "New tune name...", false);
             if o.enter || retro_btn_w(ui, "ADD", 70.0, false).clicked() {
                 acts.push(Action::NewTune);
             }
         });
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), BTN_H), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), bh()), Sense::hover());
         let _ =
             field(ui, &mut self.ed, F_TUNE_IREAL, &mut self.tunes_ireal, rect, "iReal Pro link or playlist: irealb://...", false);
         if retro_btn(ui, "IMPORT IREAL", false)
@@ -1109,7 +1200,7 @@ impl App {
         });
         ui.horizontal_wrapped(|ui| {
             let w = (ui.available_width() - 4.0).max(120.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = field(
                 ui,
                 &mut self.ed,
@@ -1347,7 +1438,7 @@ impl App {
             if retro_btn_w(ui, "<", 34.0, false).tip("Previous month").clicked() {
                 self.diary_ym = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
             }
-            let (r, _) = ui.allocate_exact_size(Vec2::new(190.0, BTN_H), Sense::hover());
+            let (r, _) = ui.allocate_exact_size(Vec2::new(190.0, bh()), Sense::hover());
             ptext(ui.painter(), r.center(), Align::Center, &format!("{} {}", MONTHS[(m as usize - 1) % 12], y), 2.0, pal().ink);
             if retro_btn_w(ui, ">", 34.0, false).tip("Next month").clicked() {
                 self.diary_ym = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
@@ -1510,6 +1601,22 @@ impl App {
                 crate::tour::mark("TIMEBTNS", tb.rect.union(mb.rect));
             });
         });
+        // the panel's contents scroll when the panel is short, rather than running past its edge
+        // (no drag-to-scroll: dragging on the waveform sets loops)
+        // everything inside grows and shrinks with the panel, gently (the square root of the size change), from a
+        // little smaller to about twice as big
+        let size = ui.available_size();
+        let s = (size.y / 250.0).min(size.x / 760.0).max(0.1).sqrt().clamp(0.85, 2.0);
+        let wave_h = 54.0 * s;
+        crate::font::with_scale(s, || {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .drag_to_scroll(false)
+                .show(ui, |ui| self.practice_body(ui, acts, wave_h));
+        });
+    }
+
+    fn practice_body(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>, wave_h: f32) {
         let dur = self.track_len();
         let pos = self.pos();
         let tid = self.cur_track().map(|t| t.id);
@@ -1519,7 +1626,7 @@ impl App {
         let shift = ui.input(|i| i.modifiers.shift);
 
         // ---- waveform timeline
-        let (bar, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 54.0), Sense::click_and_drag());
+        let (bar, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), wave_h), Sense::click_and_drag());
         let resp = resp
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .tip("Click to jump. Shift + drag to select a loop (inside a loop: slide it). Ctrl + drag A or B to move it. Right-click for more.");
@@ -1675,7 +1782,24 @@ impl App {
         } else {
             ptext(ui.painter(), bar.center(), Align::Center, "PLAY A TRACK TO START", 2.0, pal().dim);
         }
-        ui.add_space(10.0);
+        ui.add_space(6.0);
+
+        // ---- the panel's tabs: the loop and speed tools first, then the bigger tools (TRAINER, PITCH & EAR, STEMS)
+        let cur = if self.more { self.mtab as usize + 1 } else { 0 };
+        if let Some(i) = tab_row(ui, &["LOOP & SPEED", "TRAINER", "PITCH & EAR", "STEMS"], cur) {
+            self.more = i > 0;
+            if i > 0 {
+                self.mtab = (i - 1) as u8;
+            }
+        }
+        ui.add_space(4.0);
+        if self.more {
+            let top = ui.cursor().min.y;
+            self.more_tools(ui, acts);
+            let r = ui.min_rect();
+            crate::tour::mark("MOREBOX", Rect::from_min_max(Pos2::new(r.min.x, top), Pos2::new(r.max.x, ui.cursor().min.y)));
+            return;
+        }
 
         // ---- A and B, then the loop's own buttons  (each block reports where it is, for the practice tour)
         let row_mark = |ui: &egui::Ui, key: &str, top: f32| {
@@ -1729,37 +1853,42 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             let ink = pal().ink;
-            if crate::icon_btn_w(ui, &crate::IC_REW, false, ink, 44.0).tip("Back two seconds  (, key)").clicked() {
+            if crate::ibtn(ui, &crate::IC_REW, "2 SEC", false).tip("Back two seconds  (, key)").clicked() {
                 acts.push(Action::SeekRel(-2.0));
             }
-            if crate::icon_btn_w(ui, &crate::IC_PREV, false, ink, 44.0)
+            if crate::ibtn(ui, &crate::IC_PREV, "RESTART", false)
                 .tip("Back to the loop start (or the track start)  (. key)")
                 .clicked()
             {
                 acts.push(Action::Seek(self.loop_a.unwrap_or(0.0)));
             }
+            let _ = ink;
             ui.add_space(14.0);
             label(ui, "SPEED", 64.0);
-            // a drop-down of speeds (Up / Down keys still step it)
-            let sp = retro_btn_w(ui, &format!("{}%  v", self.speed), 92.0, self.speed != 100)
-                .tip("Playback speed (Down / Up keys step it)");
+            // the usual speeds in a drop-down, and - / + for 1% at a time (click the number to type any, 25 to 250)
+            let sp = retro_btn_w(ui, "v", 34.0, false).tip("Pick a speed");
             let menu = ui.id().with("speed_menu");
             if sp.clicked() {
                 ui.memory_mut(|m| m.toggle_popup(menu));
             }
             egui::popup::popup_below_widget(ui, menu, &sp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                 ui.set_min_width(110.0);
-                for pct in [50u32, 60, 70, 75, 80, 85, 90, 95, 100, 110, 125, 150] {
+                for pct in [25u32, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 100, 110, 125, 150] {
                     let mark = if self.speed == pct { "> " } else { "   " };
                     if menu_item(ui, &format!("{}{}%", mark, pct)) {
                         acts.push(Action::Speed(pct));
                     }
                 }
             });
-            ui.add_space(14.0);
-            if retro_btn_w(ui, "MORE", 64.0, self.more).tip("Speed trainer, pitch, ear modes, stems").clicked() {
-                acts.push(Action::ToggleMore);
-            }
+            self.num_step(
+                ui,
+                acts,
+                F_SPEED,
+                64.0,
+                Knob::Speed,
+                format!("{}%", self.speed),
+                "1% slower / faster - or click and type any speed from 25 to 250",
+            );
         });
         row_mark(ui, "SPEEDROW", speed_top);
         ui.add_space(10.0);
@@ -1769,7 +1898,7 @@ impl App {
             // the save button's real width; if the name box cannot keep a usable size, the button drops to the next line
             let bw = 10.0 + 18.0 + 8.0 + text_w("SAVE LOOP", 2.0) + 10.0;
             let w = (ui.available_width() - bw - 12.0).max(150.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
             let o = field(ui, &mut self.ed, F_SEC, &mut self.sec_name, rect, "Name this loop (bridge, head, lick...)", false);
             if o.enter {
                 acts.push(Action::SaveSection);
@@ -1810,86 +1939,64 @@ impl App {
             }
         });
 
-        // ---- MORE: grouped in tabs
-        if self.more {
-            // where the MORE panel was last drawn, for the practice tour
-            if let Some(s) = egui::AreaState::load(ui.ctx(), egui::Id::new("more_overlay")) {
-                crate::tour::mark("MOREBOX", s.rect());
+        ui.add_space(6.0);
+    }
+
+    /// The practice panel's other tabs: TRAINER (0), PITCH & EAR (1), STEMS (2).
+    fn more_tools(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
+        let tid = self.cur_track().map(|t| t.id);
+        match self.mtab {
+            0 => {
+                ui.horizontal_wrapped(|ui| {
+                    label(ui, "TRAIN", 56.0);
+                    if retro_btn_w(ui, if self.trainer { "ON" } else { "OFF" }, 56.0, self.trainer)
+                        .tip("Practice the loop a set number of times, then speed up by a set percent")
+                        .clicked()
+                    {
+                        acts.push(Action::Trainer);
+                    }
+                    if self.trainer {
+                        lcd_box(ui, &format!("PASS {}/{}", self.passes, self.trainer_n), 100.0, pal().ink);
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    label(ui, "EVERY", 60.0);
+                    self.num_step(
+                        ui,
+                        acts,
+                        F_TR_LOOPS,
+                        44.0,
+                        Knob::Loops,
+                        self.trainer_n.to_string(),
+                        "Loops to play before each speed-up - or type it",
+                    );
+                    label(ui, "LOOPS", 56.0);
+                    self.num_step(
+                        ui,
+                        acts,
+                        F_TR_STEP,
+                        52.0,
+                        Knob::Step,
+                        format!("+{}%", self.trainer_step),
+                        "How much faster each step - or type it",
+                    );
+                });
+                dim_line(ui, "STARTS AT THE SPEED SET ABOVE AND STOPS AT 100%", 1.0, pal().dim);
+                ui.horizontal_wrapped(|ui| {
+                    let ci = if self.count_in == 0 { "COUNT OFF".to_string() } else { format!("COUNT {}", self.count_in) };
+                    if retro_btn_w(ui, &ci, 100.0, self.count_in > 0).tip("Clicks before every loop pass").clicked() {
+                        acts.push(Action::CountIn);
+                    }
+                    if retro_btn_w(ui, "FOCUS", 76.0, self.focus_mode)
+                        .tip("Hide the lists - just the player and these tools")
+                        .clicked()
+                    {
+                        acts.push(Action::ToggleFocus);
+                    }
+                });
             }
-            let more_pos = ui.cursor().min;
-            let more_w = ui.available_width();
-            egui::Area::new(egui::Id::new("more_overlay")).order(egui::Order::Foreground).fixed_pos(more_pos).show(
-                ui.ctx(),
-                |ui| {
-                    egui::Frame::none()
-                        .fill(pal().beige)
-                        .stroke(egui::Stroke::new(2.0_f32, pal().edge))
-                        .inner_margin(egui::Margin::same(6.0))
-                        .show(ui, |ui| {
-                            ui.set_width((more_w - 16.0).max(200.0));
-                            if let Some(t) = tab_row(ui, &["TRAINER", "PITCH & EAR", "STEMS"], self.mtab as usize) {
-                                self.mtab = t as u8;
-                            }
-                            ui.add_space(2.0);
-                            match self.mtab {
-                                0 => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        label(ui, "TRAIN", 56.0);
-                                        if retro_btn_w(ui, if self.trainer { "ON" } else { "OFF" }, 56.0, self.trainer)
-                                            .tip("Practice the loop a set number of times, then speed up by a set percent")
-                                            .clicked()
-                                        {
-                                            acts.push(Action::Trainer);
-                                        }
-                                        if self.trainer {
-                                            lcd_box(ui, &format!("PASS {}/{}", self.passes, self.trainer_n), 100.0, pal().ink);
-                                        }
-                                    });
-                                    ui.horizontal_wrapped(|ui| {
-                                        label(ui, "EVERY", 60.0);
-                                        self.num_step(
-                                            ui,
-                                            acts,
-                                            F_TR_LOOPS,
-                                            44.0,
-                                            Knob::Loops,
-                                            self.trainer_n.to_string(),
-                                            "Loops to play before each speed-up - or type it",
-                                        );
-                                        label(ui, "LOOPS", 56.0);
-                                        self.num_step(
-                                            ui,
-                                            acts,
-                                            F_TR_STEP,
-                                            52.0,
-                                            Knob::Step,
-                                            format!("+{}%", self.trainer_step),
-                                            "How much faster each step - or type it",
-                                        );
-                                    });
-                                    dim_line(ui, "STARTS AT THE SPEED SET ABOVE AND STOPS AT 100%", 1.0, pal().dim);
-                                    ui.horizontal_wrapped(|ui| {
-                                        let ci = if self.count_in == 0 {
-                                            "COUNT OFF".to_string()
-                                        } else {
-                                            format!("COUNT {}", self.count_in)
-                                        };
-                                        if retro_btn_w(ui, &ci, 100.0, self.count_in > 0)
-                                            .tip("Clicks before every loop pass")
-                                            .clicked()
-                                        {
-                                            acts.push(Action::CountIn);
-                                        }
-                                        if retro_btn_w(ui, "FOCUS", 76.0, self.focus_mode)
-                                            .tip("Hide the lists - just the player and these tools")
-                                            .clicked()
-                                        {
-                                            acts.push(Action::ToggleFocus);
-                                        }
-                                    });
-                                }
-                                1 => {
-                                    ui.horizontal_wrapped(|ui| {
+            1 => {
+                ui.horizontal_wrapped(|ui| {
                                         label(ui, "PITCH", 56.0);
                                         if retro_btn_w(ui, "-", 28.0, false)
                                             .tip("Lower the pitch a semitone (speed stays)")
@@ -1949,11 +2056,11 @@ impl App {
                                             acts.push(Action::Export);
                                         }
                                     });
-                                }
-                                _ => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        label(ui, "STEMS", 56.0);
-                                        if self.stem_busy == 1 {
+            }
+            _ => {
+                ui.horizontal_wrapped(|ui| {
+                    label(ui, "STEMS", 56.0);
+                    if self.stem_busy == 1 {
                     lcd_box(ui, &stems::stage_text(), 300.0, pal().ink2);
                 } else if self.stem_busy == 2 {
                     let (d, t) = (stems::DONE.load(Ordering::Relaxed), stems::TOTAL.load(Ordering::Relaxed));
@@ -1991,23 +2098,9 @@ impl App {
                 {
                     acts.push(Action::StemSplit);
                 }
-                                    });
-                                }
-                            }
-                        });
-                },
-            );
+                });
+            }
         }
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 14.0), Sense::hover());
-        ptext_fit(
-            ui.painter(),
-            Pos2::new(rect.min.x + 2.0, rect.center().y),
-            Align::Min,
-            "LOOPS, SPEED AND SEEKS STAY ON THIS PC - NOTHING IS REPORTED TO TIDAL",
-            1.0,
-            rect.width() - 4.0,
-            pal().dim,
-        );
     }
 }
 
@@ -2020,7 +2113,7 @@ fn comfort_meter(ui: &mut egui::Ui, level: u8) -> Option<u8> {
     ui.horizontal_wrapped(|ui| {
         label(ui, "KNOW IT", 74.0);
         for n in 0..4u8 {
-            let (r, resp) = ui.allocate_exact_size(Vec2::new(30.0, BTN_H), Sense::click());
+            let (r, resp) = ui.allocate_exact_size(Vec2::new(30.0, bh()), Sense::click());
             let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).tip(COMFORT[n as usize]);
             let on = n <= level;
             let p = ui.painter();

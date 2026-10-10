@@ -93,7 +93,7 @@ const BASIC: &[Step] = &[
     Step {
         key: "LIBRARY",
         title: "THE LIBRARY",
-        text: "Everything you can play lives here. Search at the top, click a song to play it, right-click it for more. The mouse's back and forward buttons step through the pages you opened.",
+        text: "Everything you can play lives here. Click a song to play it, right-click it for more.",
         ..BASE
     },
     Step {
@@ -123,8 +123,8 @@ const BASIC: &[Step] = &[
     },
     Step {
         key: "APPMENU",
-        title: "THE TIDALITE MENU",
-        text: "Skins (ORIGINAL, RETRO ORIGINAL and Winamp skins from the museum), preferences, help and these tours, where tracks are stored, and the log, all in one place. Ctrl+K finds any action by typing.",
+        title: "MUSIC, PRACTICE, TIDALITE",
+        text: "Three tabs: MUSIC (Tidal, your library and the other sources), PRACTICE (your tunes and the diary) and TIDALITE (skins, preferences, help and these tours, storage and the log). Under them: back and forward (the mouse's side buttons work too) and search. TIDALITE has its own tabs, Winamp skins among them. Ctrl+K finds any action by typing.",
         ..BASE
     },
     Step {
@@ -153,7 +153,7 @@ const PRACTICE_TOUR: &[Step] = &[
         key: "LOOPROW",
         scene: Scene::Practice,
         title: "1. LOOP A SPOT",
-        text: "The tour just looped a few bars: listen to them come round again. Press A where the hard part starts and B where it ends ([ and ] keys), then loop it (\\ key). Click a time to type it exactly. SAVE LOOP keeps it with the song.",
+        text: "The tour just looped a few seconds and jumped there: listen to them come round again. Press A where the hard part starts and B where it ends ([ and ] keys), then loop it (\\ key). Click a time to type it exactly. SAVE LOOP keeps it with the song.",
         ab: true,
         ..BASE
     },
@@ -161,18 +161,18 @@ const PRACTICE_TOUR: &[Step] = &[
         key: "SPEEDROW",
         scene: Scene::Practice,
         title: "2. SLOW IT DOWN",
-        text: "Same loop, now at 75%, same pitch. Pick a speed from the list (UP and DOWN keys step it). Play it clean slow, then step up.",
+        text: "Same loop, now at 85%, same pitch. Pick a speed from the list, or step it 1% at a time with - and + (click the number to type any). Play it clean slow, then step up.",
         ab: true,
-        speed: 75,
+        speed: 85,
         ..BASE
     },
     Step {
         key: "MOREBOX",
         scene: Scene::PracticeMore(0),
         title: "3. LET IT SPEED YOU UP",
-        text: "MORE opens these tools. The TRAINER plays your loop a set number of times, then speeds it up by a set percent, again and again: start slow and let it bring you up to tempo.",
+        text: "The tabs along the top hold the bigger tools. The TRAINER plays your loop a set number of times, then speeds it up by a set percent, again and again: start slow and let it bring you up to tempo.",
         ab: true,
-        speed: 75,
+        speed: 85,
         ..BASE
     },
     Step {
@@ -311,6 +311,8 @@ impl App {
             if self.loop_a != Some(a) || self.loop_b != Some(b) {
                 self.apply(Action::SetAAt(a));
                 self.apply(Action::SetBAt(b));
+                // and go there, so the loop is what you hear
+                self.apply(Action::Seek(a));
             }
             if !self.loop_on {
                 self.apply(Action::LoopToggle);
@@ -439,18 +441,19 @@ impl App {
             if low { (egui::Align2::CENTER_TOP, [0.0, 24.0]) } else { (egui::Align2::CENTER_BOTTOM, [0.0, -24.0]) };
         let mut go: i32 = 0;
         egui::Area::new(egui::Id::new("tour_card")).order(egui::Order::Tooltip).anchor(align, off).show(ctx, |ui| {
+            // the card keeps its own colours (soft white on near black), so it reads the same whatever skin is worn
             let frame = egui::Frame::none()
-                .fill(pal().beige)
-                .stroke(egui::Stroke::new(2.0_f32, pal().edge))
+                .fill(Color32::from_rgb(20, 20, 22))
+                .stroke(egui::Stroke::new(2.0_f32, Color32::from_gray(110)))
                 .rounding(if crate::style() != 0 { 8.0 } else { 0.0 })
                 .inner_margin(14.0);
             frame.show(ui, |ui| {
                 ui.set_width(460.0_f32.min(screen.width() - 60.0));
-                title_line(ui, &format!("{}   {}/{}", step.title, i + 1, list.len()), 2.5, pal().ink);
-                para(ui, step.text, pal().ink);
+                title_line(ui, &format!("{}   {}/{}", step.title, i + 1, list.len()), 2.5, Color32::from_rgb(240, 240, 236));
+                para(ui, step.text, Color32::from_rgb(225, 225, 220));
                 // the credit the song's licence asks for, while it plays
                 if self.tour_play.as_ref().is_some_and(|s| s.song.is_some()) {
-                    crate::views::dim_line(ui, crate::tour_song::CREDIT, 1.0, pal().dim);
+                    crate::views::dim_line(ui, crate::tour_song::CREDIT, 1.0, Color32::from_gray(160));
                 }
                 ui.horizontal(|ui| {
                     if i > 0 && retro_btn(ui, "BACK", false).clicked() {

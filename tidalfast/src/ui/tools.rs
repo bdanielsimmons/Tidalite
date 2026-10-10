@@ -6,8 +6,7 @@ use crate::extras::{Knob, Opt};
 use crate::font::{ptext, ptext_fit, text_w};
 use crate::views::{dim_line, field, label, F_CHART, F_IREAL};
 use crate::{
-    check_box, dropdown, fill_rect, inset, lcd_box, outline, pal, para, retro_btn, retro_btn_w, title_line, Action, App, Tip,
-    BTN_H,
+    bh, check_box, dropdown, fill_rect, inset, lcd_box, outline, pal, para, retro_btn, retro_btn_w, title_line, Action, App, Tip,
 };
 use eframe::egui::{self, Align, Pos2, Rect, Sense, Vec2};
 use std::time::Instant;
@@ -52,7 +51,8 @@ pub const F_WINAMP: u32 = 50;
 impl App {
     /// A box you can type into. Shows `shown`; returns the typed text when you press Enter or click away.
     pub(crate) fn entry(&mut self, ui: &mut egui::Ui, id: u32, w: f32, shown: &str) -> Option<String> {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+        let w = w * crate::font::ui_scale();
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
         let editing = self.ed.id == id;
         if editing && self.ebuf_id != id {
             self.ebuf = shown.to_string();
@@ -553,7 +553,7 @@ impl App {
                 para(ui, "Have an iReal Pro link? Paste it to bring in the changes (and the composer):", pal().ink2);
                 ui.horizontal(|ui| {
                     let w = (ui.available_width() - 90.0).max(80.0);
-                    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
                     let _ = field(ui, &mut self.ed, F_IREAL, &mut self.ireal_in, rect, "irealb://...", false);
                     if retro_btn_w(ui, "IMPORT", 80.0, false).clicked() {
                         acts.push(Action::ImportIreal(None));
@@ -664,7 +664,7 @@ impl App {
                 para(ui, "Or paste an iReal Pro link (irealb://...). It fills in the changes, key, tempo and composer.", pal().ink2);
                 ui.horizontal(|ui| {
                     let w = (ui.available_width() - 90.0).max(80.0);
-                    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
                     let _ = field(ui, &mut self.ed, F_IREAL, &mut self.ireal_in, rect, "irealb://...", false);
                     if retro_btn_w(ui, "IMPORT", 80.0, false).clicked() {
                         acts.push(Action::ImportIreal(Some(ti)));
@@ -683,7 +683,7 @@ impl App {
             }
             ui.horizontal(|ui| {
                 let w = (ui.available_width() - 90.0).max(80.0);
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(w, BTN_H), Sense::hover());
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(w, bh()), Sense::hover());
                 let o = field(ui, &mut self.ed, F_CHART_Q, &mut self.chart_q, rect, "Other title or lyrics of the song", false);
                 if (o.enter || retro_btn_w(ui, "FIND", 80.0, false).clicked()) && !self.chart_q.trim().is_empty() {
                     let q = self.chart_q.trim().to_string();

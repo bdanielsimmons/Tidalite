@@ -19,7 +19,26 @@ fn modern() -> bool {
 }
 
 fn mfont(px: f32) -> egui::FontId {
-    egui::FontId::proportional((px * 7.4).max(9.0))
+    egui::FontId::proportional((px * 7.4 * ui_scale()).max(9.0))
+}
+
+// ------------------------------------------------------------ panel scale
+thread_local! {
+    static SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+/// How much bigger (or smaller) text and controls are drawn right now: 1 normally; a panel that scales its
+/// contents with its size (the practice panel) sets it while it draws (see `with_scale`).
+pub fn ui_scale() -> f32 {
+    SCALE.with(|s| s.get())
+}
+
+/// Draw `f` with everything (text, buttons, icons) `s` times its usual size.
+pub fn with_scale<R>(s: f32, f: impl FnOnce() -> R) -> R {
+    let was = SCALE.with(|c| c.replace(s));
+    let r = f();
+    SCALE.with(|c| c.set(was));
+    r
 }
 
 fn mw(text: &str, px: f32) -> f32 {
@@ -52,9 +71,19 @@ pub fn thick(k: f32) -> f32 {
     (k * p).round().max(1.0) / p
 }
 
-/// Pixel size of one font dot: always a whole number of physical pixels.
+/// Pixel size of one font dot: always a whole number of physical pixels (and as scaled as the panel drawing it).
 pub fn spx(px: f32) -> f32 {
-    thick(px)
+    thick(px * ui_scale())
+}
+
+/// Width of pixel-font text whose dots are already `d` wide.
+fn pw(text: &str, d: f32) -> f32 {
+    let n: f32 = text.chars().map(adv).sum();
+    if n == 0.0 {
+        0.0
+    } else {
+        n * d - d
+    }
 }
 
 // ------------------------------------------------------------------ glyphs
@@ -243,7 +272,7 @@ fn adv(c: char) -> f32 {
 /// size `px` maps to about this many points.
 fn skin_size(px: f32) -> f32 {
     // never below 12 points, so small labels stay readable
-    (px * 8.0).max(12.0)
+    (px * 8.0).max(12.0) * ui_scale()
 }
 
 fn skinned() -> bool {
@@ -263,13 +292,7 @@ pub fn text_w(text: &str, px: f32) -> f32 {
     if skinned() || modern() {
         return sw(text, px);
     }
-    let px = spx(px);
-    let n: f32 = text.chars().map(adv).sum();
-    if n == 0.0 {
-        0.0
-    } else {
-        n * px - px
-    }
+    pw(text, spx(px))
 }
 
 // ------------------------------------------------------------------ atlas
@@ -338,8 +361,12 @@ pub fn ptext(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, col
         p.text(Pos2::new(anchor.x, anchor.y + 0.5), al, text, mfont(px), color);
         return w;
     }
-    let px = spx(px);
-    let w = text_w(text, px);
+    draw_dots(p, anchor, h, text, spx(px), color)
+}
+
+/// Pixel-font text whose dots are already `px` wide.
+fn draw_dots(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32, color: Color32) -> f32 {
+    let w = pw(text, px);
     let Some(tex) = TEX.get().copied() else { return w };
     let mut x = snap(match h {
         Align::Min => anchor.x,
@@ -375,10 +402,10 @@ pub fn ptext_fit(p: &egui::Painter, anchor: Pos2, h: Align, text: &str, px: f32,
     }
     let mut k = spx(px);
     let step = thick(1.0);
-    while k > thick(1.0) && text_w(text, k) > max_w {
+    while k > thick(1.0) && pw(text, k) > max_w {
         k -= step;
     }
-    ptext(p, anchor, h, text, k, color);
+    draw_dots(p, anchor, h, text, k, color);
 }
 
 /// Shorten with "..." so the text fits `max_w`.
@@ -402,7 +429,7 @@ pub fn fit(text: &str, px: f32, max_w: f32) -> String {
         return format!("{}...", t.trim_end());
     }
     let px = spx(px);
-    let limit = max_w - text_w("...", px) - px;
+    let limit = max_w - pw("...", px) - px;
     let mut acc = 0.0f32;
     let mut end = 0usize;
     for (i, c) in text.char_indices() {

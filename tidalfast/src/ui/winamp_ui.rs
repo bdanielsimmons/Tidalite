@@ -54,8 +54,9 @@ impl Place {
     fn fit(area: Rect) -> Place {
         let ppp = font::ppp();
         let fit = (area.width() / 275.0).min(area.height() / 116.0);
-        // whole screen pixels per skin pixel, so the art stays crisp
-        let s = ((fit * ppp).floor().max(1.0)) / ppp;
+        // whole screen pixels per skin pixel, so the art stays crisp; in a panel too small for even one, it shrinks
+        // to fit rather than spilling over the edges
+        let s = if fit * ppp >= 1.0 { (fit * ppp).floor() / ppp } else { fit.max(0.2) };
         // the corner on a whole screen pixel too, so every skin pixel lands exactly on screen pixels
         let snap = |v: f32| (v * ppp).round() / ppp;
         Place { o: Pos2::new(snap(area.center().x - 137.5 * s), snap(area.center().y - 58.0 * s)), s }
@@ -196,11 +197,13 @@ pub(crate) fn draw_frame(p: &egui::Painter, outer: Rect, inner: Rect, title: &st
             x += tw;
         }
         piece(p, tex, *size, (0.0, 0.0, 25.0, 20.0), Rect::from_min_size(top.min, Vec2::new(tw, top_h)));
+        // the right end is a plain piece: the skin's own corner has minimize / close buttons, which would do
+        // nothing on these windows
         piece(
             p,
             tex,
             *size,
-            (153.0, 0.0, 25.0, 20.0),
+            (127.0, 0.0, 25.0, 20.0),
             Rect::from_min_size(Pos2::new(outer.max.x - tw, top.min.y), Vec2::new(tw, top_h)),
         );
         // the sides: the skin's edge tiles, repeated down
@@ -441,14 +444,17 @@ impl App {
                 t.spr(&p, digits, (d as f32 * 9.0, 0.0, 9.0, 13.0), pl.r(x, 26.0, 9.0, 13.0));
             }
         }
-        // the scrolling title
-        let title = match &track {
-            Some(tr) => format!("{} - {} ({})", tr.artists_text(), tr.title, fmt_time(tr.duration)),
-            None => "TIDALITE - A RETRO PLAYER FOR TIDAL".to_string(),
+        // the scrolling title; while a slider is hovered or dragged it says where that slider is, as Winamp does
+        let hint_id = id.with("hint");
+        let hint: Option<String> = ui.ctx().data_mut(|d| d.remove_temp(hint_id));
+        let title = match (&hint, &track) {
+            (Some(h), _) => h.clone(),
+            (None, Some(tr)) => format!("{} - {} ({})", tr.artists_text(), tr.title, fmt_time(tr.duration)),
+            (None, None) => "TIDALITE - A RETRO PLAYER FOR TIDAL".to_string(),
         };
         let marquee = pl.r(111.0, 24.0, 154.0, 6.0);
         let w = title.chars().count() as f32 * 5.0;
-        let shift = if w > 154.0 { ((ui.input(|i| i.time) as f32 * 22.0) % (w + 25.0)).floor() } else { 0.0 };
+        let shift = if w > 154.0 && hint.is_none() { ((ui.input(|i| i.time) as f32 * 22.0) % (w + 25.0)).floor() } else { 0.0 };
         let clip = p.with_clip_rect(marquee);
         wa_text(&t, &clip, pl, 111.0 - shift, 24.0, &title);
         if w > 154.0 {
@@ -495,6 +501,10 @@ impl App {
                 acts.push(Action::Volume(((pp.x - vr.min.x - pl.s * 7.0) / (pl.s * 54.0)).clamp(0.0, 1.0)));
             }
         }
+        let mut say: Option<String> = None;
+        if vh.hovered() || vh.dragged() {
+            say = Some(format!("VOLUME: {}%", (self.volume * 100.0).round()));
+        }
         vh.context_menu(|ui| self.output_menu(ui, acts));
         // balance: left / right; double-click to centre it again
         let br = pl.r(177.0, 57.0, 38.0, 13.0);
@@ -510,6 +520,13 @@ impl App {
         if t.size(bal).map_or(false, |s| s.y >= 433.0) {
             let src = if bh.dragged() { (0.0, 422.0, 14.0, 11.0) } else { (15.0, 422.0, 14.0, 11.0) };
             t.spr(&p, bal, src, pl.r(177.0 + (self.balance + 100) as f32 / 200.0 * 24.0, 58.0, 14.0, 11.0));
+        }
+        if bh.hovered() || bh.dragged() {
+            say = Some(match self.balance {
+                0 => "BALANCE: CENTER".to_string(),
+                b if b < 0 => format!("BALANCE: {}% LEFT", -b),
+                b => format!("BALANCE: {}% RIGHT", b),
+            });
         }
         if bh.double_clicked() {
             acts.push(Action::Balance(0));
@@ -560,11 +577,19 @@ impl App {
                     self.seek_drag = Some(((pp.x - pr.min.x - 14.5 * pl.s) / (219.0 * pl.s)).clamp(0.0, 1.0) * dur);
                 }
             }
+            if ph.dragged() || ph.hovered() {
+                let at = self.seek_drag.unwrap_or(pos);
+                say = Some(format!("SEEK TO: {}/{} ({}%)", fmt_time(at), fmt_time(dur), (at / dur * 100.0).round()));
+            }
             if ph.drag_stopped() || ph.clicked() {
                 if let Some(s) = self.seek_drag.take() {
                     acts.push(Action::Seek(s));
                 }
             }
+        }
+        if let Some(s) = say {
+            ui.ctx().data_mut(|d| d.insert_temp(hint_id, s));
+            ui.ctx().request_repaint();
         }
         // transport
         let buttons: [(&str, f32, f32, f32, Action, &str); 5] = [
@@ -598,9 +623,19 @@ impl App {
             acts.push(Action::Shuffle);
         }
         let rp = pl.r(210.0, 89.0, 28.0, 15.0);
-        let rph = hit(ui, "repeat", rp, false).tip("Repeat (all, then one track)");
+        let rph = hit(ui, "repeat", rp, false).tip(match self.repeat {
+            Repeat::Off => "Repeat: off  (click: repeat all)",
+            Repeat::All => "Repeat: all  (click: repeat this song)",
+            _ => "Repeat: this song  (click: off)",
+        });
         let ry = if self.repeat != Repeat::Off { 30.0 } else { 0.0 } + if rph.is_pointer_button_down_on() { 15.0 } else { 0.0 };
         t.spr(&p, "shufrep", (0.0, ry, 28.0, 15.0), rp);
+        // Winamp's button has only on / off: repeating one song gets a small "1" in the skin's own font, in the
+        // button's corner, so every skin shows which it is
+        if self.repeat == Repeat::One {
+            p.rect_filled(pl.r(231.0, 90.0, 6.0, 7.0), 0.0, t.vis.first().copied().unwrap_or(Color32::BLACK));
+            wa_text(&t, &p, pl, 232.0, 90.5, "1");
+        }
         if rph.clicked() {
             acts.push(Action::Repeat);
         }
@@ -679,7 +714,7 @@ impl App {
             let c = t.graph.get((y - 17.0) as usize).copied().unwrap_or(Color32::YELLOW);
             p.rect_filled(pl.r(86.0 + x as f32, y, 1.0, 1.0), 0.0, c);
         }
-        // the preamp slider (Tidalite has none: it sits in the middle) and the ten bands
+        // the preamp slider (a plain gain before the bands) and the ten bands
         let band = |p: &egui::Painter, x: f32, value: f32, down: bool| {
             let n = (value / 100.0 * 27.0).round().clamp(0.0, 27.0) as i32;
             let (sx, sy) = ((n % 14) as f32 * 15.0, (n / 14) as f32 * 65.0);
@@ -687,7 +722,27 @@ impl App {
             let ty = 38.0 + (1.0 - value / 100.0) * 51.0;
             t.spr(p, "eqmain", (0.0, if down { 176.0 } else { 164.0 }, 11.0, 11.0), pl.r(x + 1.0, ty, 11.0, 11.0));
         };
-        band(&p, 21.0, 50.0, false);
+        let pr = pl.r(21.0, 38.0, 14.0, 63.0);
+        let ph = ui.interact(pr, id.with("preamp"), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand).tip(
+            format!("Preamp: {:+} dB, louder or softer before the bands  (double-click to reset)", self.eq_pre.round() as i32),
+        );
+        if ph.dragged() || ph.clicked() {
+            if let Some(pp) = ph.interact_pointer_pos() {
+                let f = ((pp.y - pr.min.y - 5.5 * pl.s) / (51.0 * pl.s)).clamp(0.0, 1.0);
+                let mut g = ((12.0 - 24.0 * f) * 2.0).round() / 2.0;
+                if g.abs() < 0.75 {
+                    g = 0.0;
+                }
+                self.eq_pre = g;
+                self.eq_on = true;
+                changed = true;
+            }
+        }
+        if ph.double_clicked() {
+            self.eq_pre = 0.0;
+            changed = true;
+        }
+        band(&p, 21.0, (self.eq_pre + 12.0) / 24.0 * 100.0, ph.dragged());
         for i in 0..10 {
             let x = 78.0 + i as f32 * 18.0;
             let r = pl.r(x, 38.0, 14.0, 63.0);
@@ -951,8 +1006,9 @@ impl PixFont {
                 for gy in 0..pl.height as i32 {
                     for gx in 0..pl.width as i32 {
                         let c = img.data[(gy * pl.width as i32 + gx) as usize];
-                        // hinted outlines sit on the pixel grid, so half coverage is the honest cut
-                        if c >= if embedded { 1 } else { 128 } {
+                        // hinted outlines sit on the pixel grid; a stroke a little off it still counts (a quarter
+                        // covered), so light fonts like Courier keep every stroke at small sizes
+                        if c >= if embedded { 1 } else { 64 } {
                             let (dx, dy) = (x + pl.left + gx, 1 + asc - pl.top + gy);
                             if dx >= 0 && dy >= 0 && (dx as usize) < w && (dy as usize) < h {
                                 px[dy as usize * w + dx as usize] = 255;
@@ -1127,7 +1183,12 @@ impl App {
         let Some(t) = self.wa_art.take() else { return };
         let p = ui.painter().clone();
         let ppp = font::ppp();
-        let k = ((1.5 * ppp).round().max(1.0)) / ppp;
+        // the window's pieces and the text grow and shrink with the playlist (its width and its height; whole screen
+        // pixels, so the skin stays crisp)
+        // fluid (no steps), and gentle: the square root of the size change
+        let fit = (outer.width() / 480.0).min(outer.height() / 220.0).max(0.1);
+        let k = (1.5 * fit.sqrt()).clamp(0.8, 3.0);
+        let _ = ppp;
         let id = ui.id().with("winamp_playlist");
         let piece = |src: (f32, f32, f32, f32), dst: Rect| {
             t.spr(&p, "pledit", src, dst);
