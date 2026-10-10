@@ -2687,21 +2687,6 @@ impl App {
         if let Some(list) = st["wa_recent"].as_array() {
             app.wa_recent = list.iter().filter_map(|v| Some((v[0].as_str()?.to_string(), v[1].as_str()?.to_string()))).collect();
         }
-        if let Some(g) = st["winamp"][0].as_str().and_then(|m| m.strip_prefix("gen:")).and_then(|g| g.parse::<usize>().ok()) {
-            app.apply(Action::WaGen(g));
-        } else if st["winamp"].is_null() && st["plain"].as_bool() != Some(true) {
-            // the SLEEK style unless PLAIN was picked
-            app.apply(Action::WaGen(2));
-        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
-            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
-            let (tx, ctx) = (app.tx.clone(), app.ctx.clone());
-            std::thread::spawn(move || {
-                if let Some(b) = winamp::load_saved(&s.md5) {
-                    let _ = tx.send(Msg::WaSkin(winamp::load(&b).map(|(p, art)| (s, p, art))));
-                    ctx.request_repaint();
-                }
-            });
-        }
         if let Some(b) = st["balance"].as_i64() {
             app.balance = (b as i32).clamp(-100, 100);
             app.player.ctl.set_balance(app.balance);
@@ -2710,6 +2695,24 @@ impl App {
             app.pl_font = (f as usize).min(winamp_ui::PL_FONTS.len() - 1);
         }
         app.eq_auto = st["eq_auto"].as_bool().unwrap_or(false);
+        // the skin worn last time (SLEEK unless PLAIN was picked), put on before the first frame so the window
+        // opens already wearing it, with no glimpse of the plain look
+        let gen = match st["winamp"][0].as_str() {
+            Some(m) => m.strip_prefix("gen:").and_then(|g| g.parse::<usize>().ok()),
+            None if st["plain"].as_bool() != Some(true) => Some(2),
+            None => None,
+        };
+        if let Some(g) = gen.filter(|g| *g > 0) {
+            let n = SKIN.load(Ordering::Relaxed) % PALS.len();
+            let look = (g - 1).min(genskin::LOOKS.len() - 1);
+            let s = app.gen_skin(n, look);
+            app.wear_skin(genskin::wear(&PALS[n], look).map(|(p, art)| (s, p, art)), false);
+        } else if let (Some(md5), Some(name)) = (st["winamp"][0].as_str(), st["winamp"][1].as_str()) {
+            let s = winamp::WaSkin { md5: md5.to_string(), name: name.to_string(), shot: String::new(), download: String::new() };
+            if let Some(b) = winamp::load_saved(&s.md5) {
+                app.wear_skin(winamp::load(&b).map(|(p, art)| (s, p, art)), false);
+            }
+        }
         if let Some(m) = st["eq_songs"].as_object() {
             for (k, v) in m {
                 let g: Vec<f32> =
