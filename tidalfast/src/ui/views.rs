@@ -931,7 +931,7 @@ impl App {
                         acts.push(Action::Enqueue(t.clone()));
                         ui.close_menu();
                     }
-                    crate::goto_items(ui, acts, t.id, tidal);
+                    crate::goto_items(ui, acts, &t, tidal);
                     if k > 0 && menu_item(ui, "Move up") {
                         acts.push(Action::PlaylistMove(pi, k, -1));
                         ui.close_menu();
@@ -1194,7 +1194,7 @@ impl App {
                         ui.close_menu();
                     }
                     let tidal = self.ext_of(vtracks[vi].id).is_none();
-                    crate::goto_items(ui, acts, vtracks[vi].id, tidal);
+                    crate::goto_items(ui, acts, &vtracks[vi], tidal);
                     crate::link_item(ui, acts, crate::track_link(&vtracks[vi], self.ext_of(vtracks[vi].id).as_ref()));
                     if menu_item(ui, "Remove from this tune") {
                         acts.push(Action::RemoveVersion(i, vi));
@@ -1253,7 +1253,7 @@ impl App {
                     ui,
                     k,
                     Some(k + 1),
-                    || format!("{} - {}", t.artist, t.title),
+                    || format!("{} - {}", t.artists_text(), t.title),
                     || format!("{}\t{}", pops[k], fmt_time(t.duration)),
                     state,
                     false,

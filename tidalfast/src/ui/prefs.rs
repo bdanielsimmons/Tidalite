@@ -351,3 +351,54 @@ impl App {
             });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_keys_are_usable() {
+        let d = default_binds();
+        for (i, k) in d.iter().enumerate() {
+            let k = k.unwrap();
+            assert!(!reserved(k), "{} uses a reserved key", CMDS[i].id);
+            for j in 0..i {
+                assert_ne!(d[j], Some(k), "{} and {} share {:?}", CMDS[j].id, CMDS[i].id, k);
+            }
+        }
+        // ids are what settings.json stores: they must be unique
+        for (i, c) in CMDS.iter().enumerate() {
+            assert!(CMDS[..i].iter().all(|o| o.id != c.id), "duplicate id {}", c.id);
+        }
+    }
+
+    #[test]
+    fn keys_round_trip_through_settings() {
+        let mut b = default_binds();
+        b[0] = Some(Key::Q);
+        b[1] = None;
+        assert_eq!(binds_from_json(&binds_to_json(&b)), b);
+    }
+
+    #[test]
+    fn bad_settings_are_cleaned_up() {
+        // missing entries keep defaults; a reserved or doubled key is dropped
+        let v = serde_json::json!({ CMDS[0].id: "Escape", CMDS[2].id: CMDS[1].def.name(), "unknown": "Q" });
+        let b = binds_from_json(&v);
+        assert_eq!(b[0], None, "Escape can't be taken");
+        assert_eq!(b[1], Some(CMDS[1].def));
+        assert_eq!(b[2], None, "same key as the command before it");
+        assert_eq!(b[3], Some(CMDS[3].def));
+        assert_eq!(binds_from_json(&serde_json::json!("nonsense")), default_binds());
+    }
+
+    #[test]
+    fn key_names() {
+        assert_eq!(key_label(Key::ArrowLeft), "LEFT");
+        assert_eq!(key_label(Key::Num3), "3");
+        assert_eq!(key_label(Key::OpenBracket), "[");
+        assert_eq!(key_label(Key::Backslash), "\\");
+        assert_eq!(key_label(Key::Space), "SPACE");
+        assert_eq!(key_label(Key::P), "P");
+    }
+}

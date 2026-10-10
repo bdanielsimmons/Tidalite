@@ -139,3 +139,16 @@ pub fn fmt_size(b: u64) -> String {
         format!("{} KB", b / 1024)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizes() {
+        assert_eq!(fmt_size(0), "0 KB");
+        assert_eq!(fmt_size(1536), "1 KB");
+        assert_eq!(fmt_size(5 << 20), "5 MB");
+        assert_eq!(fmt_size(3 << 29), "1.5 GB");
+    }
+}

@@ -119,15 +119,16 @@ impl App {
         let tb = rc(112.0, 6.0, 182.0, 14.0);
         inset(p, tb, pal().lcd);
         let title_txt = match &track {
-            Some(t) => format!("{} - {}  ({})", t.artist, t.title, fmt_time(t.duration)),
+            Some(t) => format!("{} - {}  ({})", t.artists_text(), t.title, fmt_time(t.duration)),
             None => format!("Tidalite {} - a retro player for Tidal", VERSION),
         };
         marquee(ui, tb, &title_txt, px_big, pal().ink);
         // right-click the playing song: its album, artist or radio
-        if let Some(id) = track.as_ref().map(|t| t.id).filter(|id| self.ext_of(*id).is_none()) {
+        if let Some(t) = track.as_ref().filter(|t| self.ext_of(t.id).is_none()) {
+            let t = (*t).clone();
             let tr = ui.interact(tb, ui.id().with("title_menu"), Sense::click());
-            tr.tip("Right-click: go to the album, the artist or the track radio").context_menu(|ui| {
-                goto_items(ui, acts, id, true);
+            tr.tip("Right-click: go to the album, the artist or the track radio, or see the credits").context_menu(|ui| {
+                goto_items(ui, acts, &t, true);
             });
         }
 
@@ -140,7 +141,7 @@ impl App {
         } else if self.loading {
             ("LOADING...".to_string(), pal().ink2)
         } else if let (true, Some(n)) = (active, &next) {
-            (format!("NEXT: {} - {}", n.artist, n.title), pal().ink2)
+            (format!("NEXT: {} - {}", n.artists_text(), n.title), pal().ink2)
         } else if active {
             ("END OF QUEUE".to_string(), pal().ink2)
         } else {
@@ -536,7 +537,7 @@ impl App {
                                 ui,
                                 i,
                                 Some(i + 1),
-                                || format!("{} - {}", t.artist, t.title),
+                                || format!("{} - {}", t.artists_text(), t.title),
                                 || fmt_time(t.duration),
                                 state,
                                 true,
@@ -558,7 +559,7 @@ impl App {
                                         acts.push(Action::ToggleLike(t.clone()));
                                         ui.close_menu();
                                     }
-                                    goto_items(ui, acts, t.id, tidal);
+                                    goto_items(ui, acts, &t, tidal);
                                     if menu_item(ui, "Play now") {
                                         acts.push(Action::PlayIndex(i));
                                         ui.close_menu();

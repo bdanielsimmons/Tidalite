@@ -130,7 +130,7 @@ impl App {
             let cx = art_zone.center().x;
             let y0 = art_zone.max.y - caption_h + 14.0;
             let w = art_zone.width() - 60.0;
-            let sub = format!("{} - {}", tr.artist, tr.album);
+            let sub = format!("{} - {}", tr.artists_text(), tr.album);
             // a soft dark plate sized to the words, so they stay readable over the visualizer
             let tw = text_w(&tr.title, 3.0).max(text_w(&sub, 2.0)).min(w);
             let plate =

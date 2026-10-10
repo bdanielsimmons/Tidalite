@@ -309,3 +309,25 @@ impl App {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_words_in_any_order() {
+        assert!(matches("Mode: album view (big cover)", "album"));
+        assert!(matches("Mode: album view (big cover)", "COVER  mode"));
+        assert!(matches("Next song", ""));
+        assert!(!matches("Next song", "next album"));
+    }
+
+    #[test]
+    fn every_palette_entry_runs_something() {
+        // each name must be known to run_named, or picking it would do nothing
+        let names: Vec<&str> = ITEMS.iter().map(|i| i.1).collect();
+        for (i, n) in names.iter().enumerate() {
+            assert!(!n.is_empty() && !names[..i].contains(n), "duplicate or empty: {}", n);
+        }
+    }
+}

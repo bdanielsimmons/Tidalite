@@ -74,10 +74,26 @@ pub fn log_text() -> String {
 pub struct Track {
     pub id: i64,
     pub title: String,
+    /// the main artist (what lookups search by)
     pub artist: String,
+    /// everyone credited on the track, main artist first (Tidal tracks; empty for files, YouTube...)
+    pub artists: Vec<(i64, String)>,
     pub album: String,
     pub cover: String,
     pub duration: f32,
+}
+
+impl Track {
+    /// All the artists, kept short: "A", "A & B", "A, B & C", then "A, B, C +2".
+    pub fn artists_text(&self) -> String {
+        let names: Vec<&str> = self.artists.iter().map(|a| a.1.as_str()).collect();
+        match names.len() {
+            0 => self.artist.clone(),
+            1 => names[0].to_string(),
+            n @ (2 | 3) => format!("{} & {}", names[..n - 1].join(", "), names[n - 1]),
+            n => format!("{} +{}", names[..3].join(", "), n - 3),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -211,6 +227,13 @@ fn parse_track(v: &Value) -> Option<Track> {
         }
     }
     let artist = t["artist"]["name"].as_str().or_else(|| t["artists"][0]["name"].as_str()).unwrap_or("").to_string();
+    let mut artists: Vec<(i64, String)> =
+        arr(&t["artists"]).iter().filter_map(|a| Some((a["id"].as_i64()?, a["name"].as_str()?.to_string()))).collect();
+    if artists.is_empty() {
+        if let Some(id) = t["artist"]["id"].as_i64() {
+            artists.push((id, artist.clone()));
+        }
+    }
     // tempo and key, when Tidal has them for this track
     let bpm = t["bpm"].as_f64().filter(|b| *b > 0.0).map(|b| b.round() as u16);
     let key = t["key"].as_str().and_then(|k| crate::meta::parse_key(k, t["keyScale"].as_str().unwrap_or("")));
@@ -221,6 +244,7 @@ fn parse_track(v: &Value) -> Option<Track> {
         id,
         title,
         artist,
+        artists,
         album: t["album"]["title"].as_str().unwrap_or("").to_string(),
         cover: t["album"]["cover"].as_str().unwrap_or("").to_string(),
         duration: t["duration"].as_f64().unwrap_or(0.0) as f32,
@@ -252,6 +276,25 @@ fn parse_lrc(s: &str) -> Vec<(f32, String)> {
     }
     out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     out
+}
+
+/// Tidal's credits list: [{"type": "Producer", "contributors": [{"name": ...}, ...]}, ...]
+fn parse_credits(v: &Value) -> Vec<(String, String)> {
+    arr(v)
+        .iter()
+        .filter_map(|role| {
+            let names: Vec<&str> = arr(&role["contributors"]).iter().filter_map(|p| p["name"].as_str()).collect();
+            // some roles arrive squashed ("BassVocalist"): space them out
+            let mut role_name = String::new();
+            for (i, c) in role["type"].as_str()?.chars().enumerate() {
+                if i > 0 && c.is_uppercase() && !role_name.ends_with(' ') {
+                    role_name.push(' ');
+                }
+                role_name.push(c);
+            }
+            Some((role_name, names.join(", "))).filter(|_| !names.is_empty())
+        })
+        .collect()
 }
 
 fn tracks_from(items: &[Value]) -> Vec<Track> {
@@ -983,6 +1026,15 @@ impl Api {
                 p.tracks = tracks_from(&items);
             }
             Kind::Artist => {
+                // reached from a track (go to artist), there is no picture yet: ask for the artist itself
+                if p.image.is_empty() {
+                    if let Ok(a) = self.get(&format!("/artists/{}", c.id), &[]) {
+                        p.image = image_url(a["picture"].as_str().unwrap_or(""), 320, 320);
+                        if let Some(name) = a["name"].as_str() {
+                            p.title = name.to_string();
+                        }
+                    }
+                }
                 let v = self.get(&format!("/artists/{}/toptracks", c.id), &[("limit", "30")])?;
                 p.tracks = tracks_from(arr(&v["items"]));
                 if let Ok(a) = self.get(&format!("/artists/{}/albums", c.id), &[("limit", "30")]) {
@@ -1042,6 +1094,12 @@ impl Api {
         self.open(&card)
     }
 
+    /// Who made a track: (role, names), e.g. ("Producer", "Kaytranada"). Empty when Tidal has none.
+    pub fn credits(&self, id: i64) -> Res<Vec<(String, String)>> {
+        let v = self.get(&format!("/tracks/{}/credits", id), &[("limit", "100")])?;
+        Ok(parse_credits(&v))
+    }
+
     // -------------------------------------------------------------- playback
 
     /// Direct audio URL for a track. Lossless first (if allowed), then 320k AAC, then low.
@@ -1098,5 +1156,121 @@ impl Api {
         let msg = errs.join(" | ");
         log(&format!("track {} FAILED: {}", id, msg));
         Err(msg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn image_urls() {
+        assert_eq!(cover_url("ab-cd-ef", 320), "https://resources.tidal.com/images/ab/cd/ef/320x320.jpg");
+        assert_eq!(image_url("ab-cd", 320, 214), "https://resources.tidal.com/images/ab/cd/320x214.jpg");
+        assert_eq!(cover_url("", 320), "");
+        // YouTube thumbnails are full links already
+        assert_eq!(cover_url("https://i.ytimg.com/vi/x/hq.jpg", 80), "https://i.ytimg.com/vi/x/hq.jpg");
+    }
+
+    #[test]
+    fn tracks_plain_and_wrapped() {
+        let plain = json!({"id": 1, "title": "So What", "artist": {"name": "Miles Davis"},
+            "album": {"title": "Kind of Blue", "cover": "c-1"}, "duration": 562});
+        let t = parse_track(&plain).unwrap();
+        assert_eq!((t.id, t.title.as_str(), t.artist.as_str(), t.album.as_str()), (1, "So What", "Miles Davis", "Kind of Blue"));
+        assert_eq!((t.cover.as_str(), t.duration), ("c-1", 562.0));
+        // playlist items come wrapped, and the version goes into the title
+        let wrapped = json!({"type": "track", "item": {"id": 2, "title": "Blue in Green", "version": "Take 2",
+            "artists": [{"name": "Bill Evans"}], "album": {"title": "x"}}});
+        let t = parse_track(&wrapped).unwrap();
+        assert_eq!((t.title.as_str(), t.artist.as_str()), ("Blue in Green (Take 2)", "Bill Evans"));
+    }
+
+    #[test]
+    fn tracks_that_are_not_tracks() {
+        assert!(parse_track(&json!({"type": "video", "item": {"id": 3, "title": "v", "album": {}}})).is_none());
+        // no album = an artist, a playlist... not a track
+        assert!(parse_track(&json!({"id": 4, "title": "x"})).is_none());
+        assert!(parse_track(&json!({"title": "no id", "album": {}})).is_none());
+        let list =
+            [json!({"id": 5, "title": "a", "album": {}}), json!({"type": "video"}), json!({"id": 6, "title": "b", "album": {}})];
+        assert_eq!(tracks_from(&list).iter().map(|t| t.id).collect::<Vec<_>>(), vec![5, 6]);
+    }
+
+    #[test]
+    fn tidal_tempo_and_key_reach_the_table() {
+        parse_track(&json!({"id": 777001, "title": "t", "album": {}, "bpm": 121.6, "key": "FSharp", "keyScale": "MINOR"}));
+        let i = crate::meta::get(777001).unwrap();
+        assert_eq!((i.bpm, i.key, i.tidal), (Some(122), Some(12 + 6), true));
+        // 0 bpm and unknown keys are "not known", not values
+        parse_track(&json!({"id": 777002, "title": "t", "album": {}, "bpm": 0, "key": "UNKNOWN", "keyScale": "UNKNOWN"}));
+        assert!(crate::meta::get(777002).is_none());
+    }
+
+    #[test]
+    fn lyrics_lines() {
+        // tags like [ar:...] and untimed lines are skipped; a line can carry several times
+        let l = parse_lrc("[ar:Someone]\n[00:12.50] second\n[00:01.00][01:00.00] first and again\nno time\n[00:05]tight");
+        let times: Vec<f32> = l.iter().map(|x| x.0).collect();
+        assert_eq!(times, vec![1.0, 5.0, 12.5, 60.0]);
+        let words: Vec<&str> = l.iter().map(|x| x.1.as_str()).collect();
+        assert_eq!(words, vec!["first and again", "tight", "second", "first and again"]);
+    }
+
+    #[test]
+    fn several_artists_kept_short() {
+        let mut t = parse_track(&json!({"id": 21, "title": "x", "album": {}, "artist": {"id": 1, "name": "Main"},
+            "artists": [{"id": 1, "name": "Main"}, {"id": 2, "name": "Guest"}]}))
+        .unwrap();
+        assert_eq!(t.artist, "Main", "lookups still use the main artist");
+        assert_eq!(t.artists, vec![(1, "Main".to_string()), (2, "Guest".to_string())]);
+        assert_eq!(t.artists_text(), "Main & Guest");
+        t.artists.push((3, "Third".to_string()));
+        assert_eq!(t.artists_text(), "Main, Guest & Third");
+        t.artists.extend([(4, "D".to_string()), (5, "E".to_string())]);
+        assert_eq!(t.artists_text(), "Main, Guest, Third +2");
+        // only the old single "artist" field: still one artist to go to
+        let t = parse_track(&json!({"id": 22, "title": "x", "album": {}, "artist": {"id": 9, "name": "Solo"}})).unwrap();
+        assert_eq!((t.artists.clone(), t.artists_text()), (vec![(9, "Solo".to_string())], "Solo".to_string()));
+        // files and clips have no artist list: the plain name is shown
+        let f = Track { artist: "Someone".to_string(), ..Default::default() };
+        assert_eq!(f.artists_text(), "Someone");
+    }
+
+    #[test]
+    fn credits_list() {
+        let v = json!([
+            {"type": "Producer", "contributors": [{"name": "Kaytranada"}]},
+            {"type": "BassVocalist", "contributors": [{"name": "A"}, {"name": "B"}]},
+            {"type": "Mastering Engineer", "contributors": [{"name": "C"}]},
+            {"type": "Empty", "contributors": []},
+            {"contributors": [{"name": "no role"}]}
+        ]);
+        let c = parse_credits(&v);
+        let want: Vec<(String, String)> = [("Producer", "Kaytranada"), ("Bass Vocalist", "A, B"), ("Mastering Engineer", "C")]
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        assert_eq!(c, want);
+        assert!(parse_credits(&json!({"error": 1})).is_empty());
+    }
+
+    #[test]
+    fn cards_of_every_kind() {
+        let pl = parse_card(&json!({"uuid": "u-1", "title": "Mix", "squareImage": "s-q", "numberOfTracks": 12})).unwrap();
+        assert!(pl.kind == Kind::Playlist && pl.id == "u-1" && pl.subtitle == "12 tracks");
+        assert!(pl.image.ends_with("s/q/320x320.jpg"));
+        let mix = parse_card(
+            &json!({"id": "m1", "mixType": "TRACK_MIX", "title": "My Mix", "images": {"MEDIUM": {"url": "http://i"}}}),
+        )
+        .unwrap();
+        assert!(mix.kind == Kind::Mix && mix.id == "m1" && mix.image == "http://i");
+        let al = parse_card(&json!({"id": 9, "title": "Album", "cover": "c-v", "artists": [{"name": "A"}]})).unwrap();
+        assert!(al.kind == Kind::Album && al.id == "9" && al.subtitle == "A");
+        let ar = parse_card(&json!({"item": {"id": 10, "name": "Artist", "picture": "p-x"}})).unwrap();
+        assert!(ar.kind == Kind::Artist && ar.title == "Artist");
+        // a track is not a card
+        assert!(parse_card(&json!({"id": 11, "title": "t", "cover": "c", "album": {}})).is_none());
     }
 }

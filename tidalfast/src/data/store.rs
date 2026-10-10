@@ -46,6 +46,7 @@ impl Version {
             id: self.id,
             title: self.title.clone(),
             artist: self.artist.clone(),
+            artists: Vec::new(),
             album: self.album.clone(),
             cover: self.cover.clone(),
             duration: self.dur,
@@ -115,6 +116,7 @@ impl Ext {
             id: self.id,
             title: self.title.clone(),
             artist: self.artist.clone(),
+            artists: Vec::new(),
             album: String::new(),
             cover: self.cover.clone(),
             duration: self.dur,
@@ -338,4 +340,74 @@ pub fn hash_id(s: &str) -> i64 {
         h = h.wrapping_mul(0x100000001b3);
     }
     -((h & 0x3fff_ffff_ffff_ffff) as i64) - 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_round_trip() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2000, 3, 1), 11017);
+        assert_eq!(date_str(0), "1970-01-01");
+        // every day for ~60 years survives the trip, leap days included
+        for z in -3650..20000 {
+            let (y, m, d) = civil_from_days(z);
+            assert_eq!(days_from_civil(y, m, d), z);
+        }
+        assert_eq!(date_str(parse_date("2024-02-29").unwrap()), "2024-02-29");
+        assert_eq!(parse_date("2024-03-01").unwrap() - parse_date("2024-02-28").unwrap(), 2);
+        assert_eq!(parse_date("2023-03-01").unwrap() - parse_date("2023-02-28").unwrap(), 1);
+        assert_eq!(parse_date("garbage"), None);
+        assert_eq!(parse_date("2024-02"), None);
+    }
+
+    #[test]
+    fn weekdays() {
+        assert_eq!(weekday(0), "THU"); // 1970-01-01
+        assert_eq!(weekday(parse_date("2026-10-09").unwrap()), "FRI");
+        assert_eq!(weekday(-1), "WED");
+    }
+
+    #[test]
+    fn ids_for_files_never_clash_with_tidal() {
+        for s in ["", "a", "C:/music/song.flac", "yt:dQw4w9WgXcQ"] {
+            assert!(hash_id(s) < 0, "{}", s);
+            assert_eq!(hash_id(s), hash_id(s), "stable");
+        }
+        assert_ne!(hash_id("a"), hash_id("b"));
+    }
+
+    fn day(date: &str, secs: u32) -> Day {
+        let mut d = Day { date: date.to_string(), ..Default::default() };
+        d.secs.insert("tune".to_string(), secs);
+        d
+    }
+
+    #[test]
+    fn practice_streak() {
+        let today = parse_date("2026-10-09").unwrap();
+        let mut s = Store::default();
+        assert_eq!(s.streak(today), 0);
+        s.days = vec![day("2026-10-06", 300), day("2026-10-07", 120), day("2026-10-08", 600)];
+        // not practiced yet today: yesterday's streak still counts
+        assert_eq!(s.streak(today), 3);
+        s.days.push(day("2026-10-09", 90));
+        assert_eq!(s.streak(today), 4);
+        // under a minute is not a practice day, and it breaks the chain
+        s.days[1].secs.insert("tune".to_string(), 30);
+        assert_eq!(s.streak(today), 2);
+        assert_eq!(s.secs_on("2026-10-08"), 600);
+        assert_eq!(s.secs_on("2001-01-01"), 0);
+    }
+
+    #[test]
+    fn old_library_files_still_load() {
+        // fields added later default instead of failing the whole file
+        let s: Store = serde_json::from_str(r#"{"folders": ["C:/music"], "bpm": {"5": 120}}"#).unwrap();
+        assert_eq!(s.folders, vec!["C:/music".to_string()]);
+        assert_eq!(s.bpm.get(&5), Some(&120));
+        assert!(s.meta.is_empty() && s.playlists.is_empty());
+    }
 }

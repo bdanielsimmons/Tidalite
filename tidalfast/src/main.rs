@@ -35,6 +35,8 @@ mod update;
 
 #[path = "ui/album_view.rs"]
 mod album_view;
+#[path = "ui/credits.rs"]
+mod credits;
 #[path = "ui/font.rs"]
 mod font;
 #[path = "ui/help.rs"]
@@ -140,6 +142,8 @@ enum Msg {
     Beats(i64, Option<(f32, f32)>),
     /// tempo / key detected from a track's audio
     Meta(i64, meta::Info),
+    /// a track's credits: (role, names)
+    Credits(Result<Vec<(String, String)>, String>),
     /// stem separation finished for this track id
     Stems(#[allow(dead_code)] i64, Result<(), String>),
     /// the stem tool (runtime + model) finished downloading
@@ -177,10 +181,15 @@ enum Action {
     Open(Card),
     /// a track's album, artist or radio
     GoTo(i64, GoTo),
+    /// show who made a track (id, "artist - title")
+    Credits(i64, String),
+    /// a track with several artists: ask which one to open
+    PickArtist(Vec<(i64, String)>),
     Home,
     Library,
     Search(String),
     Back,
+    Forward,
     Tab(Tab),
     Play(Vec<Track>, usize),
     PlayShuffled(Vec<Track>),
@@ -1018,17 +1027,26 @@ fn list_row(
     Some(resp.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
 
-/// "Go to album / artist / track radio" for a Tidal track (files, YouTube and SoundCloud have none).
-fn goto_items(ui: &mut egui::Ui, acts: &mut Vec<Action>, id: i64, tidal: bool) {
+/// "Go to album / artist / track radio" and the credits, for a Tidal track (files, YouTube and SoundCloud have none).
+/// A track with several artists gets one entry per artist, so you pick which one.
+fn goto_items(ui: &mut egui::Ui, acts: &mut Vec<Action>, t: &Track, tidal: bool) {
     if !tidal {
         return;
     }
-    for (label, to) in [("Go to album", GoTo::Album), ("Go to artist", GoTo::Artist), ("Go to track radio", GoTo::Radio)] {
+    let mut go = |ui: &mut egui::Ui, label: &str, a: Action| {
         if menu_item(ui, label) {
-            acts.push(Action::GoTo(id, to));
+            acts.push(a);
             ui.close_menu();
         }
+    };
+    go(ui, "Go to album", Action::GoTo(t.id, GoTo::Album));
+    if t.artists.len() > 1 {
+        go(ui, "Go to artist...", Action::PickArtist(t.artists.clone()));
+    } else {
+        go(ui, "Go to artist", Action::GoTo(t.id, GoTo::Artist));
     }
+    go(ui, "Go to track radio", Action::GoTo(t.id, GoTo::Radio));
+    go(ui, "Show credits", Action::Credits(t.id, format!("{} - {}", t.artists_text(), t.title)));
 }
 
 /// Retro-styled entry for right-click menus. Returns true when clicked.
@@ -1475,7 +1493,7 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
             ui,
             i,
             Some(i + 1),
-            || track_cells(t.id, &t.title, &t.artist, &t.album),
+            || track_cells(t.id, &t.title, &t.artists_text(), &t.album),
             || if col_on(2) { fmt_time(t.duration) } else { String::new() },
             state,
             false,
@@ -1494,7 +1512,7 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
                     acts.push(Action::Enqueue(t.clone()));
                     ui.close_menu();
                 }
-                goto_items(ui, acts, t.id, true);
+                goto_items(ui, acts, t, true);
                 {
                     let lk = if liked.contains(&t.id) { "Remove from My Tracks" } else { "Add to My Tracks" };
                     if menu_item(ui, lk) {
@@ -1708,6 +1726,12 @@ struct App {
 
     page: Option<Arc<Page>>,
     back: Vec<Arc<Page>>,
+    /// pages left with Back, for Forward (cleared when you open something new)
+    fwd: Vec<Arc<Page>>,
+    /// the credits panel: which track, and its credits once they arrive
+    credits: Option<(String, Option<Result<Vec<(String, String)>, String>>)>,
+    /// the "which artist?" panel
+    artist_pick: Option<Vec<(i64, String)>>,
     serial: u64,
     lib_gen: u64,
     lib_tab: Tab,
@@ -2013,6 +2037,9 @@ impl App {
             login_err: String::new(),
             page: None,
             back: Vec::new(),
+            fwd: Vec::new(),
+            credits: None,
+            artist_pick: None,
             serial: 0,
             lib_gen: 0,
             lib_tab: Tab::Tracks,
@@ -2526,6 +2553,7 @@ impl App {
         self.dirty = true;
         self.login_code = None;
         self.back.clear();
+        self.fwd.clear();
         crate::api::log("logged in; loading library");
         self.load(false, |a| a.library());
     }
@@ -2586,6 +2614,7 @@ impl App {
                         if let Some(old) = self.page.take() {
                             self.back.push(old);
                         }
+                        self.fwd.clear();
                     }
                     self.page = Some(Arc::new(p));
                     self.serial += 1;
@@ -2962,11 +2991,13 @@ impl App {
             Action::Home => {
                 self.sec = Sec::Tidal;
                 self.back.clear();
+                self.fwd.clear();
                 self.load(false, |a| a.home());
             }
             Action::Library => {
                 self.sec = Sec::Tidal;
                 self.back.clear();
+                self.fwd.clear();
                 self.load(false, |a| a.library());
             }
             Action::Tab(t) => {
@@ -2987,9 +3018,28 @@ impl App {
                 self.sec = Sec::Tidal;
                 self.load(true, move |a| a.track_page(id, to))
             }
+            Action::PickArtist(list) => self.artist_pick = Some(list),
+            Action::Credits(id, label) => {
+                self.credits = Some((label, None));
+                let (api, tx, ctx) = (self.api.clone(), self.tx.clone(), self.ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Credits(api.credits(id)));
+                    ctx.request_repaint();
+                });
+            }
             Action::Back => {
                 if let Some(p) = self.back.pop() {
-                    self.page = Some(p);
+                    if let Some(cur) = self.page.replace(p) {
+                        self.fwd.push(cur);
+                    }
+                    self.serial += 1;
+                }
+            }
+            Action::Forward => {
+                if let Some(p) = self.fwd.pop() {
+                    if let Some(cur) = self.page.replace(p) {
+                        self.back.push(cur);
+                    }
                     self.serial += 1;
                 }
             }
@@ -3410,6 +3460,7 @@ impl App {
                 self.auth = Auth::LoggedOut;
                 self.page = None;
                 self.back.clear();
+                self.fwd.clear();
                 self.queue = Arc::new(Vec::new());
                 self.orig_queue = None;
                 self.cur = None;
@@ -3512,7 +3563,7 @@ impl eframe::App for App {
         self.sleep_tick();
         self.tick_practice();
         let mut title = match self.cur_track() {
-            Some(t) if !self.stopped => format!("{} - {}  |  Tidalite", t.artist, t.title),
+            Some(t) if !self.stopped => format!("{} - {}  |  Tidalite", t.artists_text(), t.title),
             _ => format!("Tidalite {}", VERSION),
         };
         if let (true, Some(end)) = (self.pomo > 0, self.pomo_end) {
@@ -3542,6 +3593,8 @@ impl eframe::App for App {
             if !self.search_focus
                 && self.ed.id == 0
                 && !self.show_help
+                && self.credits.is_none()
+                && self.artist_pick.is_none()
                 && !self.show_prefs
                 && !self.palette_open
                 && self.tour.is_none()
@@ -3560,6 +3613,19 @@ impl eframe::App for App {
             }
             if ctx.input(|i| i.key_pressed(egui::Key::F11)) {
                 acts.push(Action::ToggleFullscreen);
+            }
+            // the mouse's side buttons: back closes the album view, otherwise both walk the page history
+            let (m_back, m_fwd) = ctx.input(|i| {
+                (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2))
+            });
+            // (the other sections have no page history, so there they do nothing)
+            if m_back && self.art_view {
+                acts.push(Action::ToggleArt);
+            } else if m_back && self.sec == Sec::Tidal {
+                acts.push(Action::Back);
+            }
+            if m_fwd && !self.art_view && self.sec == Sec::Tidal {
+                acts.push(Action::Forward);
             }
 
             // lyrics are fetched on demand, only while the viewer is open
@@ -3670,6 +3736,8 @@ impl eframe::App for App {
         self.update_banner(ctx, &mut acts);
         self.floating_modes(ctx, &mut acts);
         self.help_overlay(ctx, &mut acts);
+        self.credits_overlay(ctx);
+        self.artist_picker(ctx, &mut acts);
         self.palette_overlay(ctx);
         self.prefs_overlay(ctx, &mut acts);
         // first time in: open the help on the tour page

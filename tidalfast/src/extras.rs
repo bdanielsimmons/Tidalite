@@ -810,6 +810,11 @@ impl App {
                 }
             },
             Msg::Menu(id) => self.run_named(&id),
+            Msg::Credits(r) => {
+                if let Some(c) = &mut self.credits {
+                    c.1 = Some(r);
+                }
+            }
             Msg::Meta(id, found) => {
                 crate::meta::set_detected(id, found);
                 self.store.meta = crate::meta::saved();

@@ -664,3 +664,92 @@ pub fn find_chart(name: &str) -> Result<(String, String, String), (String, Vec<S
         None => Err(("not in the free chart list (jazz standards only)".to_string(), crate::chart::suggest(&list, name, 5))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn youtube_ids_from_any_link() {
+        let id = Some("dQw4w9WgXcQ".to_string());
+        for link in [
+            "dQw4w9WgXcQ",
+            "  dQw4w9WgXcQ  ",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com/watch?list=PL123&v=dQw4w9WgXcQ&t=42s",
+            "https://youtu.be/dQw4w9WgXcQ?si=abc",
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+            "https://www.youtube.com/embed/dQw4w9WgXcQ",
+            "https://www.youtube.com/live/dQw4w9WgXcQ",
+        ] {
+            assert_eq!(yt_video_id(link), id, "{}", link);
+        }
+        for bad in ["", "hello", "https://www.youtube.com/watch?v=short", "https://example.com/x", "dQw4w9WgXc!"] {
+            assert_eq!(yt_video_id(bad), None, "{}", bad);
+        }
+    }
+
+    #[test]
+    fn playlist_links_and_names() {
+        assert!(is_yt_list("https://www.youtube.com/playlist?list=PLabc"));
+        // a single video that sits in a playlist is still a single video
+        assert!(!is_yt_list("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabc"));
+        assert_eq!(list_name("https://soundcloud.com/someone/sets/my-cool_mix?si=1"), "My Cool Mix");
+        assert_eq!(list_name("https://soundcloud.com/someone/sets/late-night/"), "Late Night");
+        assert_eq!(list_name("https://soundcloud.com/---"), "Playlist");
+    }
+
+    #[test]
+    fn soundcloud_names_from_the_link() {
+        assert_eq!(
+            slug_meta("https://soundcloud.com/some-artist/cool-track?in=x"),
+            Some(("Some Artist".to_string(), "Cool Track".to_string()))
+        );
+        assert_eq!(slug_meta("https://m.soundcloud.com/a/b"), Some(("A".to_string(), "B".to_string())));
+        // playlists, likes and API links are not a single track
+        assert_eq!(slug_meta("https://soundcloud.com/someone/sets/a-mix"), None);
+        assert_eq!(slug_meta("https://soundcloud.com/someone/likes"), None);
+        assert_eq!(slug_meta("https://api.soundcloud.com/tracks/1"), None);
+        assert_eq!(slug_meta("https://youtube.com/a/b"), None);
+        assert_eq!(slug_meta("https://soundcloud.com/only-artist"), None);
+    }
+
+    #[test]
+    fn soundcloud_listing() {
+        let lines = concat!(
+            r#"{"url": "https://soundcloud.com/dj-x/first-song", "duration": 200.5}"#,
+            "\n",
+            r#"{"webpage_url": "https://soundcloud.com/dj-x/second", "title": "Real Title", "uploader": "DJ X", "thumbnail": "http://t"}"#,
+            "\n",
+            "not json\n",
+            r#"{"url": "https://soundcloud.com/dj-x/first-song"}"#,
+            "\n",
+            r#"{"url": "https://youtube.com/watch?v=1"}"#,
+        );
+        let e = parse_entries(lines.as_bytes());
+        assert_eq!(e.len(), 2, "duplicates, junk and other sites are skipped");
+        // no title in a quick listing: borrowed from the link
+        assert_eq!((e[0].title.as_str(), e[0].artist.as_str(), e[0].dur), ("First Song", "Dj X", 200.5));
+        assert_eq!((e[1].title.as_str(), e[1].artist.as_str(), e[1].cover.as_str()), ("Real Title", "DJ X", "http://t"));
+        assert_eq!(e[0].id, hash_id("yt:https://soundcloud.com/dj-x/first-song"));
+    }
+
+    #[test]
+    fn download_names() {
+        assert_eq!(media_url("dQw4w9WgXcQ"), "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        assert_eq!(media_url("https://soundcloud.com/a/b"), "https://soundcloud.com/a/b");
+        assert_eq!(file_stem("dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+        let s = file_stem("https://soundcloud.com/a/b");
+        assert!(s.starts_with("sc") && s[2..].chars().all(|c| c.is_ascii_digit()), "{}", s);
+        assert_eq!(last_line(b"line one\nERROR: it broke\n\n  "), "ERROR: it broke");
+        assert_eq!(last_line(b""), "unknown error");
+    }
+
+    #[test]
+    fn audio_files() {
+        assert!(is_audio(Path::new("a/b/song.FLAC")));
+        assert!(is_audio(Path::new("x.m4a")));
+        assert!(!is_audio(Path::new("cover.jpg")));
+        assert!(!is_audio(Path::new("noext")));
+    }
+}
