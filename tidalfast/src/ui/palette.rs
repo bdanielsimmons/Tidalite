@@ -20,7 +20,12 @@ const ITEMS: &[(&str, &str, bool)] = &[
     ("Lyrics on / off", "lyrics", false),
     ("Visualizer on / off", "spec", false),
     ("Next skin", "skin", false),
-    ("Equalizer", "eq", false),
+    ("Equalizer: show / hide", "eq", false),
+    ("Equalizer on / off", "eq_on", false),
+    ("Equalizer preset: flat", "eq_flat", false),
+    ("Equalizer preset: bass", "eq_bass", false),
+    ("Equalizer preset: treble", "eq_treble", false),
+    ("Equalizer preset: rock", "eq_rock", false),
     ("Add files...", "add_files", false),
     ("Add folder...", "add_folder", false),
     ("Preferences and shortcuts", "prefs", false),
@@ -134,6 +139,18 @@ impl App {
     }
 
     /// Run an action by name: the keyboard actions (by their key-binding name) and the extras above.
+    /// Put on an equalizer preset by name (and the equalizer with it).
+    fn eq_preset(&mut self, want: &str) {
+        if let Some((name, g)) = crate::EQ_PRESETS.iter().find(|p| p.0 == want) {
+            self.eq_gains = *g;
+            self.eq_on = true;
+            self.apply_eq();
+            self.eq_remember();
+            self.dirty = true;
+            self.set_note(&format!("EQUALIZER: {}", name));
+        }
+    }
+
     pub(crate) fn run_named(&mut self, id: &str) {
         if let Some(c) = CMDS.iter().find(|c| c.id == id) {
             if c.group == 2 && !PRACTICE {
@@ -158,6 +175,16 @@ impl App {
             "add_folder" => self.apply(Action::AddFolder),
             "skin" => self.apply(Action::Skin),
             "eq" => self.apply(Action::ToggleEq),
+            "eq_on" => {
+                self.eq_on = !self.eq_on;
+                self.apply_eq();
+                self.dirty = true;
+                self.set_note(if self.eq_on { "EQUALIZER ON" } else { "EQUALIZER OFF" });
+            }
+            "eq_flat" => self.eq_preset("FLAT"),
+            "eq_bass" => self.eq_preset("BASS"),
+            "eq_treble" => self.eq_preset("TREBLE"),
+            "eq_rock" => self.eq_preset("ROCK"),
             "spec" => self.apply(Action::ToggleSpec),
             "help" => self.apply(Action::ToggleHelp),
             "tour" => {
