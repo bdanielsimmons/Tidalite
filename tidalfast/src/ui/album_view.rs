@@ -133,7 +133,8 @@ impl App {
             let sub = format!("{} - {}", tr.artist, tr.album);
             // a soft dark plate sized to the words, so they stay readable over the visualizer
             let tw = text_w(&tr.title, 3.0).max(text_w(&sub, 2.0)).min(w);
-            let plate = Rect::from_min_max(Pos2::new(cx - tw * 0.5 - 18.0, y0 - 20.0), Pos2::new(cx + tw * 0.5 + 18.0, y0 + 46.0));
+            let plate =
+                Rect::from_min_max(Pos2::new(cx - tw * 0.5 - 18.0, y0 - 20.0), Pos2::new(cx + tw * 0.5 + 18.0, y0 + 46.0));
             p.rect_filled(plate, Rounding::same(if style() != 0 { 10.0 } else { 0.0 }), Color32::from_black_alpha(170));
             ptext_fit(&p, Pos2::new(cx, y0), Align::Center, &tr.title, 3.0, w, pal().bar_txt);
             ptext_fit(&p, Pos2::new(cx, y0 + 30.0), Align::Center, &sub, 2.0, w, pal().bar_txt.gamma_multiply(0.8));
@@ -376,6 +377,49 @@ impl App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if retro_btn(ui, "CLOSE", false).clicked() {
                         acts.push(Action::ToggleArt);
+                    }
+                    ui.add_space(14.0);
+                    // volume: drag, click or scroll over it
+                    let (sr, vr) = ui.allocate_exact_size(Vec2::new(120.0, BTN_H), Sense::click_and_drag());
+                    let vr = vr
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .tip(format!("Volume {}%  (drag, or scroll over it)", (self.volume * 100.0).round()));
+                    let g = Rect::from_center_size(sr.center(), Vec2::new(sr.width(), 8.0));
+                    let knob_w = 10.0;
+                    let kx = g.min.x + (g.width() - knob_w) * self.volume;
+                    inset(ui.painter(), g, pal().groove);
+                    fill_rect(
+                        ui.painter(),
+                        Rect::from_min_max(g.min + Vec2::new(1.5, 1.5), Pos2::new(kx + knob_w / 2.0, g.max.y - 1.5)),
+                        pal().ink2,
+                    );
+                    raised(ui.painter(), Rect::from_min_size(Pos2::new(kx, sr.center().y - 8.0), Vec2::new(knob_w, 16.0)), false);
+                    if vr.dragged() || vr.clicked() {
+                        if let Some(pp) = vr.interact_pointer_pos() {
+                            acts.push(Action::Volume(((pp.x - g.min.x - knob_w / 2.0) / (g.width() - knob_w)).clamp(0.0, 1.0)));
+                        }
+                    }
+                    let wheel = ui.input(|i| i.smooth_scroll_delta.y);
+                    if vr.hovered() && wheel != 0.0 {
+                        acts.push(Action::Volume((self.volume + wheel * 0.002).clamp(0.0, 1.0)));
+                    }
+                    let spk: &[&str] = if self.volume <= 0.0 {
+                        &IC_SPK0
+                    } else if self.volume < 0.5 {
+                        &IC_SPK1
+                    } else {
+                        &IC_SPK2
+                    };
+                    if icon_btn(ui, spk, self.volume <= 0.0, ink)
+                        .tip(if self.volume <= 0.0 { "Unmute" } else { "Mute" })
+                        .clicked()
+                    {
+                        if self.volume > 0.0 {
+                            self.vol_before = self.volume;
+                            acts.push(Action::Volume(0.0));
+                        } else {
+                            acts.push(Action::Volume(self.vol_before.max(0.3)));
+                        }
                     }
                 });
             });

@@ -123,6 +123,13 @@ impl App {
             None => format!("Tidalite {} - a retro player for Tidal", VERSION),
         };
         marquee(ui, tb, &title_txt, px_big, pal().ink);
+        // right-click the playing song: its album, artist or radio
+        if let Some(id) = track.as_ref().map(|t| t.id).filter(|id| self.ext_of(*id).is_none()) {
+            let tr = ui.interact(tb, ui.id().with("title_menu"), Sense::click());
+            tr.tip("Right-click: go to the album, the artist or the track radio").context_menu(|ui| {
+                goto_items(ui, acts, id, true);
+            });
+        }
 
         let sb = rc(112.0, 22.0, 182.0, 10.0);
         inset(p, sb, pal().lcd);
@@ -145,15 +152,30 @@ impl App {
             acts.push(Action::ClearStatus);
         }
 
-        // ---- kbps / khz / quality
+        // ---- tempo / key / quality (the stream's kbps and kHz show on hover)
+        let info = track.as_ref().and_then(|t| meta::get(t.id)).filter(|_| active).unwrap_or_default();
+        let from = if info.tidal { "from Tidal" } else { "an estimate from listening to the track" };
+        let stream = |s: String| if active && !s.is_empty() { format!("\nStream: {}", s) } else { String::new() };
         let kb = rc(112.0, 34.0, 50.0, 12.0);
         inset(p, kb, pal().lcd);
-        let kb_txt = if active && self.kbps > 0 { format!("{} KBPS", self.kbps) } else { "--- KBPS".to_string() };
+        let kb_txt = info.bpm.map_or("--- BPM".to_string(), |b| format!("{} BPM", b));
         ptext_fit(p, kb.center(), Align::Center, &kb_txt, px_sm, kb.width() - 6.0, pal().ink);
+        let kb_tip = match info.bpm {
+            Some(b) => format!("Tempo: {} BPM, {}", b, from),
+            None => "Tempo: worked out the first time a track plays".to_string(),
+        };
+        ui.interact(kb, ui.id().with("bpm"), Sense::hover())
+            .tip(kb_tip + &stream(if self.kbps > 0 { format!("{} kbps", self.kbps) } else { String::new() }));
         let kh = rc(166.0, 34.0, 40.0, 12.0);
         inset(p, kh, pal().lcd);
-        let kh_txt = if active && rate > 0 { format!("{} KHZ", rate / 1000) } else { "-- KHZ".to_string() };
+        let kh_txt = if info.key.is_some() { meta::key_text(&info) } else { "KEY --".to_string() };
         ptext_fit(p, kh.center(), Align::Center, &kh_txt, px_sm, kh.width() - 6.0, pal().ink);
+        let kh_tip = match info.key {
+            Some(k) => format!("Key: {}, {}\nThe number is its Camelot code, for mixing", meta::key_long(k), from),
+            None => "Key: worked out the first time a track plays".to_string(),
+        };
+        ui.interact(kh, ui.id().with("key"), Sense::hover())
+            .tip(kh_tip + &stream(if rate > 0 { format!("{} kHz", rate / 1000) } else { String::new() }));
         let qb = rc(210.0, 34.0, 40.0, 12.0);
         let qr = ui.interact(qb, ui.id().with("quality"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
         raised_h(p, qb, qr.is_pointer_button_down_on(), qr.hovered());
@@ -530,11 +552,13 @@ impl App {
                                 }
                                 let lk = if self.liked.contains(&t.id) { "Remove from My Tracks" } else { "Add to My Tracks" };
                                 let link = track_link(&t, self.ext_of(t.id).as_ref());
+                                let tidal = self.ext_of(t.id).is_none();
                                 r.context_menu(|ui| {
                                     if menu_item(ui, lk) {
                                         acts.push(Action::ToggleLike(t.clone()));
                                         ui.close_menu();
                                     }
+                                    goto_items(ui, acts, t.id, tidal);
                                     if menu_item(ui, "Play now") {
                                         acts.push(Action::PlayIndex(i));
                                         ui.close_menu();

@@ -162,6 +162,8 @@ pub struct Store {
     pub lists: Vec<SavedList>,
     pub playlists: Vec<Playlist>,
     pub bpm: HashMap<i64, u32>,
+    /// tempo and key found by listening to the audio (see meta.rs)
+    pub meta: HashMap<i64, crate::meta::Info>,
     pub last: Option<Last>,
 }
 

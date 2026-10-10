@@ -484,7 +484,7 @@ impl App {
                 ui,
                 i,
                 Some(i + 1),
-                || track_cells(&e.title, &e.artist, ""),
+                || track_cells(e.id, &e.title, &e.artist, ""),
                 || {
                     if e.dur == 0.0 && e.cover.is_empty() && (which == 2 || which == 3 || which == 6) {
                         "(loading info)".to_string()
@@ -910,7 +910,7 @@ impl App {
                 ui,
                 k,
                 Some(k + 1),
-                || track_cells(&v.title, &v.artist, &v.album),
+                || track_cells(v.id, &v.title, &v.artist, &v.album),
                 || if col_on(2) { fmt_time(v.dur) } else { String::new() },
                 state,
                 false,
@@ -920,6 +920,7 @@ impl App {
                 if r.clicked() {
                     acts.push(Action::Play(tracks.clone(), k));
                 }
+                let tidal = self.ext_of(v.id).is_none();
                 r.context_menu(|ui| {
                     let t = v.to_track();
                     if menu_item(ui, "Play next") {
@@ -930,6 +931,7 @@ impl App {
                         acts.push(Action::Enqueue(t.clone()));
                         ui.close_menu();
                     }
+                    crate::goto_items(ui, acts, t.id, tidal);
                     if k > 0 && menu_item(ui, "Move up") {
                         acts.push(Action::PlaylistMove(pi, k, -1));
                         ui.close_menu();
@@ -1191,6 +1193,8 @@ impl App {
                         acts.push(Action::Enqueue(vtracks[vi].clone()));
                         ui.close_menu();
                     }
+                    let tidal = self.ext_of(vtracks[vi].id).is_none();
+                    crate::goto_items(ui, acts, vtracks[vi].id, tidal);
                     crate::link_item(ui, acts, crate::track_link(&vtracks[vi], self.ext_of(vtracks[vi].id).as_ref()));
                     if menu_item(ui, "Remove from this tune") {
                         acts.push(Action::RemoveVersion(i, vi));

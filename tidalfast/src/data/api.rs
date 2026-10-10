@@ -88,6 +88,14 @@ pub enum Kind {
     Mix,
 }
 
+/// Where "Go to ..." in a track's right-click menu leads.
+#[derive(Clone, Copy)]
+pub enum GoTo {
+    Album,
+    Artist,
+    Radio,
+}
+
 #[derive(Clone)]
 pub struct Card {
     pub kind: Kind,
@@ -203,6 +211,12 @@ fn parse_track(v: &Value) -> Option<Track> {
         }
     }
     let artist = t["artist"]["name"].as_str().or_else(|| t["artists"][0]["name"].as_str()).unwrap_or("").to_string();
+    // tempo and key, when Tidal has them for this track
+    let bpm = t["bpm"].as_f64().filter(|b| *b > 0.0).map(|b| b.round() as u16);
+    let key = t["key"].as_str().and_then(|k| crate::meta::parse_key(k, t["keyScale"].as_str().unwrap_or("")));
+    if bpm.is_some() || key.is_some() {
+        crate::meta::from_tidal(id, bpm, key);
+    }
     Some(Track {
         id,
         title,
@@ -988,6 +1002,44 @@ impl Api {
             }
         }
         Ok(p)
+    }
+
+    /// The album, the artist or the radio of a track, from just its id (works for any Tidal track, saved ones too).
+    pub fn track_page(&self, id: i64, to: GoTo) -> Res<Page> {
+        let t = self.get(&format!("/tracks/{}", id), &[])?;
+        let artist = &t["artists"][0];
+        let artist = if t["artist"]["id"].is_number() { &t["artist"] } else { artist };
+        let artist_name = artist["name"].as_str().unwrap_or("").to_string();
+        let cover = image_url(t["album"]["cover"].as_str().unwrap_or(""), 320, 320);
+        let title = t["title"].as_str().unwrap_or("").to_string();
+        let card = match to {
+            GoTo::Album => Card {
+                kind: Kind::Album,
+                id: t["album"]["id"].as_i64().ok_or("no album for this track")?.to_string(),
+                title: t["album"]["title"].as_str().unwrap_or("").to_string(),
+                subtitle: artist_name,
+                image: cover,
+            },
+            GoTo::Artist => Card {
+                kind: Kind::Artist,
+                id: artist["id"].as_i64().ok_or("no artist for this track")?.to_string(),
+                title: artist_name,
+                subtitle: "Artist".to_string(),
+                image: image_url(artist["picture"].as_str().unwrap_or(""), 320, 320),
+            },
+            GoTo::Radio => {
+                let name = format!("{} radio", title);
+                // Tidal's own "more like this" mix for the track; older tracks fall back to the radio endpoint
+                if let Some(mix) = t["mixes"]["TRACK_MIX"].as_str() {
+                    Card { kind: Kind::Mix, id: mix.to_string(), title: name, subtitle: artist_name, image: cover }
+                } else {
+                    let v = self.get(&format!("/tracks/{}/radio", id), &[("limit", "100")])?;
+                    let tracks = tracks_from(arr(&v["items"]));
+                    return Ok(Page { title: name, subtitle: artist_name, image: cover, tracks, ..Default::default() });
+                }
+            }
+        };
+        self.open(&card)
     }
 
     // -------------------------------------------------------------- playback

@@ -486,6 +486,19 @@ impl App {
         self.last_wraps = self.player.ctl.wraps();
     }
 
+    /// Tempo and key for a track Tidal told us nothing about: listened for once, then remembered.
+    pub(crate) fn start_meta(&mut self, id: i64, bytes: &[u8]) {
+        if !crate::meta::claim(id) {
+            return;
+        }
+        let bytes = bytes.to_vec();
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Meta(id, crate::meta::detect(id, bytes)));
+            ctx.request_repaint();
+        });
+    }
+
     pub(crate) fn start_wave(&mut self, id: i64, bytes: &[u8]) {
         if self.wave.0 == id && self.wave.1.is_some() {
             return;
@@ -797,16 +810,24 @@ impl App {
                 }
             },
             Msg::Menu(id) => self.run_named(&id),
+            Msg::Meta(id, found) => {
+                crate::meta::set_detected(id, found);
+                self.store.meta = crate::meta::saved();
+                self.store_dirty = true;
+            }
             Msg::Tuning(id, r) => {
                 self.tuning_busy = false;
                 match r {
                     Some((c, conf)) if conf >= 0.04 => {
                         self.tuning = Some((id, c, conf));
-                        let how = if c.abs() <= 4 {
+                        let mut how = if c.abs() <= 4 {
                             "IT IS TUNED TO A440".to_string()
                         } else {
                             format!("THIS TRACK IS {} CENTS {} OF A440", c.abs(), if c > 0 { "SHARP" } else { "FLAT" })
                         };
+                        if let Some(k) = crate::meta::get(id).and_then(|i| i.key) {
+                            how += &format!(" - KEY: {}", crate::meta::key_long(k).to_uppercase());
+                        }
                         self.set_note(&how);
                     }
                     _ => self.set_note("COULD NOT TELL - TOO LITTLE PITCHED MUSIC TO MEASURE"),

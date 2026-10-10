@@ -24,6 +24,8 @@ mod api;
 mod cache;
 #[path = "data/chart.rs"]
 mod chart;
+#[path = "data/meta.rs"]
+mod meta;
 #[path = "data/sources.rs"]
 mod sources;
 #[path = "data/store.rs"]
@@ -63,7 +65,7 @@ mod views;
 #[path = "ui/viz.rs"]
 mod viz;
 
-use api::{cover_url, Api, Card, Kind, Page, Track};
+use api::{cover_url, Api, Card, GoTo, Kind, Page, Track};
 use eframe::egui::{self, Align, Color32, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
 use font::{fit, ptext, ptext_fit, snap, spx, text_w, thick, wrap};
 use icons::*;
@@ -136,6 +138,8 @@ enum Msg {
     Chart(String, Result<(String, String, String), (String, Vec<String>)>),
     Live(String, Result<(String, String, String), (String, Vec<String>)>),
     Beats(i64, Option<(f32, f32)>),
+    /// tempo / key detected from a track's audio
+    Meta(i64, meta::Info),
     /// stem separation finished for this track id
     Stems(#[allow(dead_code)] i64, Result<(), String>),
     /// the stem tool (runtime + model) finished downloading
@@ -171,6 +175,8 @@ enum Tab {
 
 enum Action {
     Open(Card),
+    /// a track's album, artist or radio
+    GoTo(i64, GoTo),
     Home,
     Library,
     Search(String),
@@ -988,7 +994,7 @@ fn list_row(
     let lraw = left();
     if lraw.contains('\t') {
         // cell layout shared with the column header
-        let avail = (rect.max.x - 10.0 - 80.0 - tx).max(40.0);
+        let avail = (rect.max.x - 10.0 - right_w() - tx).max(40.0);
         let cw = col_widths(avail);
         let cells: Vec<&str> = lraw.split('\t').collect();
         let mut x = tx;
@@ -999,12 +1005,30 @@ fn list_row(
                 x += cw[i];
             }
         }
+        if let (true, Some((key, bpm))) = (col_on(3), cells.get(3).and_then(|c| c.split_once('|'))) {
+            let kx = rect.max.x - 10.0 - 80.0 - KB_W;
+            ptext(p, Pos2::new(kx, cy), Align::Min, key, 2.0, fg2);
+            ptext(p, Pos2::new(kx + KB_GAP, cy), Align::Min, bpm, 2.0, fg2);
+        }
     } else {
         let avail = (rect.max.x - 10.0 - rw - 16.0) - tx;
         let ltxt = fit(&lraw, 2.0, avail.max(20.0));
         ptext(p, Pos2::new(tx, cy), Align::Min, &ltxt, 2.0, fg);
     }
     Some(resp.on_hover_cursor(egui::CursorIcon::PointingHand))
+}
+
+/// "Go to album / artist / track radio" for a Tidal track (files, YouTube and SoundCloud have none).
+fn goto_items(ui: &mut egui::Ui, acts: &mut Vec<Action>, id: i64, tidal: bool) {
+    if !tidal {
+        return;
+    }
+    for (label, to) in [("Go to album", GoTo::Album), ("Go to artist", GoTo::Artist), ("Go to track radio", GoTo::Radio)] {
+        if menu_item(ui, label) {
+            acts.push(Action::GoTo(id, to));
+            ui.close_menu();
+        }
+    }
 }
 
 /// Retro-styled entry for right-click menus. Returns true when clicked.
@@ -1369,9 +1393,18 @@ fn table_header(ui: &mut egui::Ui, left: &str, mid: &str, last: &str, numbered: 
 }
 
 // ------------------------------------------------------------------ list columns
-/// Which extra columns the track lists show: bit0 artist, bit1 album, bit2 length (name is always shown).
-static COLS: AtomicU32 = AtomicU32::new(0b101);
-const COL_NAMES: [&str; 3] = ["ARTIST", "ALBUM", "LENGTH"];
+/// Which extra columns the track lists show: bit0 artist, bit1 album, bit2 length, bit3 key and tempo
+/// (name is always shown).
+static COLS: AtomicU32 = AtomicU32::new(0b1101);
+const COL_NAMES: [&str; 4] = ["ARTIST", "ALBUM", "LENGTH", "KEY / BPM"];
+/// width of the KEY / BPM slot, just left of LENGTH; the BPM sits `KB_GAP` in
+const KB_W: f32 = 104.0;
+const KB_GAP: f32 = 52.0;
+
+/// Room kept on the right of a row for LENGTH (and KEY / BPM when shown).
+fn right_w() -> f32 {
+    80.0 + if col_on(3) { KB_W } else { 0.0 }
+}
 
 fn col_on(i: usize) -> bool {
     COLS.load(Ordering::Relaxed) >> i & 1 == 1
@@ -1395,10 +1428,15 @@ fn col_header(ui: &mut egui::Ui, numbered: bool) {
     fill_rect(ui.painter(), rect, pal().edge);
     let cy = rect.center().y;
     let tx = rect.min.x + 8.0 + if numbered { 44.0 } else { 0.0 };
-    let avail = (rect.max.x - 10.0 - 80.0 - tx).max(40.0);
+    let avail = (rect.max.x - 10.0 - right_w() - tx).max(40.0);
     let cw = col_widths(avail);
     let p = ui.painter();
     ptext(p, Pos2::new(rect.min.x + 8.0, cy), Align::Min, if numbered { "#" } else { "" }, 2.0, pal().trim);
+    if col_on(3) {
+        let kx = rect.max.x - 10.0 - 80.0 - KB_W;
+        ptext(p, Pos2::new(kx, cy), Align::Min, "KEY", 2.0, pal().trim);
+        ptext(p, Pos2::new(kx + KB_GAP, cy), Align::Min, "BPM", 2.0, pal().trim);
+    }
     ptext(p, Pos2::new(tx, cy), Align::Min, "NAME", 2.0, pal().trim);
     let mut x = tx + cw[0];
     for (i, name) in COL_NAMES[..2].iter().enumerate() {
@@ -1420,9 +1458,12 @@ fn col_header(ui: &mut egui::Ui, numbered: bool) {
     });
 }
 
-/// One track row's text, split into cells with tabs for `list_row`.
-fn track_cells(title: &str, artist: &str, album: &str) -> String {
-    format!("{}\t{}\t{}", title, artist, album)
+/// One track row's text, split into cells with tabs for `list_row` (the last cell is key and tempo, if known).
+fn track_cells(id: i64, title: &str, artist: &str, album: &str) -> String {
+    let i = meta::get(id).unwrap_or_default();
+    let key = meta::key_text(&i);
+    let bpm = i.bpm.map_or(String::new(), |b| b.to_string());
+    format!("{}\t{}\t{}\t{}|{}", title, artist, album, key, bpm)
 }
 
 // ------------------------------------------------------------------ page view
@@ -1434,7 +1475,7 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
             ui,
             i,
             Some(i + 1),
-            || track_cells(&t.title, &t.artist, &t.album),
+            || track_cells(t.id, &t.title, &t.artist, &t.album),
             || if col_on(2) { fmt_time(t.duration) } else { String::new() },
             state,
             false,
@@ -1453,6 +1494,7 @@ fn tracks_list(ui: &mut egui::Ui, tracks: &[Track], playing_id: Option<i64>, lik
                     acts.push(Action::Enqueue(t.clone()));
                     ui.close_menu();
                 }
+                goto_items(ui, acts, t.id, true);
                 {
                     let lk = if liked.contains(&t.id) { "Remove from My Tracks" } else { "Add to My Tracks" };
                     if menu_item(ui, lk) {
@@ -2187,6 +2229,7 @@ impl App {
             look_q: String::new(),
             chart_cache: (String::new(), chart::Chart::default()),
         };
+        meta::load(&app.store.meta);
         app.init_store();
         app.liked.extend(app.store.hearts.iter().map(|e| e.id));
         // ---- restore saved settings
@@ -2268,7 +2311,9 @@ impl App {
             app.stack_frac = (f as f32).clamp(0.3, 1.0);
         }
         if let Some(c) = st["cols"].as_u64() {
-            COLS.store(c as u32, Ordering::Relaxed);
+            // settings from before the KEY / BPM column: show it once, it can be turned off from the header
+            let new = if st["cols_v"].as_u64().unwrap_or(1) < 2 { 0b1000 } else { 0 };
+            COLS.store(c as u32 | new, Ordering::Relaxed);
         }
         if let Some(b) = st["pomo_sound"].as_bool() {
             app.pomo_sound = b;
@@ -2338,6 +2383,7 @@ impl App {
             "stack_frac": self.stack_frac,
             "pomo_sound": self.pomo_sound,
             "cols": COLS.load(Ordering::Relaxed),
+            "cols_v": 2,
             "loops": self.loops.iter().map(|(k, v)| (k.to_string(), serde_json::json!([v.0, v.1]))).collect::<serde_json::Map<String, serde_json::Value>>(),
         });
         let dir = api::config_dir();
@@ -2588,6 +2634,7 @@ impl App {
                         let n = bytes.len();
                         crate::api::log(&format!("downloaded {} bytes for track {}", n, id));
                         self.start_wave(id, &bytes);
+                        self.start_meta(id, &bytes);
                         self.player.send(Cmd::Play(bytes));
                         self.after_play();
                         self.set_kbps(n);
@@ -2668,6 +2715,7 @@ impl App {
             if id == t.id {
                 let n = bytes.len();
                 self.start_wave(id, &bytes);
+                self.start_meta(id, &bytes);
                 self.player.send(Cmd::Play(bytes));
                 self.after_play();
                 self.set_kbps(n);
@@ -2934,6 +2982,10 @@ impl App {
             Action::Open(c) => {
                 self.sec = Sec::Tidal;
                 self.load(true, move |a| a.open(&c))
+            }
+            Action::GoTo(id, to) => {
+                self.sec = Sec::Tidal;
+                self.load(true, move |a| a.track_page(id, to))
             }
             Action::Back => {
                 if let Some(p) = self.back.pop() {
