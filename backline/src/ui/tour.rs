@@ -453,7 +453,12 @@ impl App {
                 para(ui, step.text, Color32::from_rgb(225, 225, 220));
                 // the credit the song's licence asks for, while it plays
                 if self.tour_play.as_ref().is_some_and(|s| s.song.is_some()) {
-                    crate::views::dim_line(ui, crate::tour_song::CREDIT, 1.0, Color32::from_gray(160));
+                    // scrolling at the same speed as the song's name in the player
+                    let (r, _) = ui.allocate_exact_size(
+                        egui::Vec2::new(ui.available_width(), 7.0 * crate::spx(1.0) + 6.0),
+                        egui::Sense::hover(),
+                    );
+                    crate::marquee_at(ui, r, crate::tour_song::CREDIT, 1.0, Color32::from_gray(160), crate::title_scroll());
                 }
                 ui.horizontal(|ui| {
                     if i > 0 && retro_btn(ui, "BACK", false).clicked() {

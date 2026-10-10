@@ -149,6 +149,7 @@ impl App {
             None => format!("Backline {} - a retro player for Tidal", VERSION),
         };
         marquee(ui, tb, &title_txt, px_big, pal().ink);
+        crate::TITLE_SCROLL.store((9.0 * spx(px_big)).to_bits(), std::sync::atomic::Ordering::Relaxed);
         // right-click the playing song: its album, artist or radio
         if let Some(t) = track.as_ref().filter(|t| self.ext_of(t.id).is_none()) {
             let t = (*t).clone();

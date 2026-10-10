@@ -469,8 +469,26 @@ fn shuffled_from(tracks: &[Track], first: usize) -> Vec<Track> {
 }
 
 // --------------------------------------------------------------- marquee
+/// How fast the player's title scrolls (points a second, as f32 bits), so other scrolling text can keep pace.
+static TITLE_SCROLL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The player title's scrolling speed (points a second), or a usual one before the player has drawn.
+fn title_scroll() -> f32 {
+    let v = f32::from_bits(TITLE_SCROLL.load(std::sync::atomic::Ordering::Relaxed));
+    if v > 0.0 {
+        v
+    } else {
+        9.0 * spx(1.5)
+    }
+}
+
 /// Scrolling bitmap text inside `rect` (static if it fits).
 fn marquee(ui: &egui::Ui, rect: Rect, text: &str, px: f32, color: Color32) {
+    marquee_at(ui, rect, text, px, color, 9.0 * spx(px));
+}
+
+/// Scrolling bitmap text inside `rect`, moving `speed` points a second (static if it fits).
+fn marquee_at(ui: &egui::Ui, rect: Rect, text: &str, px: f32, color: Color32, speed: f32) {
     let px = spx(px);
     let w = text_w(text, px);
     let clip = ui.painter().with_clip_rect(rect.shrink2(Vec2::new(2.0, 0.0)));
@@ -480,7 +498,7 @@ fn marquee(ui: &egui::Ui, rect: Rect, text: &str, px: f32, color: Color32) {
     } else {
         let period = w + 8.0 * px;
         let t = ui.input(|i| i.time) as f32;
-        let off = (t * 9.0 * px) % period;
+        let off = (t * speed) % period;
         let x = rect.min.x + 5.0 - off;
         ptext(&clip, Pos2::new(x, cy), Align::Min, text, px, color);
         ptext(&clip, Pos2::new(x + period, cy), Align::Min, text, px, color);
