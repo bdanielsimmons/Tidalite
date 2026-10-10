@@ -868,6 +868,10 @@ impl App {
                 }
             }
             Msg::WaSkin(r) => self.wear_skin(r, true),
+            Msg::TourSong(r) => match r {
+                Ok(path) => self.tour_put_on(path),
+                Err(e) => crate::api::log(&format!("tour song: {}", e)),
+            },
             Msg::IntroFile(f) => {
                 if f.is_some() {
                     self.intro_file = f;

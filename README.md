@@ -12,9 +12,6 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 - **v9.49:** The Winamp skins you wore are listed in the browser and the menu, each with an X to take it off
 - **v9.48:** Skins sorted into ORIGINAL (sleek, Silkscreen), RETRO ORIGINAL (the classic pixel look) and WINAMP
 - **v9.48:** Your last 8 Winamp skins stay in the menu, back in one click
-- **v9.48:** Practice panel: roomier, A and B, a speed drop-down; timer and metronome in their own corner
-- **v9.47:** Every Tidalite skin now comes as a Winamp-style skin drawn by Tidalite itself - SLEEK (the new default) or PIXEL
-- **v9.47:** Art view song titles in soft white or soft black, with a right-click menu for size and colour
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).

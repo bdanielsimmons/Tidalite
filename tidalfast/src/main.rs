@@ -18,6 +18,8 @@ mod media;
 mod player;
 #[path = "audio/stems.rs"]
 mod stems;
+#[path = "audio/tour_song.rs"]
+mod tour_song;
 #[path = "audio/tuning.rs"]
 mod tuning;
 
@@ -159,6 +161,8 @@ enum Msg {
     FontReady(usize, Result<Vec<u8>, String>),
     /// the file picked for the opening sound
     IntroFile(Option<String>),
+    /// the tour's song, fetched
+    TourSong(Result<std::path::PathBuf, String>),
     /// a track's credits: (role, names)
     Credits(Result<Vec<(String, String)>, String>),
     /// stem separation finished for this track id
@@ -2187,6 +2191,8 @@ struct App {
     tour: Option<(u8, usize)>,
     /// what was showing when the tour began (album view, practice mode, MORE and its tab), put back after
     tour_restore: Option<(bool, bool, bool, u8)>,
+    /// what was playing before the tour (it plays its own song), put back when it ends
+    tour_play: Option<tour::TourPlay>,
     tour_seen: bool,
     help_tab: usize,
     /// (track id, cents from A440, confidence) from the tuning check
@@ -2515,6 +2521,7 @@ impl App {
             bind_note: String::new(),
             tour: None,
             tour_restore: None,
+            tour_play: None,
             tour_seen: false,
             help_tab: 0,
             tuning: None,

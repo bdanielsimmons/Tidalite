@@ -64,7 +64,7 @@ pub fn chime() -> Vec<f32> {
 
 /// A small Freeverb-style room: four damped combs and two allpasses per side (slightly different lengths
 /// left and right, for width), mixed with the dry sound. Interleaved stereo out.
-fn reverb(dry: &[f32]) -> Vec<f32> {
+pub(crate) fn reverb(dry: &[f32]) -> Vec<f32> {
     let side = |spread: usize| -> Vec<f32> {
         let mut combs: Vec<(Vec<f32>, usize, f32)> =
             [1116usize, 1188, 1277, 1356].iter().map(|l| (vec![0.0; l + spread], 0usize, 0.0f32)).collect();
