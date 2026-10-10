@@ -7,6 +7,8 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
+- **v9.40:** Credits for any Tidal track: producer, writers, players and engineers (right-click, Show credits)
+- **v9.40:** Mouse back / forward buttons walk the page history (back also closes the album view)
 - **v9.39:** Tempo and key for every track (from Tidal, or estimated from the audio), with Camelot codes for mixing
 - **v9.39:** Right-click any Tidal track: go to its album, its artist or its track radio
 - Library grouped into **MUSIC** (Tidal, SoundCloud, Files, YouTube, Lists) and **PRACTICE** (Tunes, Diary) tabs
