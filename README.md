@@ -7,14 +7,15 @@ Unofficial: it talks to the same endpoints the Tidal apps and the open-source `t
 ## What's new
 
 <!-- whats-new -->
-- **v9.60:** Three tabs - MUSIC, PRACTICE and TIDALITE (skins, settings, Winamp skins, storage and the log) - with one back / forward history for the whole library
-- **v9.60:** The practice panel has tabs (LOOP & SPEED, TRAINER, PITCH & EAR, STEMS), 1% speed steps you can type, and scales with its size
-- **v9.60:** Drag handles under the player and above the practice panel; the playlist and practice panel scale smoothly
-- **v9.60:** YouTube playlists load in full and fold up into one card with their name, song count, PLAY, SHUFFLE, SAVE and X
-- **v9.60:** The equalizer's preamp works, and repeat-one shows a small 1 on Winamp skins
-- **v9.60:** The tour plays "Local Forecast - Elevator" by Kevin MacLeod (Creative Commons Attribution) and shows each feature working on it: a slower speed, a loop, the equalizer
-- **v9.60:** When the tour ends, everything comes back: your queue, your song and where you were, the speed, the loop and the EQ
-- **v9.60:** Skins you wore lately are in a WORN LATELY drop-down on the Winamp skins page, each with an X
+- Winamp skins: thousands of classic ones from the Winamp Skin Museum, or Tidalite's own palettes as sleek Winamp-style skins (ORIGINAL) or the classic pixel look (RETRO ORIGINAL)
+- Three tabs - MUSIC, PRACTICE and TIDALITE - with one back / forward history (the mouse's side buttons too)
+- Practice panel: A-B loops you can save, speed from 25% to 250% in 1% steps, a speed trainer, pitch and ear tools, and stems
+- A guided tour that plays a song and shows each feature working, then puts everything back the way you had it
+- Equalizer with presets and a preamp; Winamp skins show volume, balance and seek readouts and a repeat-one badge
+- YouTube playlists load in full and fold into one card; your Tidal library opens instantly (REFRESH to reload it)
+- Click any album or artist picture to see it big
+- An opening sound: Tidalite's chime or a file of yours
+- Accessibility: high-contrast skins, colour-blind safe loops, reduce motion, and a size setting for everything
 <!-- /whats-new -->
 
 Every release lists its full changes on the [Releases page](../../releases).

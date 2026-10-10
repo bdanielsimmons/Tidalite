@@ -124,6 +124,7 @@ impl App {
         r: Result<(crate::winamp::WaSkin, crate::skin::Pal, crate::winamp::Art), String>,
         announce: bool,
     ) {
+        self.wa_loading = None;
         match r {
             Ok((s, p, art)) => {
                 crate::skin::set_custom(Some(p));

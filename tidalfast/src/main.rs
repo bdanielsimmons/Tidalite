@@ -287,6 +287,8 @@ enum Action {
     TidalitePage,
     /// load your Tidal library again
     RefreshLibrary,
+    /// look at a picture big: its link, its title, and whether it is an artist's
+    ArtPreview(String, String, bool),
     /// the log, under the TIDALITE tab
     ShowLog,
     ClearCache,
@@ -553,8 +555,10 @@ fn ui_text(p: &egui::Painter, pos: Pos2, align: Align, text: &str, px: f32, max_
 /// Fit a pixel icon into `r` as large as whole dots allow.
 fn icon_in(p: &egui::Painter, r: Rect, icon: &[&str], col: Color32) {
     // the dot size is a whole number of real screen pixels: crisp, and as fine as the button allows
+    // with a margin all round: as big as fits in both directions, not just the height
     let ppp = font::ppp();
-    let k = (((r.height() - 3.0) * ppp / icon.len() as f32).floor().max(1.0)) / ppp;
+    let fit = ((r.height() - 5.0) / icon.len() as f32).min((r.width() - 8.0) / icon[0].len() as f32);
+    let k = ((fit * ppp).floor().max(1.0)) / ppp;
     let (w, h) = (icon[0].len() as f32 * k, icon.len() as f32 * k);
     pixmap(p, Pos2::new((r.center().x - w / 2.0).round(), (r.center().y - h / 2.0).round()), k, icon, col);
 }
@@ -1432,6 +1436,11 @@ struct Images {
 }
 
 impl Images {
+    /// A loaded picture's size in pixels.
+    fn size(&self, url: &str) -> Option<[usize; 2]> {
+        self.map.get(url).and_then(|(t, _)| t.as_ref()).map(|h| h.size())
+    }
+
     fn get(&mut self, url: &str) -> Option<egui::TextureId> {
         if url.is_empty() {
             return None;
@@ -1576,7 +1585,7 @@ fn vinyl_angle(ui: &egui::Ui, speed: f32) -> f32 {
     let id = egui::Id::new("vinyl_angle");
     let dt = ui.input(|i| i.stable_dt).min(0.1);
     let (ang, vel): (f32, f32) = ui.ctx().data(|d| d.get_temp(id)).unwrap_or((0.0, 0.0));
-    let target = 3.49 * speed; // radians a second at 33 1/3 rpm
+    let target = if skin::calm() { 0.0 } else { 3.49 * speed }; // radians a second at 33 1/3 rpm
     let vel = vel + (target - vel) * (1.0 - (-dt * 2.0).exp());
     let ang = (ang + vel * dt) % std::f32::consts::TAU;
     ui.ctx().data_mut(|d| d.insert_temp(id, (ang, vel)));
@@ -1907,6 +1916,14 @@ fn cards_list(ui: &mut egui::Ui, cards: &[Card], tags: bool, acts: &mut Vec<Acti
             if r.clicked() {
                 acts.push(Action::Open(c.clone()));
             }
+            if !c.image.is_empty() {
+                r.context_menu(|ui| {
+                    if menu_item(ui, "View art") {
+                        acts.push(Action::ArtPreview(c.image.clone(), c.title.clone(), c.kind == Kind::Artist));
+                        ui.close_menu();
+                    }
+                });
+            }
         }
     }
 }
@@ -1991,10 +2008,15 @@ fn page_view(
     let has_header = !page.image.is_empty() || !page.subtitle.is_empty();
     if has_header {
         ui.horizontal(|ui| {
-            // the page's picture, square and framed like the rest of the skin (just a picture: no click)
-            let (cr, _) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::hover());
+            // the page's picture, square and framed like the rest of the skin; click it to look at it big
+            let (cr, cresp) = ui.allocate_exact_size(Vec2::splat(104.0), Sense::click());
             inset(ui.painter(), cr, pal().edge);
             paint_page_art(ui, images, &page.image, cr.shrink(2.0), false);
+            if !page.image.is_empty()
+                && cresp.on_hover_cursor(egui::CursorIcon::PointingHand).tip("Look at the picture big").clicked()
+            {
+                acts.push(Action::ArtPreview(page.image.clone(), page.title.clone(), page.artist));
+            }
             ui.vertical(|ui| {
                 title_line(ui, &page.title, 3.0, pal().ink);
                 title_line(ui, &page.subtitle, 2.0, pal().ink2);
@@ -2057,6 +2079,10 @@ struct App {
     page: Option<Arc<Page>>,
     /// your library as last loaded: MY LIBRARY shows it at once (REFRESH loads it again)
     lib_page: Option<Arc<Page>>,
+    /// a Winamp skin being fetched and put on (its name), for the little "putting it on" panel
+    wa_loading: Option<String>,
+    /// the picture being looked at big (link, title, an artist's?)
+    art_preview: Option<(String, String, bool)>,
     back: Vec<Arc<Page>>,
     /// pages left with Back, for Forward (cleared when you open something new)
     fwd: Vec<Arc<Page>>,
@@ -2411,6 +2437,20 @@ impl App {
         }
         font::set_ppp(cc.egui_ctx.pixels_per_point());
         let font_tex = font::init(&cc.egui_ctx);
+        // the installed-font list (Winamp skins name their font) is read in the background, never on screen
+        std::thread::spawn(winamp_ui::warm_fonts);
+        // smooth text (the sleek skins, tooltips) in Chakra Petch: retro and techy without being pixel text
+        // (SIL Open Font License, see assets/ChakraPetch-OFL.txt)
+        {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts
+                .font_data
+                .insert("chakra".to_string(), egui::FontData::from_static(include_bytes!("../assets/ChakraPetch-Regular.ttf")));
+            if let Some(f) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                f.insert(0, "chakra".to_string());
+            }
+            cc.egui_ctx.set_fonts(fonts);
+        }
         setup_style(&cc.egui_ctx);
         let api = Api::new();
         let (tx, rx) = channel();
@@ -2428,6 +2468,8 @@ impl App {
             login_err: String::new(),
             page: None,
             lib_page: None,
+            art_preview: None,
+            wa_loading: None,
             back: Vec::new(),
             fwd: Vec::new(),
             credits: None,
@@ -2711,6 +2753,8 @@ impl App {
         if let Some(f) = st["art_op"].as_f64() {
             app.art_op = (f as f32).clamp(0.5, 1.0);
         }
+        skin::LOOP_SAFE.store(st["loop_safe"].as_bool().unwrap_or(false), Ordering::Relaxed);
+        skin::CALM.store(st["reduce_motion"].as_bool().unwrap_or(false), Ordering::Relaxed);
         if let Some(m) = st["intro"].as_u64() {
             app.intro = (m as u8).min(2);
         }
@@ -2891,6 +2935,8 @@ impl App {
             "tour_seen": self.tour_seen,
             "auto_restart": self.auto_restart,
             "intro": self.intro,
+            "loop_safe": skin::LOOP_SAFE.load(Ordering::Relaxed),
+            "reduce_motion": skin::calm(),
             "intro_file": self.intro_file,
             "art_op": self.art_op,
             "zoom": self.ctx.zoom_factor(),
@@ -3535,6 +3581,11 @@ impl App {
                     None => self.load(false, |a| a.library()),
                 }
             }
+            Action::ArtPreview(url, title, artist) => {
+                if !url.is_empty() {
+                    self.art_preview = Some((url, title, artist));
+                }
+            }
             Action::RefreshLibrary => {
                 self.sec = Sec::Tidal;
                 self.load(false, |a| a.library());
@@ -3641,7 +3692,7 @@ impl App {
                 });
             }
             Action::WaApply(s) => {
-                self.set_note(&format!("PUTTING ON {}...", s.name.to_uppercase()));
+                self.wa_loading = Some(s.name.clone());
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
                     let r = winamp::fetch(&s).and_then(|b| winamp::load(&b)).map(|(p, art)| (s, p, art));
@@ -4489,6 +4540,8 @@ impl eframe::App for App {
         self.floating_modes(ctx, &mut acts);
         self.help_overlay(ctx, &mut acts);
         self.credits_overlay(ctx);
+        self.art_preview_overlay(ctx);
+        self.skin_loading_panel(ctx);
         self.viz_panel(ctx);
         self.artist_picker(ctx, &mut acts);
         self.palette_overlay(ctx);

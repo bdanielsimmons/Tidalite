@@ -129,7 +129,7 @@ const BASIC: &[Step] = &[
     },
     Step {
         title: "THAT'S IT",
-        text: "DONE puts everything back the way you had it. When an update is ready, a bar at the top says so. The ? button has every key and tip. Nothing you do here is reported to Tidal.",
+        text: "DONE puts everything back the way you had it. Preferences has ACCESSIBILITY (colour-blind safe loops, reduce motion), and the TIDALITE tab has HIGH CONTRAST skins. When an update is ready, a bar at the top says so. The ? button has every key and tip. Nothing you do here is reported to Tidal.",
         ..BASE
     },
 ];

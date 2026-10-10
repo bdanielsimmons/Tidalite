@@ -449,15 +449,30 @@ impl App {
         let hint: Option<String> = ui.ctx().data_mut(|d| d.remove_temp(hint_id));
         let title = match (&hint, &track) {
             (Some(h), _) => h.clone(),
-            (None, Some(tr)) => format!("{} - {} ({})", tr.artists_text(), tr.title, fmt_time(tr.duration)),
+            (None, Some(tr)) => {
+                // the key and tempo ride along, once they are known
+                let info = crate::meta::get(tr.id).unwrap_or_default();
+                let mut extra = String::new();
+                if info.key.is_some() {
+                    extra += &format!("  *  KEY {}", crate::meta::key_text(&info));
+                }
+                if let Some(b) = info.bpm {
+                    extra += &format!("  *  {} BPM", b);
+                }
+                format!("{} - {} ({}){}", tr.artists_text(), tr.title, fmt_time(tr.duration), extra)
+            }
             (None, None) => "TIDALITE - A RETRO PLAYER FOR TIDAL".to_string(),
         };
         let marquee = pl.r(111.0, 24.0, 154.0, 6.0);
         let w = title.chars().count() as f32 * 5.0;
-        let shift = if w > 154.0 && hint.is_none() { ((ui.input(|i| i.time) as f32 * 22.0) % (w + 25.0)).floor() } else { 0.0 };
+        let shift = if w > 154.0 && hint.is_none() && !crate::skin::calm() {
+            ((ui.input(|i| i.time) as f32 * 22.0) % (w + 25.0)).floor()
+        } else {
+            0.0
+        };
         let clip = p.with_clip_rect(marquee);
         wa_text(&t, &clip, pl, 111.0 - shift, 24.0, &title);
-        if w > 154.0 {
+        if w > 154.0 && shift > 0.0 {
             wa_text(&t, &clip, pl, 111.0 - shift + w + 25.0, 24.0, &title);
             ui.ctx().request_repaint();
         }
@@ -845,9 +860,21 @@ pub(crate) const PL_FONTS: [(&str, FontSrc); 13] = [
 ];
 
 /// Windows' list of installed fonts: family name (lower case, e.g. "arial narrow", "trebuchet ms italic") to file.
+static FONT_MAP: std::sync::OnceLock<HashMap<String, std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// Whether the list of installed fonts has been read (asking Windows for it takes a moment, so it is done in
+/// the background and nothing waits for it on screen).
+pub(crate) fn fonts_ready() -> bool {
+    FONT_MAP.get().is_some()
+}
+
+/// Read the list of installed fonts now (call off the main thread).
+pub(crate) fn warm_fonts() {
+    let _ = installed_fonts();
+}
+
 fn installed_fonts() -> &'static HashMap<String, std::path::PathBuf> {
-    static MAP: std::sync::OnceLock<HashMap<String, std::path::PathBuf>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| {
+    FONT_MAP.get_or_init(|| {
         let mut map = HashMap::new();
         if !cfg!(windows) {
             return map;
@@ -1144,6 +1171,17 @@ impl App {
     /// Put the chosen playlist font in place (fetching a free one first if it is not here yet).
     pub(crate) fn apply_pl_font(&mut self) {
         let skin_font = self.wa_art.as_ref().and_then(|t| t.font.clone());
+        // the skin's font comes from the list of installed fonts: if that is not read yet, read it in the
+        // background and come back (the window never stalls on it)
+        if !fonts_ready() && matches!(PL_FONTS.get(self.pl_font).map(|f| &f.1), Some(FontSrc::Skin | FontSrc::Sys(_))) {
+            let (tx, ctx, choice) = (self.tx.clone(), self.ctx.clone(), self.pl_font);
+            std::thread::spawn(move || {
+                warm_fonts();
+                let _ = tx.send(Msg::FontReady(choice, Ok(Vec::new())));
+                ctx.request_repaint();
+            });
+            return;
+        }
         // the skin's own font, when it names one of the free fonts (SLEEK asks for Silkscreen), comes from there
         let mut choice = self.pl_font;
         if matches!(PL_FONTS.get(choice).map(|f| &f.1), Some(FontSrc::Skin)) {
@@ -1373,21 +1411,11 @@ impl App {
         if bot.width() >= (125.0 + 75.0 + 150.0) * k {
             let vr = Rect::from_min_size(Pos2::new(br.min.x - 75.0 * k, bot.min.y), Vec2::new(75.0, 38.0) * k);
             piece((205.0, 0.0, 75.0, 38.0), vr);
-            let (bands, _, _) = self.viz_data(0);
+            let (bands, peaks, wave) = self.viz_data(0);
             let inner = Rect::from_min_size(vr.min + Vec2::new(3.0, 12.0) * k, Vec2::new(72.0, 16.0) * k);
-            if self.cur.is_some() && !self.stopped && t.vis.len() >= 18 && !bands.is_empty() {
-                for b in 0..18usize {
-                    let i = b * bands.len() / 18;
-                    let h = (bands[i].clamp(0.0, 1.0) * 16.0).round() as usize;
-                    for row in 0..h {
-                        let topr = 15 - row;
-                        p.rect_filled(
-                            Rect::from_min_size(inner.min + Vec2::new(b as f32 * 4.0, topr as f32) * k, Vec2::new(3.0, 1.0) * k),
-                            0.0,
-                            t.vis[2 + topr],
-                        );
-                    }
-                }
+            if self.cur.is_some() && !self.stopped {
+                // the same style as the player's (bars, wave or both), in the skin's colours
+                skin_viz(&p.with_clip_rect(inner), inner.min, k, &t.vis, &bands, &peaks, &wave, self.viz[0].mode);
             }
         }
         let list_btn = Rect::from_min_size(br.min + Vec2::new(106.0, 8.0) * k, Vec2::new(22.0, 18.0) * k);

@@ -39,6 +39,19 @@ impl App {
             let r_prac = place(if PRACTICE { fit("PRACTICE") } else { 0.0 });
             let r_lis = place(if PRACTICE { fit("LISTEN") } else { 0.0 });
             let r_focus = place(if PRACTICE { fit("FOCUS") } else { 0.0 });
+            // stream quality: on the title bar, so it is there with every skin (Winamp ones too)
+            let q_txt = if self.prefer_lossless { "HIFI" } else { "320K" };
+            let r_q = place(fit(q_txt));
+            if chip(ui, r_q, q_txt, self.prefer_lossless, "c_quality")
+                .tip(if self.prefer_lossless {
+                    "Stream quality: HiFi (lossless when Tidal has it). Click for 320 kbps"
+                } else {
+                    "Stream quality: 320 kbps. Click for HiFi (lossless)"
+                })
+                .clicked()
+            {
+                acts.push(Action::ToggleLossless);
+            }
             if PRACTICE
                 && chip(ui, r_focus, "FOCUS", self.focus_mode, "c_focus")
                     .tip("Hide the lists: just the player, your tools and the chart")
@@ -364,7 +377,7 @@ impl App {
         if active && dur > 0.0 && self.practice {
             let at = |t: f32| sk.min.x + thumb_w / 2.0 + (sk.width() - thumb_w) * (t / dur).clamp(0.0, 1.0);
             if let (Some(a), Some(b)) = (self.loop_a, self.loop_b) {
-                let col = if self.loop_on { pal().red.gamma_multiply(0.5) } else { pal().ink.gamma_multiply(0.3) };
+                let col = if self.loop_on { crate::skin::loop_col().gamma_multiply(0.5) } else { pal().ink.gamma_multiply(0.3) };
                 fill_rect(p, Rect::from_min_max(Pos2::new(at(a), sk.min.y + 1.5), Pos2::new(at(b), sk.max.y - 1.0)), col);
             }
             for (v, lab) in [(self.loop_a, "A"), (self.loop_b, "B")] {
@@ -492,7 +505,7 @@ impl App {
         }
     }
 
-    /// Full-window cover viewer: tilts toward the mouse, optional B&W, lyrics, fullscreen.
+    /// Full-window cover viewer: tilts toward the mouse, lyrics, fullscreen.
 
     pub(crate) fn playlist_ui(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Action>) {
         // a worn Winamp skin draws the queue as its own playlist window

@@ -4,7 +4,8 @@ Usage: release_notes.py <new tag> <previous tag or ""> <notes file to write>
 
 Every commit since the previous release becomes a line in the notes (its subject, plus any "- " points
 in its body). A body line starting with "New:" marks a big feature: it is listed first in the notes and
-added to the top of the README's What's new list (the last 8 are kept).
+added to the top of the README's What's new list, without a version number and only once (the last 10
+are kept).
 """
 
 import re
@@ -55,7 +56,9 @@ if new:
     m = re.search(r"<!-- whats-new -->\r?\n(.*?)<!-- /whats-new -->", readme, re.S)
     if m:
         old = [l for l in m.group(1).splitlines() if l.startswith("- ")]
-        items = [f"- **{tag}:** {n}" for n in new] + old
-        readme = readme[: m.start(1)] + "\n".join(items[:8]) + "\n" + readme[m.end(1) :]
+        # plain lines, no version numbers; a feature already listed is not added again
+        fresh = [f"- {n}" for n in new if f"- {n}" not in old]
+        items = fresh + old
+        readme = readme[: m.start(1)] + "\n".join(items[:10]) + "\n" + readme[m.end(1) :]
         with open("README.md", "w", encoding="utf-8") as f:
             f.write(readme)

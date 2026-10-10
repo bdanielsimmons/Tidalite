@@ -1666,7 +1666,7 @@ impl App {
                 }
             }
             if let (Some(a), Some(b)) = (self.loop_a, self.loop_b) {
-                let col = if self.loop_on { pal().red.gamma_multiply(0.35) } else { pal().ink.gamma_multiply(0.2) };
+                let col = if self.loop_on { crate::skin::loop_col().gamma_multiply(0.35) } else { pal().ink.gamma_multiply(0.2) };
                 fill_rect(&p, Rect::from_min_max(Pos2::new(at(a), inn.min.y), Pos2::new(at(b), inn.max.y)), col);
             }
             for (v, lab) in [(self.loop_a, "A"), (self.loop_b, "B")] {
@@ -1674,9 +1674,9 @@ impl App {
                     fill_rect(
                         &p,
                         Rect::from_min_max(Pos2::new(at(t) - 1.0, bar.min.y + 2.0), Pos2::new(at(t) + 1.0, bar.max.y - 2.0)),
-                        pal().red,
+                        crate::skin::loop_col(),
                     );
-                    ptext(&p, Pos2::new(at(t) + 4.0, inn.min.y + 5.0), Align::Min, lab, 1.0, pal().red);
+                    ptext(&p, Pos2::new(at(t) + 4.0, inn.min.y + 5.0), Align::Min, lab, 1.0, crate::skin::loop_col());
                 }
             }
             fill_rect(
@@ -1746,7 +1746,7 @@ impl App {
                     fill_rect(
                         &p,
                         Rect::from_min_max(Pos2::new(lo, inn.min.y), Pos2::new(hi, inn.max.y)),
-                        pal().red.gamma_multiply(0.3),
+                        crate::skin::loop_col().gamma_multiply(0.3),
                     );
                 }
                 if resp.drag_stopped() {

@@ -321,6 +321,29 @@ impl App {
                             para(ui, &format!("Your file: {}", name), pal().dim);
                         }
 
+                        section_header(ui, "ACCESSIBILITY");
+                        let safe = crate::skin::LOOP_SAFE.load(std::sync::atomic::Ordering::Relaxed);
+                        if check_box(ui, "COLOUR-BLIND SAFE LOOPS", safe)
+                            .tip("Loops and their A / B markers in orange, which nearly everyone tells apart from red and green")
+                            .clicked()
+                        {
+                            crate::skin::LOOP_SAFE.store(!safe, std::sync::atomic::Ordering::Relaxed);
+                            self.dirty = true;
+                        }
+                        let calm = crate::skin::calm();
+                        if check_box(ui, "REDUCE MOTION", calm)
+                            .tip("No spinning record, no tilting cover, no scrolling song titles")
+                            .clicked()
+                        {
+                            crate::skin::CALM.store(!calm, std::sync::atomic::Ordering::Relaxed);
+                            self.dirty = true;
+                        }
+                        para(
+                            ui,
+                            "The HIGH CONTRAST skins (TIDALITE tab) and SIZE OF EVERYTHING below help too.",
+                            pal().ink2,
+                        );
+
                         section_header(ui, "SIZE OF EVERYTHING");
                         para(ui, "Makes buttons and text bigger or smaller. Ctrl and + / - (Cmd on a Mac) does the same.", pal().ink2);
                         ui.horizontal_wrapped(|ui| {

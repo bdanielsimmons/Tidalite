@@ -62,11 +62,11 @@ impl App {
             // bottom, and darken the edges so the cover and the visualizer stand out
             let deep = |c: Color32, cap: f32| {
                 let mut h = egui::ecolor::Hsva::from(c);
-                h.s = (h.s * 1.15).min(0.8);
-                h.v = (h.v * 0.45).min(cap);
+                h.s = (h.s * 1.1).min(0.75);
+                h.v = (h.v * 0.38).min(cap);
                 Color32::from(h)
             };
-            let (tl, tr, bl, br) = (deep(top, 0.26), deep(top, 0.18), deep(bot, 0.08), deep(bot, 0.05));
+            let (tl, tr, bl, br) = (deep(top, 0.19), deep(top, 0.14), deep(bot, 0.06), deep(bot, 0.04));
             let mut mesh = egui::Mesh::default();
             let uv = egui::epaint::WHITE_UV;
             for (pos, color) in
@@ -76,25 +76,32 @@ impl App {
             }
             mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
             p.add(egui::Shape::mesh(mesh));
-            // vignette: clear in the middle, shading to dark at the edges
-            let inner = full.shrink(full.width().min(full.height()) * 0.22);
-            let (o, i) = (Color32::from_black_alpha(150), Color32::TRANSPARENT);
+            // vignette: an oval, clear around the cover and easing smoothly into near-black, reaching it right at the
+            // corners (rings of a soft curve, so there are no seams or corners in the shading)
+            let edge = Color32::from_rgb(4, 4, 6);
+            let c = full.center();
+            let (rx, ry) = (full.width() * 0.5 * 1.42, full.height() * 0.5 * 1.42);
+            const SEG: u32 = 64;
+            const RINGS: u32 = 24;
             let mut v = egui::Mesh::default();
-            for (pos, color) in [
-                (full.left_top(), o),
-                (full.right_top(), o),
-                (full.right_bottom(), o),
-                (full.left_bottom(), o),
-                (inner.left_top(), i),
-                (inner.right_top(), i),
-                (inner.right_bottom(), i),
-                (inner.left_bottom(), i),
-            ] {
-                v.vertices.push(egui::epaint::Vertex { pos, uv, color });
+            for ring in 0..=RINGS {
+                let f = ring as f32 / RINGS as f32;
+                // clear in the middle third, then a smooth rise to solid at the corners
+                let s = ((f - 0.3) / 0.7).clamp(0.0, 1.0);
+                let a = s * s * (3.0 - 2.0 * s);
+                let col = Color32::from_rgba_unmultiplied(edge.r(), edge.g(), edge.b(), (a * 255.0) as u8);
+                for k in 0..SEG {
+                    let ang = k as f32 / SEG as f32 * std::f32::consts::TAU;
+                    let pos = Pos2::new(c.x + ang.cos() * rx * f, c.y + ang.sin() * ry * f);
+                    v.vertices.push(egui::epaint::Vertex { pos, uv, color: col });
+                }
             }
-            for k in 0..4u32 {
-                let n = (k + 1) % 4;
-                v.indices.extend_from_slice(&[k, n, 4 + n, k, 4 + n, 4 + k]);
+            for ring in 0..RINGS {
+                for k in 0..SEG {
+                    let (a0, a1) = (ring * SEG + k, ring * SEG + (k + 1) % SEG);
+                    let (b0, b1) = (a0 + SEG, a1 + SEG);
+                    v.indices.extend_from_slice(&[a0, a1, b1, a0, b1, b0]);
+                }
             }
             p.add(egui::Shape::mesh(v));
         }
@@ -123,7 +130,7 @@ impl App {
 
         // ---- mild tilt, only while the mouse is on or right next to the cover
         let reach = a / 2.0 * 1.35;
-        let target = match hover {
+        let target = match hover.filter(|_| !crate::skin::calm()) {
             Some(pp) if (pp.x - center.x).abs() < reach && (pp.y - center.y).abs() < reach => {
                 Vec2::new(((pp.x - center.x) / reach).clamp(-1.0, 1.0), ((pp.y - center.y) / reach).clamp(-1.0, 1.0)) * 0.45
             }
@@ -400,15 +407,15 @@ impl App {
                 fill_rect(
                     &p,
                     Rect::from_min_max(Pos2::new(x - 1.5, sb.min.y - 4.0), Pos2::new(x + 1.5, sb.max.y + 4.0)),
-                    pal().red,
+                    crate::skin::loop_col(),
                 );
                 if x - sb.min.x > 44.0 && sb.max.x - x > 44.0 {
-                    ptext(&p, Pos2::new(x, sb.max.y + 14.0), Align::Center, lab, 2.0, pal().red);
+                    ptext(&p, Pos2::new(x, sb.max.y + 14.0), Align::Center, lab, 2.0, crate::skin::loop_col());
                 }
             };
             if let (Some(a), Some(b)) = (self.loop_a, self.loop_b) {
                 let r = Rect::from_min_max(Pos2::new(x_at(a), sb.min.y), Pos2::new(x_at(b).max(x_at(a) + 3.0), sb.max.y));
-                fill_rect(&p, r, pal().red.gamma_multiply(if on { 0.7 } else { 0.4 }));
+                fill_rect(&p, r, crate::skin::loop_col().gamma_multiply(if on { 0.7 } else { 0.4 }));
                 flag(r.min.x, "A");
                 flag(r.max.x, "B");
             } else if let Some(a) = self.loop_a {
@@ -671,7 +678,7 @@ impl App {
             &p,
             Pos2::new(full.max.x - 30.0, full.max.y - 14.0),
             Align::Max,
-            "Click the cover: record    Right-click it: border    Esc close    F fullscreen    G b&w    L lyrics    H like    Space play/pause",
+            "Click the cover: record    Right-click it: border    Esc close    F fullscreen    L lyrics    H like    Space play/pause",
             1.0,
             pal().dim,
         );

@@ -1,4 +1,4 @@
-//! Skins: the eleven palettes, which look each one belongs to, and the colour helpers the whole UI draws with.
+//! Skins: the thirteen palettes, which look each one belongs to, and the colour helpers the whole UI draws with.
 
 use super::*;
 
@@ -31,10 +31,23 @@ pub(crate) const fn c(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-pub(crate) const SKIN_NAMES: [&str; 11] =
-    ["OLIVE", "AQUA", "DARK", "AMBER", "PAPER", "PLUM", "SLATE", "CLAY", "AERO GLASS", "SLEEK DARK", "SLEEK LIGHT"];
+pub(crate) const SKIN_NAMES: [&str; 13] = [
+    "OLIVE",
+    "AQUA",
+    "DARK",
+    "AMBER",
+    "PAPER",
+    "PLUM",
+    "SLATE",
+    "CLAY",
+    "AERO GLASS",
+    "SLEEK DARK",
+    "SLEEK LIGHT",
+    "HIGH CONTRAST DARK",
+    "HIGH CONTRAST LIGHT",
+];
 
-pub(crate) static PALS: [Pal; 11] = [
+pub(crate) static PALS: [Pal; 13] = [
     // OLIVE: the classic beige/olive player
     Pal {
         app_bg: c(8, 8, 10),
@@ -288,9 +301,74 @@ pub(crate) static PALS: [Pal; 11] = [
         bar_txt: c(255, 255, 255),
         edge: c(44, 50, 70),
     },
+    // HIGH CONTRAST DARK: white on black with yellow and cyan, outlined like a high-contrast desktop theme
+    // (every control drawn on black with a bright edge), for low vision; every text well past WCAG AAA
+    Pal {
+        app_bg: c(0, 0, 0),
+        trim: c(255, 255, 255),
+        beige: c(0, 0, 0),
+        beige_lt: c(255, 255, 255),
+        beige_dk: c(150, 150, 150),
+        beige_h: c(40, 40, 40),
+        lcd: c(0, 0, 0),
+        lcd_ghost: c(60, 60, 60),
+        groove: c(190, 190, 190),
+        sel: c(60, 60, 0),
+        ink: c(255, 255, 255),
+        ink2: c(255, 240, 70),
+        dim: c(215, 215, 215),
+        red: c(26, 235, 255),
+        btn_face: c(0, 0, 0),
+        btn_hi: c(60, 60, 60),
+        row_alt: c(16, 16, 16),
+        row_sel: c(0, 0, 170),
+        bar_txt: c(255, 255, 0),
+        edge: c(0, 0, 0),
+    },
+    // HIGH CONTRAST LIGHT: black on white with deep blue, outlined in black, for low vision in bright rooms
+    Pal {
+        app_bg: c(255, 255, 255),
+        trim: c(255, 255, 255),
+        beige: c(255, 255, 255),
+        beige_lt: c(255, 255, 255),
+        beige_dk: c(60, 60, 60),
+        beige_h: c(232, 232, 232),
+        lcd: c(255, 255, 255),
+        lcd_ghost: c(200, 200, 200),
+        groove: c(60, 60, 60),
+        sel: c(255, 240, 120),
+        ink: c(0, 0, 0),
+        ink2: c(0, 0, 150),
+        dim: c(50, 50, 50),
+        red: c(170, 0, 0),
+        btn_face: c(255, 255, 255),
+        btn_hi: c(225, 225, 225),
+        row_alt: c(244, 244, 244),
+        row_sel: c(0, 0, 150),
+        bar_txt: c(255, 255, 255),
+        edge: c(0, 0, 0),
+    },
 ];
 
 pub(crate) static SKIN: AtomicUsize = AtomicUsize::new(0);
+
+/// Preferences > ACCESSIBILITY: loops in orange (told apart from green and red by nearly everyone), and less motion.
+pub(crate) static LOOP_SAFE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) static CALM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The colour of loops and their A / B markers.
+pub(crate) fn loop_col() -> Color32 {
+    if LOOP_SAFE.load(Ordering::Relaxed) {
+        Color32::from_rgb(230, 159, 0)
+    } else {
+        pal().red
+    }
+}
+
+/// Reduce motion: no spinning record, no tilting cover, no scrolling titles.
+pub(crate) fn calm() -> bool {
+    CALM.load(Ordering::Relaxed)
+}
 
 /// A palette made from a Winamp skin (winamp.rs), worn instead of the built-in ones while set. Each one is
 /// leaked on purpose (a few bytes per skin picked), so `pal()` can hand out a plain reference.
@@ -381,4 +459,26 @@ pub(crate) fn pal() -> &'static Pal {
         return unsafe { &*c };
     }
     &PALS[SKIN.load(Ordering::Relaxed) % PALS.len()]
+}
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::*;
+
+    #[test]
+    fn high_contrast_skins_meet_aaa() {
+        for i in [11usize, 12] {
+            let p = &PALS[i];
+            let c = crate::winamp::contrast;
+            for (what, fg, bg) in [
+                ("text on panels", p.ink, p.beige),
+                ("text on lists", p.ink, p.lcd),
+                ("second text", p.ink2, p.lcd),
+                ("playing row", p.bar_txt, p.row_sel),
+                ("button text", p.ink, p.btn_face),
+            ] {
+                assert!(c(fg, bg) >= 7.0, "{} {}: {:.1}", SKIN_NAMES[i], what, c(fg, bg));
+            }
+        }
+    }
 }

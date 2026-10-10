@@ -60,7 +60,8 @@ impl Pen<'_> {
 
 /// Draw a smooth version of `rows` inside `r`. False when the icon has no vector form.
 pub fn draw(p: &egui::Painter, r: Rect, rows: &[&str], col: Color32) -> bool {
-    let s = r.width().max(r.height());
+    // the drawing's square fits inside the icon's box (a wide icon such as the speaker would spill out otherwise)
+    let s = r.width().max(r.height()).min(r.width().min(r.height()) * 1.15);
     let pen = Pen { p, o: r.center() - Vec2::splat(s / 2.0), s, col };
     let is = |a: &[&str]| rows == a;
     if is(&IC_PLAY) || is(&PLAY_S) {

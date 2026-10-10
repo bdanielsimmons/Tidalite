@@ -222,4 +222,106 @@ impl App {
         });
         self.viz_panel = if close { None } else { Some(which) };
     }
+
+    /// A picture looked at big: the sharpest copy Tidal has (1280 for covers, 750 for artists) shown at a
+    /// comfortable size, never blown up past its own pixels. X, ESC or a click outside closes it.
+    pub(crate) fn art_preview_overlay(&mut self, ctx: &egui::Context) {
+        let Some((url, title, artist)) = self.art_preview.clone() else { return };
+        let big = if url.contains("resources.tidal.com") {
+            let want = if artist { "750x750" } else { "1280x1280" };
+            url.replace("320x320", want).replace("640x640", want)
+        } else {
+            url.clone()
+        };
+        let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let screen = ctx.screen_rect();
+        // the dim behind; a click on it closes the picture
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("art_preview_dim")));
+        p.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(170));
+        egui::Area::new(egui::Id::new("art_preview_block")).order(egui::Order::Middle).fixed_pos(screen.min).show(ctx, |ui| {
+            if ui.allocate_response(screen.size(), egui::Sense::click()).clicked() {
+                close = true;
+            }
+        });
+        // the sharp copy when it is here (or when it cannot be had), the small one meanwhile
+        let (shown, ready) = match self.images.get(&big) {
+            Some(id) => (Some((id, big.clone())), true),
+            None if big != url && !self.images.failed(&big) => (self.images.get(&url).map(|id| (id, url.clone())), false),
+            None => (self.images.get(&url).map(|id| (id, url.clone())), true),
+        };
+        let ppp = ctx.pixels_per_point();
+        let native = shown.as_ref().and_then(|s| self.images.size(&s.1)).map_or(640.0, |s| s[0].max(s[1]) as f32 / ppp);
+        let room = (screen.width() - 80.0).min(screen.height() - 140.0);
+        let side = native.min(room).min(720.0).max(160.0);
+        egui::Area::new(egui::Id::new("art_preview"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(pal().beige)
+                    .stroke(egui::Stroke::new(2.0_f32, pal().edge))
+                    .rounding(if crate::style() != 0 { 8.0 } else { 0.0 })
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.set_width(side);
+                            let at = ui.cursor().min + Vec2::new(0.0, 13.0);
+                            crate::ptext_fit(ui.painter(), at, egui::Align::Min, &title, 2.0, side - 50.0, pal().ink);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if crate::Tip::tip(retro_btn_w(ui, "X", 30.0, false), "Close  (ESC)").clicked() {
+                                    close = true;
+                                }
+                            });
+                        });
+                        ui.add_space(8.0);
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(side), egui::Sense::hover());
+                        match shown {
+                            Some((id, _)) => {
+                                egui::Image::new(egui::load::SizedTexture::new(id, r.size())).paint_at(ui, r);
+                            }
+                            None => crate::paint_record(ui.painter(), r, Some(ui.input(|i| i.time) as f32)),
+                        }
+                        if !ready {
+                            ui.ctx().request_repaint();
+                        }
+                    });
+            });
+        if close {
+            self.art_preview = None;
+        }
+    }
+
+    /// While a Winamp skin is fetched and put on: a small panel with a moving bar, so it never looks stuck. It
+    /// closes by itself when the skin is on; the music keeps playing meanwhile.
+    pub(crate) fn skin_loading_panel(&mut self, ctx: &egui::Context) {
+        let Some(name) = self.wa_loading.clone() else { return };
+        let t = ctx.input(|i| i.time) as f32;
+        egui::Area::new(egui::Id::new("skin_loading"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(20, 20, 22))
+                    .stroke(egui::Stroke::new(2.0_f32, egui::Color32::from_gray(110)))
+                    .rounding(6.0)
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.set_width(320.0);
+                        title_line(ui, "PUTTING ON THE SKIN", 2.0, egui::Color32::from_rgb(240, 240, 236));
+                        crate::views::dim_line(ui, &name.to_uppercase(), 1.0, egui::Color32::from_gray(190));
+                        ui.add_space(6.0);
+                        // a bar that sweeps back and forth
+                        let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), Sense::hover());
+                        ui.painter().rect_filled(r, 3.0, egui::Color32::from_gray(50));
+                        let w = r.width() * 0.3;
+                        let x = r.min.x + (r.width() - w) * (0.5 + 0.5 * (t * 2.2).sin());
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(Pos2::new(x, r.min.y), Vec2::new(w, r.height())),
+                            3.0,
+                            pal().btn_hi,
+                        );
+                    });
+            });
+        ctx.request_repaint();
+    }
 }
